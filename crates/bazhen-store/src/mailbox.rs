@@ -1,9 +1,9 @@
 //! An agent's mail as the mailbox reads and writes it (`mailbox.ts`): a message queued for it, a
 //! step it takes towards delivery, and who sent it.
 
-use bazhen_protocol::ids::{AgentId, MessageId};
+use bazhen_protocol::ids::{AgentId, MessageId, ObservedId};
 use bazhen_protocol::mail::MailboxState;
-use bazhen_protocol::mail_events::{MailQueued, MailRequeued, RequeueReason};
+use bazhen_protocol::mail_events::{MailQueued, MailRequeued, MessageObserved, RequeueReason};
 use rusqlite::OptionalExtension;
 use rusqlite::types::Type;
 
@@ -16,6 +16,17 @@ pub struct Message {
     pub agent: String,
     pub body: String,
     pub state: MailboxState,
+}
+
+/// What an observed send records, as shown: its summary and text already cut and cleaned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObservedSend<'a> {
+    pub summary: &'a str,
+    pub text: &'a str,
+    /// Whether the harness said it was sent.
+    pub accepted: bool,
+    /// The tool call that sent it.
+    pub tool_use_id: &'a str,
 }
 
 /// One of an agent's messages as the mailbox hands it over and settles it.
@@ -141,6 +152,71 @@ impl Writer<'_> {
         Ok((message, id))
     }
 
+    /// Records the message `from` sent through its harness's own channel by the tool call
+    /// `tool_use_id`, to the session named `to`: a session answers to the name it was last started
+    /// with, whatever its agent is called since. Recorded only when exactly one other live agent of
+    /// `from`'s harness answers to `to`, ignoring case, for the channel reaches no other, and only
+    /// once per tool call. Answers the event's id; `None` when it isn't recorded.
+    ///
+    /// # Errors
+    ///
+    /// The reads' and the append's, or no random bytes for the id.
+    pub fn observe_send(
+        &self,
+        from: &AgentId,
+        to: &str,
+        sent: ObservedSend<'_>,
+    ) -> Result<Option<u64>, AppendError> {
+        let reads = self.reads();
+        let Some(sender) = reads.sender(from.as_str())? else {
+            return Ok(None);
+        };
+        let answering: Vec<String> = self
+            .connection()
+            .prepare(
+                "SELECT id FROM agent_sessions
+                 WHERE harness_name = ? COLLATE NOCASE AND harness = ? AND id != ?
+                   AND state NOT IN ('closed', 'failed')
+                 ORDER BY created_event_id LIMIT 2",
+            )?
+            .query_map((to, &sender.harness, from.as_str()), |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let [recipient] = answering.as_slice() else {
+            return Ok(None);
+        };
+        let Some(recipient) = AgentId::parse(recipient) else {
+            return Ok(None);
+        };
+        let recorded = self
+            .connection()
+            .query_row(
+                "SELECT 1 FROM observed_messages WHERE from_agent_id = ? AND tool_use_id = ?",
+                (from.as_str(), sent.tool_use_id),
+                |_| Ok(()),
+            )
+            .optional()?;
+        if recorded.is_some() {
+            return Ok(None);
+        }
+        let observed = ObservedId::mint(
+            crate::now_ms(),
+            crate::urandom().map_err(AppendError::NoId)?,
+        );
+        let id = self.append(&NewEvent::MessageObserved {
+            observed,
+            actor: from.as_str().to_owned(),
+            payload: MessageObserved {
+                from: from.clone(),
+                to: recipient,
+                summary: sent.summary.to_owned(),
+                text: sent.text.to_owned(),
+                accepted: sent.accepted,
+                tool_use_id: sent.tool_use_id.to_owned(),
+            },
+        })?;
+        Ok(Some(id))
+    }
+
     /// Requeues every message a hook held, as a daemon that stopped leaves them: the hooks went
     /// with its socket. Answers how many.
     ///
@@ -190,9 +266,10 @@ mod tests {
         MailAccepted, MailOffered, MailRequeued, MailSeen, MailUndeliverable, RequeueReason,
         UndeliverableReason,
     };
+    use rusqlite::OptionalExtension as _;
     use rusqlite::types::Type;
 
-    use super::{Mail, Message, Sender};
+    use super::{Mail, Message, ObservedSend, Sender};
     use crate::testing::TempDir;
     use crate::{MailChange, Store};
 
@@ -461,6 +538,125 @@ mod tests {
                 None,
                 None,
             )
+        );
+    }
+
+    /// Adds an agent of `harness`, last started as `started_as`, in `state`.
+    fn agent(store: &Store, agent: &str, harness: &str, started_as: &str, state: &str) {
+        store
+            .db
+            .execute(
+                "INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                   harness_name, created_event_id, updated_event_id)
+                   VALUES (?, ?, ?, 'p', '/w', ?, ?, 1, 1)",
+                (agent, ENV, harness, state, started_as),
+            )
+            .unwrap();
+    }
+
+    /// Whether `from`'s send to `to` by the tool call `use_id` was recorded; `None` on an error.
+    fn observed(store: &mut Store, from: &str, to: &str, use_id: &str) -> Option<bool> {
+        let sent = ObservedSend {
+            summary: "lunch?",
+            text: "lunch?\nat noon",
+            accepted: true,
+            tool_use_id: use_id,
+        };
+        let from = id(from);
+        store
+            .write(|w| w.observe_send(&from, to, sent))
+            .ok()
+            .map(|id| id.is_some())
+    }
+
+    /// Each observed message, by who sent it to whom with what, and the tool call.
+    fn observations(store: &Store) -> Vec<(String, String, String, String)> {
+        let mut rows = store
+            .db
+            .prepare(
+                "SELECT from_agent_id, to_agent_id, summary, tool_use_id FROM observed_messages
+                 ORDER BY created_event_id",
+            )
+            .unwrap();
+        rows.query_map((), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    const BOB: &str = "agent_01900000000070008000000000000003";
+    const BOB_CLOSED: &str = "agent_01900000000070008000000000000004";
+    const BOB_TWO: &str = "agent_01900000000070008000000000000005";
+
+    #[test]
+    fn records_a_send_once_to_the_one_other_live_agent_of_the_senders_harness_started_as_its_name()
+    {
+        let dir = TempDir::new("observe");
+        let mut store = store(&dir);
+        store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET harness_name = 'bob' WHERE id = ?",
+                [AGENT],
+            )
+            .unwrap();
+        agent(&store, BOB, "claude-code", "Bob", "running");
+        agent(&store, BOB_CLOSED, "claude-code", "bob", "closed");
+        store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET harness_name = 'bob' WHERE id = ?",
+                [PEER],
+            )
+            .unwrap();
+        let first = observed(&mut store, AGENT, "BOB", "toolu_1");
+        let again = observed(&mut store, AGENT, "BOB", "toolu_1");
+        let payload: Option<String> = store
+            .db
+            .query_row(
+                "SELECT payload FROM events WHERE type = 'message.observed'",
+                (),
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(
+            (first, again, observations(&store), payload),
+            (
+                Some(true),
+                Some(false),
+                vec![(
+                    AGENT.to_owned(),
+                    BOB.to_owned(),
+                    "lunch?".to_owned(),
+                    "toolu_1".to_owned()
+                )],
+                Some(format!(
+                    r#"{{"from":"{AGENT}","to":"{BOB}","summary":"lunch?","text":"lunch?\nat noon","accepted":true,"toolUseId":"toolu_1"}}"#
+                )),
+            )
+        );
+    }
+
+    #[test]
+    fn records_no_send_to_a_name_no_other_agent_or_two_answer_to_nor_from_an_agent_unknown() {
+        let dir = TempDir::new("observe-none");
+        let mut store = store(&dir);
+        let nobody = observed(&mut store, AGENT, "bob", "toolu_1");
+        agent(&store, BOB, "claude-code", "bob", "running");
+        agent(&store, BOB_TWO, "claude-code", "bob", "starting");
+        let two = observed(&mut store, AGENT, "bob", "toolu_2");
+        let unknown = observed(
+            &mut store,
+            "agent_01900000000070008000000000000099",
+            "bob",
+            "toolu_3",
+        );
+        assert_eq!(
+            (nobody, two, unknown, observations(&store)),
+            (Some(false), Some(false), Some(false), vec![])
         );
     }
 }
