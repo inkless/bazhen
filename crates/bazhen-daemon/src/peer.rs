@@ -194,6 +194,8 @@ struct Pass {
 }
 
 impl Tcp {
+    /// Where `/proc` says who holds a socket, and in tests of how it is read.
+    #[cfg(any(target_os = "linux", test))]
     pub(crate) fn new(
         view: Arc<View>,
         uid: u32,

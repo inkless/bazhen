@@ -41,6 +41,22 @@ pub(crate) fn connected(router: axum::Router) -> axum::Router {
     ))
 }
 
+/// `router` with each request's `PeerSocket` taken off, so the guard reads no caller and lets the
+/// request through as the owner's, as it did a TCP request before TCP connections carried one.
+///
+/// For the stream harnesses, which serve the socket's router over loopback TCP as a stand-in for
+/// the Unix socket and test the streams, not who calls: on TCP the caller is read through `/proc`,
+/// which only Linux has, and which a sandbox may answer differently from the socket. The HTTP
+/// guard's own tests don't use it: they test what each reading of the caller is let do.
+pub(crate) fn without_the_callers_socket(router: axum::Router) -> axum::Router {
+    router.layer(axum::middleware::from_fn(
+        |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            request.extensions_mut().remove::<crate::peer::PeerSocket>();
+            next.run(request)
+        },
+    ))
+}
+
 /// `router` as the loopback listener serves a TCP caller from port 1000 to its port 7900.
 pub(crate) fn from_port_1000(router: axum::Router) -> axum::Router {
     router.layer(axum::middleware::from_fn(

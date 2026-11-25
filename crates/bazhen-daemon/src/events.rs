@@ -588,7 +588,7 @@ mod tests {
             let address = listener.local_addr().unwrap();
             runtime.spawn(crate::accept::serve_on(
                 listener,
-                crate::routes::socket_router(shared),
+                crate::testing::without_the_callers_socket(crate::routes::socket_router(shared)),
                 crate::accept::SOCKET,
                 stop.token().clone(),
                 tokio_util::task::TaskTracker::new(),

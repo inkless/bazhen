@@ -1269,7 +1269,7 @@ mod tests {
         connections.spawn_on(
             crate::accept::serve_on(
                 listener,
-                crate::routes::socket_router(shared),
+                crate::testing::without_the_callers_socket(crate::routes::socket_router(shared)),
                 crate::accept::SOCKET,
                 stop.token().clone(),
                 TaskTracker::new(),
