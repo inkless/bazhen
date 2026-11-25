@@ -207,6 +207,9 @@ pub struct Activity {
     pub resets_at: Option<String>,
 }
 
+/// The most usage limits a usage holds.
+pub const USAGE_LIMITS_MAX: usize = 20;
+
 /// One of an account's usage limits: the share of it in use, and when it resets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -244,7 +247,7 @@ pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(
         feature = "schema",
-        schemars(with = "Vec<UsageLimit>", length(max = 20))
+        schemars(with = "Vec<UsageLimit>", length(max = USAGE_LIMITS_MAX))
     )]
     pub limits: Option<Vec<UsageLimit>>,
 }

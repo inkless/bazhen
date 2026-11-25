@@ -2,12 +2,15 @@
 //! shows a window used up, and weighed again as a late reading of the meter comes, while the stop
 //! still stands.
 
+use std::collections::HashSet;
+
 use bazhen_harness::LimitStop;
-use bazhen_protocol::agents::{Activity, ActivityValue, Usage, UsageLimit};
+use bazhen_protocol::agents::{Activity, ActivityValue, USAGE_LIMITS_MAX, Usage, UsageLimit};
 use jiff::{SignedDuration, Timestamp};
 use serde_json::json;
 
 use super::*;
+use crate::hooks::limits::merge_limits;
 
 /// When each test's stop is.
 fn t0() -> Timestamp {
@@ -222,4 +225,217 @@ fn records_a_turn_its_account_stopped_limited_once_its_status_line_shows_the_win
         (stopped, f.latest(), f.of("agent.usage").len()),
         (is("failed", None), is("limited", Some(&resets_at)), 1)
     );
+}
+
+#[test]
+fn gives_an_accounts_update_to_each_agent_on_it_kept_beside_what_else_its_usage_holds() {
+    let f = fixture();
+    let bob = with_bob(&f);
+    runtime().block_on(async {
+        let spent = UsageLimit {
+            window: "codex.primary".to_owned(),
+            used_percent: 100.0,
+            resets_at: Some(SOON.to_owned()),
+        };
+        let other = UsageLimit {
+            window: "codex.secondary".to_owned(),
+            used_percent: 20.0,
+            resets_at: None,
+        };
+        let mut held = usage(&[
+            ("codex.primary", 50.0, None),
+            ("codex.secondary", 20.0, None),
+        ]);
+        held.model = Some("gpt".to_owned());
+        let (limits, agent) = (Arc::clone(&f.shared.hooks.limits), bob.clone());
+        write(&f.shared.store, move |w| {
+            limits.usage(w, &agent, &held, t0())
+        })
+        .await
+        .unwrap();
+        f.stopped(
+            doing(ActivityValue::Failed, t0()),
+            Some(LimitStop::Rate),
+            t0(),
+        )
+        .await;
+        let (limits, agents, update) = (
+            Arc::clone(&f.shared.hooks.limits),
+            vec![f.agent.clone(), bob.clone()],
+            vec![spent.clone()],
+        );
+        write(&f.shared.store, move |w| {
+            limits.account_limits(w, &agents, &update, t0())
+        })
+        .await
+        .unwrap();
+        let reader = f.shared.store.reader().unwrap();
+        let usage_of = |agent: &AgentId| reader.reads().agent_usage(agent.as_str()).unwrap();
+        let mut bobs = usage(&[]);
+        bobs.model = Some("gpt".to_owned());
+        bobs.limits = Some(vec![spent.clone(), other]);
+        assert_eq!(
+            (usage_of(&f.agent), usage_of(&bob), f.latest()),
+            (
+                Some(Usage {
+                    limits: Some(vec![spent]),
+                    ..usage(&[])
+                }),
+                Some(bobs),
+                is("limited", Some(SOON))
+            )
+        );
+    });
+}
+
+/// A limit of `window`, used `used` percent.
+fn limit(window: &str, used: f64) -> UsageLimit {
+    UsageLimit {
+        window: window.to_owned(),
+        used_percent: used,
+        resets_at: None,
+    }
+}
+
+fn windows(limits: &[UsageLimit]) -> Vec<String> {
+    limits.iter().map(|limit| limit.window.clone()).collect()
+}
+
+#[test]
+fn merges_an_update_into_the_limits_held_replacing_those_it_names_and_keeping_the_rest() {
+    let (primary, secondary) = (limit("codex.primary", 10.0), limit("codex.secondary", 40.0));
+    let spent = limit("codex.primary", 100.0);
+    let again = limit("codex.primary", 12.0);
+    assert_eq!(
+        (
+            merge_limits(None, std::slice::from_ref(&primary)),
+            merge_limits(
+                Some(&[primary.clone(), secondary.clone()]),
+                std::slice::from_ref(&spent)
+            ),
+            merge_limits(None, &[primary.clone(), again.clone()]),
+            merge_limits(
+                Some(std::slice::from_ref(&primary)),
+                &[primary.clone(), again.clone()]
+            ),
+        ),
+        (
+            vec![primary],
+            vec![spent, secondary],
+            vec![again.clone()],
+            vec![again]
+        )
+    );
+}
+
+#[test]
+fn keeps_no_more_limits_than_usage_holds_dropping_first_the_oldest_the_update_leaves_out() {
+    let named = |n: usize| {
+        (0..n)
+            .map(|i| limit(&format!("w{i}"), 1.0))
+            .collect::<Vec<_>>()
+    };
+    // An update that alone names more keeps the first it names.
+    let update = named(USAGE_LIMITS_MAX + 5);
+    let alone = merge_limits(
+        Some(&[limit(&format!("w{}", USAGE_LIMITS_MAX + 4), 1.0)]),
+        &update,
+    );
+    let held = named(USAGE_LIMITS_MAX);
+    let merged = merge_limits(Some(&held), &[limit("new", 1.0), limit("w5", 99.0)]);
+    assert_eq!(
+        (
+            windows(&alone),
+            merged.len(),
+            merged.first().map(|l| l.window.clone()),
+            merged.last().map(|l| l.window.clone()),
+            merged
+                .iter()
+                .find(|l| l.window == "w5")
+                .map(|l| l.used_percent),
+        ),
+        (
+            windows(&update[..USAGE_LIMITS_MAX]),
+            USAGE_LIMITS_MAX,
+            Some("w1".to_owned()),
+            Some("new".to_owned()),
+            Some(99.0)
+        )
+    );
+}
+
+mod merging {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    /// Limits of windows drawn from a few more than usage holds, so updates name the same window
+    /// twice, and name as many as usage holds, often enough.
+    fn limits(most: usize) -> impl Strategy<Value = Vec<UsageLimit>> {
+        prop::collection::vec((0..USAGE_LIMITS_MAX + 10, 0u8..=100), 0..=most).prop_map(|drawn| {
+            drawn
+                .into_iter()
+                .map(|(w, used)| limit(&format!("w{w}"), f64::from(used)))
+                .collect()
+        })
+    }
+
+    /// Limits as usage holds them: each window once, and no more than it holds.
+    fn held() -> impl Strategy<Value = Vec<UsageLimit>> {
+        limits(USAGE_LIMITS_MAX * 2).prop_map(|drawn| {
+            let mut seen = HashSet::new();
+            let mut held: Vec<UsageLimit> = drawn
+                .into_iter()
+                .filter(|l| seen.insert(l.window.clone()))
+                .collect();
+            held.truncate(USAGE_LIMITS_MAX);
+            held
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(4096))]
+
+        /// Each window once, no more than usage holds, each as the update last names it or else
+        /// as held, and every window the update names kept unless it alone names as many as
+        /// usage holds, when the first it names are.
+        #[test]
+        fn a_merge_holds_each_window_once_as_last_said_within_the_most_usage_holds(
+            held in held(),
+            update in limits(USAGE_LIMITS_MAX * 2),
+        ) {
+            let merged = merge_limits(Some(&held), &update);
+            let said = |window: &str| {
+                update.iter().rev().chain(&held).find(|l| l.window == window).cloned()
+            };
+            let mut named: Vec<String> = Vec::new();
+            for limit in &update {
+                if !named.contains(&limit.window) {
+                    named.push(limit.window.clone());
+                }
+            }
+            let unique: HashSet<String> = windows(&merged).into_iter().collect();
+            prop_assert!(merged.len() <= USAGE_LIMITS_MAX);
+            prop_assert_eq!(unique.len(), merged.len());
+            for limit in &merged {
+                prop_assert_eq!(Some(limit.clone()), said(&limit.window));
+            }
+            if named.len() >= USAGE_LIMITS_MAX {
+                prop_assert_eq!(windows(&merged), named[..USAGE_LIMITS_MAX].to_vec());
+            } else {
+                // Those held first, in their order, then those new, in the update's; of those
+                // the update leaves out, the newest held, as many as there is room for.
+                let left_out: Vec<String> =
+                    windows(&held).into_iter().filter(|w| !named.contains(w)).collect();
+                let room = USAGE_LIMITS_MAX - named.len();
+                let kept = &left_out[left_out.len().saturating_sub(room)..];
+                let order: Vec<String> = windows(&held)
+                    .into_iter()
+                    .chain(named.iter().filter(|w| !windows(&held).contains(w)).cloned())
+                    .filter(|w| named.contains(w) || kept.contains(w))
+                    .collect();
+                prop_assert_eq!(windows(&merged), order);
+            }
+        }
+    }
 }

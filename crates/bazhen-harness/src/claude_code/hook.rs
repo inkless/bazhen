@@ -10,7 +10,9 @@ use crate::{
 };
 use bazhen_core::mail::mail_label;
 use bazhen_protocol::agent_events::{CompactedSign, ReadySign};
-use bazhen_protocol::agents::{ActivityValue, ExternalRefKind, Usage, UsageLimit};
+use bazhen_protocol::agents::{
+    ActivityValue, ExternalRefKind, USAGE_LIMITS_MAX, Usage, UsageLimit,
+};
 use bazhen_protocol::ids::AgentId;
 
 /// One of the hooks a launch installed, read.
@@ -527,6 +529,6 @@ fn limits_of(rate_limits: Option<&Js>) -> Vec<UsageLimit> {
             resets_at,
         });
     }
-    limits.truncate(20);
+    limits.truncate(USAGE_LIMITS_MAX);
     limits
 }
