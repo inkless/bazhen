@@ -837,6 +837,22 @@ pub(crate) mod tests {
                 .to_owned()
         }
 
+        /// Shells on the agents' own runtime, store, budget and turns, as serve.rs builds them.
+        pub(crate) fn shells(&self) -> Arc<crate::shells::Shells> {
+            Arc::new(crate::shells::Shells::new(crate::shells::ShellsDeps {
+                turns: Arc::clone(&self.agents.deps.turns),
+                store: self.store.clone(),
+                terminals: Arc::new(self.fake.clone()),
+                budget: Arc::clone(&self.agents.deps.budget),
+                home: self.home.clone(),
+                shell: "/bin/zsh".to_owned(),
+                socket: "/run/b.sock".to_owned(),
+                tracker: TaskTracker::new(),
+                stop: tokio_util::sync::CancellationToken::new(),
+                integration: None,
+            }))
+        }
+
         /// The fake runtime the agents run on.
         pub(crate) fn fake(&self) -> &Fake {
             &self.fake
