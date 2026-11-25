@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::ids::AgentId;
 
-use crate::peer::{self, PeerSocket, Reading, Via};
+use crate::peer::{self, PeerRead, PeerSocket, Reading, Via};
 use crate::routes::{Shared, fail, header, internal};
 use crate::writer::Writer;
 
@@ -286,6 +286,15 @@ async fn who(
         Some(socket) => Some(shared.peers.read(socket).await),
         None => None,
     };
+    identified(shared, read, presented).await
+}
+
+/// Who called, by `read` of its socket's peer where there is one, or why the store couldn't say.
+pub(crate) async fn identified(
+    shared: &Shared,
+    read: Option<PeerRead>,
+    presented: Presented,
+) -> Result<Identity, String> {
     let store = shared.store.clone();
     tokio::task::spawn_blocking(move || {
         let mut credentials = Stored {
@@ -1123,10 +1132,11 @@ mod tests {
                     refused("forbidden", reason),
                 ]
             );
+            // Each refuses the caller itself, and answers so its hook goes on as it would.
             for path in ["/v1/hooks", "/v1/hooks/ack"] {
                 assert_eq!(
                     ask(router(&store, tmux()), "POST", path, &[], None, true).0,
-                    404,
+                    200,
                     "{path}"
                 );
             }

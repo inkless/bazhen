@@ -288,6 +288,11 @@ pub(crate) struct Agents {
 }
 
 impl Agents {
+    /// The harnesses served, or none while no hook client is built.
+    pub(crate) fn harnesses(&self) -> Option<&Harnesses> {
+        self.deps.harnesses.as_ref()
+    }
+
     pub(crate) fn new(deps: AgentsDeps) -> Self {
         Self { deps }
     }

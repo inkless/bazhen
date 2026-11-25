@@ -104,6 +104,8 @@ pub(crate) struct Shared {
     pub(crate) streams: Option<crate::stream::route::Streams>,
     /// The roles in force: the built-ins, and the user's files once a config directory is given.
     pub(crate) roles: Arc<Roles>,
+    /// What the agents' hooks keep between requests.
+    pub(crate) hooks: Arc<crate::hooks::Hooks>,
 }
 
 impl Shared {
@@ -128,6 +130,7 @@ impl Shared {
             web: None,
             streams: None,
             roles: Arc::new(Roles::new(None)),
+            hooks: Arc::new(crate::hooks::Hooks::default()),
         }
     }
 
@@ -401,6 +404,8 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/rename", post(agent_routes::rename))
         .route("/v1/agents/{id}/close", post(agent_routes::close))
         .route("/v1/agents/{id}/signal", post(agent_routes::signal))
+        .route("/v1/hooks", post(crate::hooks::hook))
+        .route("/v1/hooks/ack", post(crate::hooks::ack))
         .route("/v1/shells", post(shell_routes::open))
         .route("/v1/shells/{id}/close", post(shell_routes::close))
         .route("/v1/shells/{id}/restart", post(shell_routes::restart))
