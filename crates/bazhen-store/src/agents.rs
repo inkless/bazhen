@@ -105,6 +105,25 @@ impl Reads<'_> {
         })
     }
 
+    /// The agents that hold the harness session `session` names, by id: each bound to it that
+    /// isn't closed or failed, since an exited or lost agent is started again on the session it
+    /// is bound to.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn session_holders(self, session: &ExternalRef) -> rusqlite::Result<Vec<String>> {
+        let kind = serde_json::to_value(session.kind)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+        let mut rows = self.0.prepare(
+            "SELECT id FROM agent_sessions WHERE state NOT IN ('closed', 'failed')
+               AND json_extract(external_ref, '$.kind') = ?
+               AND json_extract(external_ref, '$.id') = ? ORDER BY id",
+        )?;
+        rows.query_map((kind.as_str(), session.id.as_str()), |row| row.get(0))?
+            .collect()
+    }
+
     /// The agent's state, or `None` for an agent the store doesn't know.
     ///
     /// # Errors
@@ -770,6 +789,53 @@ mod tests {
                 None,
                 None
             ]
+        );
+    }
+
+    #[test]
+    fn names_every_agent_holding_a_session_but_those_closed_or_failed() {
+        let dir = TempDir::new("holders");
+        let store = store(&dir);
+        let on = |id, state, kind: &str| {
+            let external_ref = format!(r#"{{"kind":"{kind}","id":"t-1"}}"#);
+            store
+                .db
+                .execute(
+                    "INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                       external_ref, untokened, created_event_id, updated_event_id)
+                     VALUES (?, 'env_local', 'codex', 'p', '/', ?, ?, 0, 1, 1)",
+                    (id, state, external_ref),
+                )
+                .unwrap();
+        };
+        on("agent_01", "exited", "codex-thread");
+        on("agent_02", "lost", "codex-thread");
+        on("agent_03", "closed", "codex-thread");
+        on("agent_04", "failed", "codex-thread");
+        on("agent_05", "running", "claude-session");
+        on("agent_06", "running", "codex-thread");
+        let reads = store.reads();
+        let session = |id: &str| {
+            serde_json::from_value::<bazhen_protocol::agents::ExternalRef>(serde_json::json!({
+                "environmentId": "env_01900000000070008000000000000001",
+                "kind": "codex-thread",
+                "id": id,
+            }))
+            .unwrap()
+        };
+        assert_eq!(
+            (
+                reads.session_holders(&session("t-1")).unwrap(),
+                reads.session_holders(&session("t-2")).unwrap(),
+            ),
+            (
+                vec![
+                    "agent_01".to_owned(),
+                    "agent_02".to_owned(),
+                    "agent_06".to_owned()
+                ],
+                Vec::<String>::new(),
+            )
         );
     }
 
