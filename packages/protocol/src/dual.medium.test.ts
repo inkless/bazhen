@@ -45,23 +45,12 @@ interface NotYet {
   readonly why: string;
 }
 
-const ATTENTION = "the attention routes' port";
-const ATTENTION_WHY = "the Rust daemon serves no attention route yet";
-
 /**
  * The schemas the protocol exports that the zod generated from the Rust protocol doesn't. A schema
  * exported and not listed fails, and so does an entry the generated zod now exports: the change
  * that emits a schema removes its entry.
  */
 const NOT_YET_IN_RUST: readonly NotYet[] = [
-  { name: "AnswerAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "AnswerAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "DismissAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "DismissAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "ReplyAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "ReplyAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "ResendAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "ResendAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
   {
     name: "BroadcastMessageRequest",
     owner: "the mailbox routes' port",

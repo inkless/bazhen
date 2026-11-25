@@ -13,7 +13,10 @@ use crate::agents::{
     CloseAgentRequest, RelaunchAgentRequest, RespawnAgentRequest, SignalAgentRequest,
 };
 use crate::ids::TaskId;
-use crate::mail::{HookAck, HookRequest, SendMessageRequest};
+use crate::mail::{
+    AnswerAttentionRequest, DismissAttentionRequest, HookAck, HookRequest, ReplyAttentionRequest,
+    ResendAttentionRequest, SendMessageRequest,
+};
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
 use crate::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
@@ -184,6 +187,38 @@ impl EdgeCheck for SendMessageRequest {
             (1..=MESSAGE_BODY_MAX_CHARS).contains(&chars(&self.body)),
             MESSAGE_BODY_RULE,
         )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for AnswerAttentionRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for ReplyAttentionRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        holds(
+            (1..=MESSAGE_BODY_MAX_CHARS).contains(&chars(&self.body)),
+            MESSAGE_BODY_RULE,
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for DismissAttentionRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for ResendAttentionRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
         Ok(self)
     }
 }
@@ -393,6 +428,31 @@ mod tests {
         assert_eq!(
             verdict::<SendMessageRequest>(&send(KEY, "")),
             Err(MESSAGE_BODY_RULE.to_owned())
+        );
+    }
+
+    #[test]
+    fn an_attention_verb_is_taken_with_a_key_an_answer_with_a_decision_a_reply_with_a_body() {
+        let keyed = |key: &str| json!({ "idempotencyKey": key });
+        let answer =
+            |key: &str, decision: &str| json!({ "idempotencyKey": key, "decision": decision });
+        let reply = |key: &str, body: &str| json!({ "idempotencyKey": key, "body": body });
+        assert_eq!(
+            [
+                verdict::<AnswerAttentionRequest>(&answer(KEY, "allow")).is_ok(),
+                verdict::<AnswerAttentionRequest>(&answer(KEY, "deny")).is_ok(),
+                refused::<AnswerAttentionRequest>(&answer(KEY, "ask")),
+                refused::<AnswerAttentionRequest>(&answer("", "allow")),
+                verdict::<ReplyAttentionRequest>(&reply(KEY, &"b".repeat(20_000))).is_ok(),
+                refused::<ReplyAttentionRequest>(&reply(KEY, "")),
+                refused::<ReplyAttentionRequest>(&reply(KEY, &"b".repeat(20_001))),
+                refused::<ReplyAttentionRequest>(&reply("", "b")),
+                verdict::<DismissAttentionRequest>(&keyed(KEY)).is_ok(),
+                refused::<DismissAttentionRequest>(&keyed("")),
+                verdict::<ResendAttentionRequest>(&keyed(KEY)).is_ok(),
+                refused::<ResendAttentionRequest>(&keyed("")),
+            ],
+            [true; 12]
         );
     }
 

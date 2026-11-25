@@ -408,6 +408,12 @@ export type AgentRef = z.infer<typeof AgentRef>;
 export const AgentsSettings = z.object({ loginShell: z.string().nullable(), shell: AgentShell });
 export type AgentsSettings = z.infer<typeof AgentsSettings>;
 
+export const AnswerAttentionRequest = z.object({ decision: ApprovalDecision, idempotencyKey: IdempotencyKey });
+export type AnswerAttentionRequest = z.infer<typeof AnswerAttentionRequest>;
+
+export const AnswerAttentionResponse = z.object({ eventIds: z.array(EventId) });
+export type AnswerAttentionResponse = z.infer<typeof AnswerAttentionResponse>;
+
 export const AssignTaskResponse = z.object({ assignmentId: z.string().regex(new RegExp("^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")), eventIds: z.array(EventId) });
 export type AssignTaskResponse = z.infer<typeof AssignTaskResponse>;
 
@@ -443,6 +449,12 @@ export type CreateTaskResponse = z.infer<typeof CreateTaskResponse>;
 
 export const Device = z.object({ expiresAt: Timestamp, id: z.string().regex(new RegExp("^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")), lastSeenAt: Timestamp, name: z.string(), pairedAt: Timestamp });
 export type Device = z.infer<typeof Device>;
+
+export const DismissAttentionRequest = z.object({ idempotencyKey: IdempotencyKey });
+export type DismissAttentionRequest = z.infer<typeof DismissAttentionRequest>;
+
+export const DismissAttentionResponse = z.object({ eventIds: z.array(EventId) });
+export type DismissAttentionResponse = z.infer<typeof DismissAttentionResponse>;
 
 export const DismissNoticeRequest = z.object({ idempotencyKey: IdempotencyKey });
 export type DismissNoticeRequest = z.infer<typeof DismissNoticeRequest>;
@@ -560,6 +572,18 @@ export type RenameAgentRequest = z.infer<typeof RenameAgentRequest>;
 
 export const RenameShellRequest = z.object({ idempotencyKey: IdempotencyKey, name: ShellName.nullable() });
 export type RenameShellRequest = z.infer<typeof RenameShellRequest>;
+
+export const ReplyAttentionRequest = z.object({ body: z.string().min(1).max(20000), idempotencyKey: IdempotencyKey });
+export type ReplyAttentionRequest = z.infer<typeof ReplyAttentionRequest>;
+
+export const ReplyAttentionResponse = z.object({ eventIds: z.array(EventId), messageId: z.string().regex(new RegExp("^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")).nullable() });
+export type ReplyAttentionResponse = z.infer<typeof ReplyAttentionResponse>;
+
+export const ResendAttentionRequest = z.object({ idempotencyKey: IdempotencyKey });
+export type ResendAttentionRequest = z.infer<typeof ResendAttentionRequest>;
+
+export const ResendAttentionResponse = z.object({ eventIds: z.array(EventId), messageId: z.string().regex(new RegExp("^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")) });
+export type ResendAttentionResponse = z.infer<typeof ResendAttentionResponse>;
 
 export const RespawnAgentRequest = z.object({ generation: z.number().int().min(0).max(9007199254740991), idempotencyKey: IdempotencyKey, theme: TuiTheme.optional() });
 export type RespawnAgentRequest = z.infer<typeof RespawnAgentRequest>;

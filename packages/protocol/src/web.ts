@@ -11,11 +11,3 @@ export { parseJson } from "./json.ts";
 export { BUILTIN_ROLES } from "./roles.ts";
 export { HISTORY_LINES, MAX_ROWS } from "./stream.ts";
 export { TERMINAL_COLOURS } from "./theme.ts";
-
-// The attention routes' replies, until the Rust protocol emits them with those routes' port.
-export {
-  AnswerAttentionResponse,
-  DismissAttentionResponse,
-  ReplyAttentionResponse,
-  ResendAttentionResponse,
-} from "./mail.ts";
