@@ -28,6 +28,8 @@ pub(crate) struct StubHarness {
     pub(crate) launches: Arc<Mutex<Vec<LaunchRequest>>>,
     /// What each launch is refused with, if it is.
     refusal: Option<LaunchError>,
+    /// What it says of whether any session resumes.
+    resumes: bool,
 }
 
 impl StubHarness {
@@ -36,6 +38,15 @@ impl StubHarness {
             caps,
             launches: Arc::default(),
             refusal: None,
+            resumes: false,
+        }
+    }
+
+    /// The same, saying every session resumes.
+    pub(crate) fn resuming(self) -> Self {
+        Self {
+            resumes: true,
+            ..self
         }
     }
 
@@ -123,7 +134,7 @@ impl Harness for StubHarness {
     }
 
     fn can_resume(&self, _evidence: &Evidence<'_>) -> bool {
-        false
+        self.resumes
     }
 
     fn ingest(&self, _report: Report<'_>, _context: &IngestContext<'_>) -> Ingested {

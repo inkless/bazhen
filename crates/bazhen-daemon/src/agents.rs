@@ -5,6 +5,7 @@
 
 pub(crate) mod prompts;
 pub(crate) mod transcript;
+pub(crate) mod view;
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -301,6 +302,16 @@ impl Agents {
         job: impl FnOnce(&StoreWriter<'_>) -> Result<T, AgentError> + Send + 'static,
     ) -> Result<T, AgentError> {
         self.deps.store.run(move |store| store.write(job)).await?
+    }
+
+    /// What the state's agents are described with now: the harnesses served, and the roles in
+    /// force as they read at this call.
+    pub(crate) fn view(self: &Arc<Self>) -> view::AgentsView {
+        view::AgentsView::new(Arc::clone(self), self.deps.roles.current())
+    }
+
+    pub(crate) fn harnesses(&self) -> &Harnesses {
+        &self.deps.harnesses
     }
 
     /// Launches one agent. A repeat of the key while the launch is in flight gets the answer so
@@ -664,7 +675,7 @@ impl Agents {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::PathBuf;
     use std::sync::Mutex as StdMutex;
@@ -681,10 +692,10 @@ mod tests {
     use crate::testing::{TempDir, runtime};
 
     /// Agents on a fake runtime, over a store of their own, whose user's home holds `repo`.
-    struct Fixture {
-        agents: Arc<Agents>,
+    pub(crate) struct Fixture {
+        pub(crate) agents: Arc<Agents>,
         fake: Fake,
-        store: Writer,
+        pub(crate) store: Writer,
         home: String,
         run: PathBuf,
         _dir: TempDir,
@@ -699,11 +710,11 @@ mod tests {
         }
     }
 
-    struct Setup {
-        harnesses: Harnesses,
-        hook_built: bool,
-        max: u64,
-        login_shell: Option<String>,
+    pub(crate) struct Setup {
+        pub(crate) harnesses: Harnesses,
+        pub(crate) hook_built: bool,
+        pub(crate) max: u64,
+        pub(crate) login_shell: Option<String>,
     }
 
     impl Default for Setup {
@@ -717,7 +728,7 @@ mod tests {
         }
     }
 
-    fn setup_with(setup: Setup) -> Fixture {
+    pub(crate) fn setup_with(setup: Setup) -> Fixture {
         let dir = TempDir::new("agents");
         let path = dir.path().join("bazhen.db");
         let (store, thread) =
@@ -763,14 +774,14 @@ mod tests {
     }
 
     /// The stub `setup` serves, with what it was asked.
-    fn stubbed(stub: &StubHarness) -> Fixture {
+    pub(crate) fn stubbed(stub: &StubHarness) -> Fixture {
         setup_with(Setup {
             harnesses: stub.served_as(HarnessId::ClaudeCode),
             ..Setup::default()
         })
     }
 
-    fn request(key: &str) -> LaunchAgentRequest {
+    pub(crate) fn request(key: &str) -> LaunchAgentRequest {
         LaunchAgentRequest {
             idempotency_key: key.to_owned(),
             harness: HarnessId::ClaudeCode,
@@ -791,7 +802,10 @@ mod tests {
     }
 
     impl Fixture {
-        async fn launch(&self, req: LaunchAgentRequest) -> Result<LaunchAgentResponse, AgentError> {
+        pub(crate) async fn launch(
+            &self,
+            req: LaunchAgentRequest,
+        ) -> Result<LaunchAgentResponse, AgentError> {
             self.agents.launch(&req).await
         }
 
