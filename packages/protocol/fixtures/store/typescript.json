@@ -159,6 +159,11 @@
       "name": "2026-11-18-mailbox-sender-and-settled",
       "sql": "\n    -- The agent that sent the message; null when the human did.\n    ALTER TABLE mailbox ADD COLUMN from_agent_id TEXT;\n    -- The event that last moved it from on its way to settled (seen, delivered or undeliverable).\n    ALTER TABLE mailbox ADD COLUMN settled_event_id INTEGER REFERENCES events (id);\n    UPDATE mailbox SET from_agent_id = (\n      SELECT json_extract(e.payload, '$.from') FROM events e WHERE e.id = mailbox.created_event_id\n    );\n    -- When it reached the agent, not when it last moved: a message seen, then delivered at its\n    -- turn's end, settled when seen; one folded into a running turn, when emitted into it. Only\n    -- since it was last requeued, if it was.\n    UPDATE mailbox SET settled_event_id = coalesce(\n      (SELECT max(e.id) FROM events e\n        WHERE e.entity_type = 'message' AND e.entity_id = mailbox.id\n          AND e.type IN ('mailbox.emitted', 'mailbox.seen')\n          AND e.id > coalesce((SELECT max(r.id) FROM events r\n            WHERE r.entity_type = 'message' AND r.entity_id = mailbox.id\n              AND r.type = 'mailbox.requeued'), 0)),\n      updated_event_id)\n      WHERE state IN ('seen', 'delivered', 'undeliverable');\n    CREATE INDEX mailbox_reply ON mailbox (from_agent_id, agent_session_id, created_event_id);\n  ",
       "run": false
+    },
+    {
+      "name": "2026-11-25-device-forwarded",
+      "sql": "\n    -- Whether the device was paired through a forwarder: over loopback TCP from a socket no\n    -- readable process holds, each that may hold it the human's. Only such a device's cookie lets\n    -- such a caller through as the human.\n    ALTER TABLE devices ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0;\n  ",
+      "run": false
     }
   ],
   "numbered": [
@@ -451,7 +456,7 @@
       "type": "table",
       "name": "devices",
       "tbl_name": "devices",
-      "sql": "CREATE TABLE devices (\n      id TEXT PRIMARY KEY,\n      name TEXT NOT NULL,\n      token_hash TEXT NOT NULL UNIQUE,\n      paired_at TEXT NOT NULL,\n      last_seen_at TEXT NOT NULL,\n      revoked_at TEXT,\n      -- Paired over HTTPS: its cookie is __Host- and Secure, and it lapses after 30 days unused,\n      -- rather than the 1 day a loopback cookie, which other local ports also receive, keeps.\n      secure INTEGER NOT NULL\n    ) STRICT"
+      "sql": "CREATE TABLE devices (\n      id TEXT PRIMARY KEY,\n      name TEXT NOT NULL,\n      token_hash TEXT NOT NULL UNIQUE,\n      paired_at TEXT NOT NULL,\n      last_seen_at TEXT NOT NULL,\n      revoked_at TEXT,\n      -- Paired over HTTPS: its cookie is __Host- and Secure, and it lapses after 30 days unused,\n      -- rather than the 1 day a loopback cookie, which other local ports also receive, keeps.\n      secure INTEGER NOT NULL\n    , forwarded INTEGER NOT NULL DEFAULT 0) STRICT"
     },
     {
       "type": "table",

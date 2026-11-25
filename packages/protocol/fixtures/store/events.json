@@ -749,7 +749,8 @@
           "paired_at": "2026-11-01T00:00:00.000Z",
           "last_seen_at": "2026-11-01T00:00:00.000Z",
           "revoked_at": null,
-          "secure": 0
+          "secure": 0,
+          "forwarded": 0
         },
         {
           "id": "dev_01900000000070008000000000000005",
@@ -758,7 +759,8 @@
           "paired_at": "2026-11-01T00:00:00.000Z",
           "last_seen_at": "2026-11-01T00:00:00.000Z",
           "revoked_at": "2026-11-01T00:00:00.000Z",
-          "secure": 1
+          "secure": 1,
+          "forwarded": 0
         },
         {
           "id": "dev_01900000000070008000000000000006",
@@ -767,7 +769,8 @@
           "paired_at": "2026-11-01T00:00:00.000Z",
           "last_seen_at": "2026-11-01T00:00:00.000Z",
           "revoked_at": null,
-          "secure": 1
+          "secure": 1,
+          "forwarded": 0
         }
       ],
       "notices": [

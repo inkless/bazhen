@@ -183,6 +183,49 @@ pub fn of_pid(pid: Pid, accepted: u64) -> Result<Peer, Refused> {
     Ok(peer)
 }
 
+/// Who `candidate` is, a process that may hold a loopback caller's socket unseen: its session, its
+/// line and what that says of Codex, as `of_pid` reads them, with its start pinned to the one the
+/// scan read. Its environment, which the kernel hides for a process that isn't dumpable, is taken
+/// as withheld where it is denied; its arguments are still read.
+///
+/// # Errors
+///
+/// `Changed` when it went, or another process took its pid, after the scan read it, which a request
+/// made again may read for sure; else as `Refused` says, a process on its line that can't be read
+/// included.
+#[cfg(target_os = "linux")]
+pub fn candidate_of(candidate: tcp::Candidate) -> Result<Peer, Refused> {
+    let pid = candidate.pid;
+    let moved = Cell::new(false);
+    let pinned = |at: Pid| {
+        let read = step(at);
+        if at == pid && !matches!(&read, Ok(read) if read.started == candidate.started) {
+            moved.set(true);
+        }
+        read
+    };
+    let environ = |at: Pid| match own_environ(at) {
+        Err(denied) if at == pid && denied.kind() == io::ErrorKind::PermissionDenied => Ok(None),
+        read => read,
+    };
+    let line = line_of(pid, pinned, own_args, environ, thread::sleep);
+    let session = bazhen_pid::session(Some(pid));
+    if moved.get() || !step(pid).is_ok_and(|now| now.started == candidate.started) {
+        return Err(Refused::Changed(
+            "a process that may hold the caller's socket went while it was read",
+        ));
+    }
+    let (ancestors, names, codex) = line?;
+    Ok(Peer {
+        pid,
+        session: session?,
+        codex_server: codex.server,
+        environment_withheld: codex.environment_withheld,
+        ancestors,
+        names,
+    })
+}
+
 /// When `pid`'s process started, refused when that was after `accepted`.
 fn started(pid: Pid, accepted: u64) -> Result<u64, Refused> {
     let started =

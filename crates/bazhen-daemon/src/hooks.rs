@@ -227,6 +227,14 @@ async fn taken(
             dropped(event, said, NO_SUCH_AGENT);
             return framed(&quiet());
         }
+        Ok(Identity::Unheld) => {
+            dropped(
+                event,
+                said,
+                "refused, no process holding its socket can be read",
+            );
+            return framed(&quiet());
+        }
         Err(err) => {
             dropped(event, said, &format!("its caller can't be read: {err}"));
             return framed(&quiet());

@@ -465,9 +465,11 @@ hold the connection's other end, which Linux's `/proc` names. So an agent's `cur
 browser is refused over HTTP what it is refused on the socket, and the refusal names the process it
 read and the agent's terminal it was started from. A browser first started from an agent's
 terminal, as `xdg-open` starts one for a dev server or a login step when no browser is running, is
-that agent's until you restart it outside Bazhen. A connection whose holders can't be read, such as
-one forwarded by `ssh -L` through `sshd`, or that another user's process holds, such as a proxy's,
-is refused. Where `/proc` doesn't say who holds a socket (`hidepid`, a daemon in another PID
+that agent's until you restart it outside Bazhen. A connection that another user's process holds,
+such as a proxy's, is refused. So is one forwarded by `ssh -L`, whose `sshd` can't be read, until
+the browser is paired through that forward once: then a request through it that carries the
+paired browser's cookie is yours, as long as every process of yours that may hold its socket
+unseen reads as yours (docs/remote.md, Pairing). Where `/proc` doesn't say who holds a socket (`hidepid`, a daemon in another PID
 namespace, or macOS), every API request over HTTP is refused: the daemon warns at start, and
 `bazhen doctor` shows `HTTP callers: unidentified`.
 

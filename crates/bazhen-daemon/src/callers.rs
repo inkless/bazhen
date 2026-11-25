@@ -2,12 +2,13 @@
 //! request presents and whose process made it; and the guard that holds each route to its callers.
 
 use axum::extract::{OriginalUri, Request, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::ids::AgentId;
 
+use crate::paired::{ThroughForwarder, Viewer};
 use crate::peer::{self, PeerRead, PeerSocket, Reading, Via};
 use crate::routes::{Shared, fail, header, internal};
 use crate::writer::Writer;
@@ -22,7 +23,14 @@ pub(crate) struct Caller(pub(crate) Option<AgentId>);
 pub(crate) enum Identity {
     Human,
     Agent(AgentId),
-    Refused { reason: String, retry: bool },
+    /// A TCP caller whose socket no readable process holds, each one that may hold it unseen the
+    /// human's, presenting no agent's credential: the human only where its request carries a
+    /// device paired the same way (`http_guard`).
+    Unheld,
+    Refused {
+        reason: String,
+        retry: bool,
+    },
 }
 
 /// Why a caller whose process wasn't read in time is refused.
@@ -119,6 +127,18 @@ pub(crate) fn identify(
         Some(Reading::Agent(agent, _)) => return as_peer(credentials, presented, agent),
         Some(Reading::Withheld) if presented.thread.is_some() => {
             return as_codex(credentials, presented, Via::Environment);
+        }
+        Some(Reading::Unheld) => {
+            let presents =
+                presented.token.is_some() || presented.said.is_some() || presented.thread.is_some();
+            return Ok(if presents {
+                refused(
+                    "a caller whose socket no readable process holds can't present an agent's \
+                     credentials",
+                )
+            } else {
+                Identity::Unheld
+            });
         }
         Some(Reading::Withheld | Reading::Outside) | None => {}
     }
@@ -337,6 +357,12 @@ fn forbidden(message: &str) -> Response {
     fail(StatusCode::FORBIDDEN, ErrorCode::Forbidden, message)
 }
 
+/// Why a caller whose socket no readable process holds is refused without a device paired the
+/// same way: only a forwarder, as `ssh -L` is, leaves its socket so, and a browser behind one
+/// pairs through it once.
+pub(crate) const UNHELD: &str = "no process holding the caller's socket can be read: pair this browser \
+                      through the forwarder it uses (`bazhen devices pair`)";
+
 /// `guard` for the loopback HTTP listener, whose every connection carries its two addresses
 /// (`accept::Connected`): a request under `/v1`, or an upgrade, that carries none can't be
 /// identified, so it is refused rather than taken for the human's.
@@ -391,6 +417,22 @@ pub(crate) async fn guard(
         Identity::Refused { reason, .. } => (None, Some(reason)),
         Identity::Human => (Some(None), None),
         Identity::Agent(agent) => (Some(Some(agent)), None),
+        Identity::Unheld if request.method() == Method::POST && path == "/v1/pairing" => {
+            request.extensions_mut().insert(ThroughForwarder);
+            (Some(None), None)
+        }
+        Identity::Unheld
+            if matches!(
+                request.extensions().get::<Viewer>(),
+                Some(Viewer::Device {
+                    forwarded: true,
+                    ..
+                })
+            ) =>
+        {
+            (Some(None), None)
+        }
+        Identity::Unheld => (None, Some(UNHELD.to_owned())),
     };
     // An agent's refusal says how its process is the agent's, where its reading says.
     let because = |why: Option<&String>| why.map_or_else(String::new, |why| format!(": {why}"));

@@ -231,6 +231,8 @@ pub(crate) struct Stored {
     pub(crate) revoked: bool,
     pub(crate) secure: bool,
     pub(crate) last_seen_ms: i64,
+    /// Paired through a forwarder.
+    pub(crate) forwarded: bool,
 }
 
 fn idle_limit(secure: bool) -> i64 {
@@ -523,6 +525,7 @@ mod tests {
             revoked: false,
             secure,
             last_seen_ms: NOW - ago,
+            forwarded: false,
         }
     }
 

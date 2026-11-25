@@ -38,6 +38,9 @@ pub struct NewDevice {
     pub origin: String,
     /// The connection's own peer, on the LAN listener only.
     pub address: Option<String>,
+    /// Paired through a forwarder: over loopback TCP from a socket no readable process holds,
+    /// each process that may hold it the human's.
+    pub forwarded: bool,
 }
 
 /// A device just paired.
@@ -66,6 +69,8 @@ pub struct DeviceRow {
     pub revoked: bool,
     /// Paired over HTTPS.
     pub secure: bool,
+    /// Paired through a forwarder.
+    pub forwarded: bool,
 }
 
 impl DeviceRow {
@@ -187,8 +192,9 @@ impl Store {
             let id = DeviceId::mint(crate::now_ms(), crate::urandom()?);
             let at = crate::now();
             w.connection().execute(
-                "INSERT INTO devices (id, name, token_hash, paired_at, last_seen_at, secure)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO devices
+                   (id, name, token_hash, paired_at, last_seen_at, secure, forwarded)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     id.as_str(),
                     &device.name,
@@ -196,6 +202,7 @@ impl Store {
                     &at,
                     &at,
                     i64::from(device.secure),
+                    i64::from(device.forwarded),
                 ),
             )?;
             w.append(&NewEvent::DevicePaired {
@@ -364,8 +371,8 @@ impl Reads<'_> {
     pub fn device_by_token(self, token_hash: &str) -> rusqlite::Result<Option<DeviceRow>> {
         self.0
             .query_row(
-                "SELECT id, name, last_seen_at, revoked_at IS NOT NULL, secure FROM devices
-                 WHERE token_hash = ?",
+                "SELECT id, name, last_seen_at, revoked_at IS NOT NULL, secure, forwarded
+                 FROM devices WHERE token_hash = ?",
                 [token_hash],
                 |row| {
                     Ok(DeviceRow {
@@ -374,6 +381,7 @@ impl Reads<'_> {
                         last_seen_at_ms: millis(row, 2)?,
                         revoked: row.get(3)?,
                         secure: row.get::<_, i64>(4)? == 1,
+                        forwarded: row.get::<_, i64>(5)? == 1,
                     })
                 },
             )
@@ -433,6 +441,7 @@ mod tests {
             secure,
             origin: "http://127.0.0.1:7900".to_owned(),
             address: None,
+            forwarded: false,
         }
     }
 
@@ -694,7 +703,8 @@ mod tests {
     }
 
     #[test]
-    fn finds_a_device_by_its_tokens_hash_revoked_or_not_with_when_it_was_last_used() {
+    fn finds_a_device_by_its_tokens_hash_revoked_or_not_with_when_it_was_last_used_and_how_it_paired()
+     {
         let dir = TempDir::new("by-token");
         let mut store = Store::open(&dir.db("a.db")).unwrap();
         let laptop = store
@@ -702,7 +712,10 @@ mod tests {
             .unwrap()
             .device_id;
         let phone = store
-            .pair_device(&device("Phone", 'b', true))
+            .pair_device(&NewDevice {
+                forwarded: true,
+                ..device("Phone", 'b', true)
+            })
             .unwrap()
             .device_id;
         store.revoke_device(phone.as_str()).unwrap();
@@ -723,11 +736,15 @@ mod tests {
                 last_seen_at_ms: 1_794_268_800_007,
                 revoked: false,
                 secure: false,
+                forwarded: false,
             }
         );
         assert_eq!(found.idle_limit(), LOOPBACK_IDLE);
         let revoked = by('b').unwrap().unwrap();
-        assert_eq!((revoked.revoked, revoked.secure), (true, true));
+        assert_eq!(
+            (revoked.revoked, revoked.secure, revoked.forwarded),
+            (true, true, true)
+        );
         assert_eq!(revoked.idle_limit(), SECURE_IDLE);
         assert_eq!(by('c').unwrap(), None);
     }

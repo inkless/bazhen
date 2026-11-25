@@ -1675,6 +1675,12 @@ const NOT_DECODERS: Record<string, string> = {
     "reads /proc/net/tcp and tcp6 whole and returns their text unparsed; end hands each line to row, which the proc_net_tcp target fuzzes",
   "crates/bazhen-peer/src/tcp.rs::peers":
     "reads a holder's descriptor link only through socket_inode, which the proc_net_tcp target fuzzes, comparing the inode it gives",
+  "crates/bazhen-peer/src/tcp.rs::zombie":
+    "reads a stat line's state only through start_time::stat_field, which the proc_stat target fuzzes, comparing it to Z",
+  "crates/bazhen-peer/src/tcp.rs::lone_zombie":
+    "reads a stat line only through zombie and start_time::stat_field, which the proc_stat target fuzzes, comparing num_threads (field 20) to 1",
+  "crates/bazhen-peer/src/tcp.rs::Proc::stat":
+    "reads /proc/<pid>/stat whole and returns its bytes unparsed; unseen hands them to start_time::start_ticks and stat_field, which the proc_stat target fuzzes",
   "crates/bazhen-daemon/src/callers.rs::Stored::reads":
     "opens the store's reader connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::agent_of":

@@ -284,6 +284,7 @@ fn pairs_dismisses_and_revokes_as_the_typescript_daemon_writes_it_events_and_row
                 secure: pairing["secure"] == true,
                 origin: text(&pairing["origin"]),
                 address: pairing["address"].as_str().map(str::to_owned),
+                forwarded: false,
             })
             .unwrap();
         assert_eq!(paired.name, text(&pairing["name"]));

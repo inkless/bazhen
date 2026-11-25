@@ -4,15 +4,19 @@
 //! then read as `of_pid` reads a Unix socket's peer.
 //!
 //! A holder of the socket is found only among this user's processes whose descriptors can be read.
-//! One the scan can't read is counted, not guessed at: with no readable holder the caller is
-//! refused, and with one, an unreadable process can hold the socket only by inheriting it from a
-//! holder, which keeps it on that holder's line, or by being handed it by one that cooperates.
+//! One the scan can't read is kept as a candidate, by its pid and its start, not guessed at: with
+//! no readable holder the caller is refused unless every candidate reads as the human, and with
+//! one, an unreadable process can hold the socket only by inheriting it from a holder, which keeps
+//! it on that holder's line, or by being handed it by one that cooperates. A process holding an
+//! `io_uring` is a candidate too, since it may hold a socket in its ring with no descriptor left.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use rustix::process::Pid;
+
+use bazhen_holder::start_time;
 
 use crate::{MAX_HOLDERS, Peer, Refused};
 
@@ -175,6 +179,19 @@ pub trait ProcView {
     ///
     /// When it can't be read, or is closed.
     fn descriptor(&self, pid: Pid, fd: u32) -> io::Result<Vec<u8>>;
+    /// `pid`'s `/proc/<pid>/stat` line, which the kernel shows even for a process whose
+    /// descriptors it hides.
+    ///
+    /// # Errors
+    ///
+    /// When it can't be read; `NotFound` for a process that has gone.
+    fn stat(&self, pid: Pid) -> io::Result<Vec<u8>>;
+    /// The threads `/proc/<pid>/task` lists of `pid`.
+    ///
+    /// # Errors
+    ///
+    /// When they can't be listed.
+    fn tasks(&self, pid: Pid) -> io::Result<Vec<Pid>>;
 }
 
 /// The inode of the caller's end of a connection the daemon accepted from `client` on `server`, as
@@ -209,12 +226,72 @@ pub struct Holder {
     pub fd: u32,
 }
 
-/// What one pass over this user's processes found: who holds each socket asked of it, and how
-/// many processes couldn't be read.
+/// A process that may hold a socket no descriptor of a readable process links to: one whose
+/// descriptors can't be read, or one holding an `io_uring`. Its start, in clock ticks since boot as
+/// its `stat` said when the scan read it, pins it: a process that took its pid since shows another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Candidate {
+    pub pid: Pid,
+    pub started: u64,
+}
+
+/// What a descriptor of an `io_uring` links to.
+pub const IO_URING: &[u8] = b"anon_inode:[io_uring]";
+
+/// What one pass over this user's processes found: who holds each socket asked of it, the
+/// candidates that may hold one unseen, and whether a process changed while it was read.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Scan {
     held: BTreeMap<u64, Vec<Holder>>,
-    unreadable: usize,
+    candidates: Vec<Candidate>,
+    raced: bool,
+}
+
+/// What the scan makes of a process whose descriptors it couldn't read, or that holds an `io_uring`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unseen {
+    /// A candidate, pinned by its start.
+    Candidate(Candidate),
+    /// A zombie whose every thread has exited, which holds no descriptor at all.
+    Exited,
+    /// One that changed, or went, while it was read.
+    Raced,
+}
+
+/// What `pid` is, as `view` reads it. A zombie is one that holds nothing only once its `stat` says
+/// so with one thread, its `task` lists itself alone, and its `stat` says so again with the same
+/// start: a zombie leader whose other threads run shares their descriptors. Any other reading of a
+/// zombie, or of a process that goes, is a race.
+fn unseen(view: &(impl ProcView + ?Sized), pid: Pid) -> Unseen {
+    let Ok(first) = view.stat(pid) else {
+        return Unseen::Raced;
+    };
+    let Some(started) = start_time::start_ticks(&first) else {
+        return Unseen::Raced;
+    };
+    if !zombie(&first) {
+        return Unseen::Candidate(Candidate { pid, started });
+    }
+    let alone = lone_zombie(&first) && view.tasks(pid).is_ok_and(|tasks| tasks == [pid]);
+    let again = view
+        .stat(pid)
+        .is_ok_and(|again| lone_zombie(&again) && start_time::start_ticks(&again) == Some(started));
+    if alone && again {
+        Unseen::Exited
+    } else {
+        Unseen::Raced
+    }
+}
+
+/// Whether a `/proc/<pid>/stat` line is a zombie's: state, field 3, `Z`.
+fn zombie(stat: &[u8]) -> bool {
+    start_time::stat_field(stat, 3) == Some(b"Z".as_slice())
+}
+
+/// Whether a `/proc/<pid>/stat` line is a zombie's with one thread: `num_threads`, field 20, which
+/// `status` shows as `Threads:`.
+fn lone_zombie(stat: &[u8]) -> bool {
+    zombie(stat) && start_time::stat_field(stat, 20) == Some(b"1".as_slice())
 }
 
 /// One pass over `view`'s processes for each socket in `inodes`, as many requests as arrived
@@ -226,9 +303,11 @@ pub struct Scan {
 pub fn scan(view: &(impl ProcView + ?Sized), inodes: &BTreeSet<u64>) -> io::Result<Scan> {
     let mut found = Scan::default();
     for pid in view.processes()? {
-        match view.descriptors(pid) {
+        let ring = match view.descriptors(pid) {
             Ok(descriptors) => {
+                let mut ring = false;
                 for (fd, link) in descriptors {
+                    ring |= link == IO_URING;
                     if let Some(inode) = socket_inode(&link).filter(|i| inodes.contains(i)) {
                         found
                             .held
@@ -237,12 +316,35 @@ pub fn scan(view: &(impl ProcView + ?Sized), inodes: &BTreeSet<u64>) -> io::Resu
                             .push(Holder { pid, fd });
                     }
                 }
+                ring
             }
-            Err(e) if gone(&e) => {}
-            Err(_) => found.unreadable += 1,
+            Err(e) if gone(&e) => false,
+            Err(_) => true,
+        };
+        if ring {
+            match unseen(view, pid) {
+                Unseen::Candidate(candidate) => found.candidates.push(candidate),
+                Unseen::Exited => {}
+                Unseen::Raced => found.raced = true,
+            }
         }
     }
     Ok(found)
+}
+
+/// The processes `scan` found that may hold a socket unseen, in the order it found them, each
+/// pinned by its start.
+///
+/// # Errors
+///
+/// `Changed` when a process changed, or went, while the scan read it.
+pub fn candidates(scan: &Scan) -> Result<&[Candidate], Refused> {
+    if scan.raced {
+        return Err(Refused::Changed(
+            "a process that may hold the caller's socket changed while it was read",
+        ));
+    }
+    Ok(&scan.candidates)
 }
 
 /// Whether reading a process failed because it has gone.
@@ -261,7 +363,7 @@ pub fn holders(scan: &Scan, inode: u64) -> Result<Vec<Holder>, Refused> {
     holders.dedup_by_key(|holder| holder.pid);
     match holders.len() {
         0 => Err(Refused::NoReadableHolder {
-            unreadable: scan.unreadable,
+            unreadable: scan.candidates.len(),
         }),
         n if n > MAX_HOLDERS => Err(Refused::TooManyHolders { holders: n }),
         _ => Ok(holders),
@@ -356,6 +458,25 @@ impl ProcView for Proc {
         use std::os::unix::ffi::OsStrExt as _;
         let link = std::fs::read_link(format!("/proc/{}/fd/{fd}", pid.as_raw_pid()))?;
         Ok(link.as_os_str().as_bytes().to_vec())
+    }
+
+    fn stat(&self, pid: Pid) -> io::Result<Vec<u8>> {
+        std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid()))
+    }
+
+    fn tasks(&self, pid: Pid) -> io::Result<Vec<Pid>> {
+        let mut tasks = Vec::new();
+        for entry in std::fs::read_dir(format!("/proc/{}/task", pid.as_raw_pid()))? {
+            if let Some(task) = entry?
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse().ok())
+                .and_then(Pid::from_raw)
+            {
+                tasks.push(task);
+            }
+        }
+        Ok(tasks)
     }
 }
 
@@ -524,6 +645,19 @@ mod tests {
             /// scan saw.
             after: RefCell<HashMap<(i32, u32), Vec<u8>>>,
             passes: Cell<usize>,
+            /// Each process's `stat` lines, one a read and the last again after, `None` for one
+            /// gone; a live one started at tick 100 where none are given.
+            stats: HashMap<i32, Vec<Option<Vec<u8>>>>,
+            stat_reads: RefCell<HashMap<i32, usize>>,
+            /// Each process's threads; itself alone where none are given.
+            tasks: HashMap<i32, Vec<i32>>,
+        }
+
+        /// A `/proc/<pid>/stat` line, in `state` with `threads` threads, started at tick
+        /// `started`.
+        fn stat_line(raw: i32, state: char, threads: u32, started: u64) -> Vec<u8> {
+            format!("{raw} (p) {state} 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 {threads} 0 {started} 0 0")
+                .into_bytes()
         }
 
         impl ProcView for Fake {
@@ -555,6 +689,24 @@ mod tests {
                     Some((_, link)) => Ok(link),
                     None => Err(io::Error::from(io::ErrorKind::NotFound)),
                 }
+            }
+            fn stat(&self, pid: Pid) -> io::Result<Vec<u8>> {
+                let raw = pid.as_raw_pid();
+                let Some(lines) = self.stats.get(&raw) else {
+                    return Ok(stat_line(raw, 'S', 1, 100));
+                };
+                let mut reads = self.stat_reads.borrow_mut();
+                let read = reads.entry(raw).or_default();
+                let line = lines.get(*read).or(lines.last()).cloned().flatten();
+                *read += 1;
+                line.ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+            }
+            fn tasks(&self, of: Pid) -> io::Result<Vec<Pid>> {
+                let raw = of.as_raw_pid();
+                Ok(self
+                    .tasks
+                    .get(&raw)
+                    .map_or_else(|| vec![of], |tasks| tasks.iter().map(|t| pid(*t)).collect()))
             }
         }
 
@@ -614,6 +766,123 @@ mod tests {
                     Err(Refused::Ambiguous.to_string()),
                     Err(Refused::Foreign { uid: 1001 }.to_string()),
                 ]
+            );
+        }
+
+        /// Every process that could hold a socket no link shows is kept, pinned by the start its
+        /// `stat` gave the scan: one whose descriptors can't be read, and one holding an `io_uring`.
+        #[test]
+        fn keeps_each_unreadable_process_and_each_io_uring_holder_as_a_candidate() {
+            let view = Fake {
+                processes: vec![
+                    (10, Fds::Denied),
+                    (11, read(&[(3, IO_URING.to_vec()), (4, socket(9))])),
+                    (12, read(&[(3, b"anon_inode:[eventfd]".to_vec())])),
+                    (13, Fds::Gone),
+                ],
+                stats: HashMap::from([(10, vec![Some(stat_line(10, 'S', 4, 500))])]),
+                ..Fake::default()
+            };
+            let found = scan(&view, &inodes(&[7])).unwrap();
+            assert_eq!(
+                (
+                    candidates(&found)
+                        .map(<[_]>::to_vec)
+                        .map_err(|r| r.to_string()),
+                    holders(&found, 7).map_err(|r| r.to_string()),
+                ),
+                (
+                    Ok(vec![
+                        Candidate {
+                            pid: pid(10),
+                            started: 500
+                        },
+                        Candidate {
+                            pid: pid(11),
+                            started: 100
+                        },
+                    ]),
+                    Err(Refused::NoReadableHolder { unreadable: 2 }.to_string()),
+                )
+            );
+        }
+
+        /// A zombie holds nothing once every thread of it has exited, which its `stat`, its
+        /// `task` and its `stat` again must each say, the same start both times. A zombie read any
+        /// other way, or an unreadable process that goes before its `stat` is read, is a race.
+        #[test]
+        fn leaves_out_a_zombie_only_once_its_every_thread_has_exited_and_else_calls_it_a_race() {
+            let zombie = |threads| Some(stat_line(10, 'Z', threads, 500));
+            let scanned = |stats: Vec<Option<Vec<u8>>>, tasks: Vec<i32>| {
+                let view = Fake {
+                    processes: vec![(10, Fds::Denied)],
+                    stats: HashMap::from([(10, stats)]),
+                    tasks: HashMap::from([(10, tasks)]),
+                    ..Fake::default()
+                };
+                let found = scan(&view, &inodes(&[7])).unwrap();
+                candidates(&found)
+                    .map(<[_]>::to_vec)
+                    .map_err(|r| r.to_string())
+            };
+            let raced = Err(Refused::Changed(
+                "a process that may hold the caller's socket changed while it was read",
+            )
+            .to_string());
+            assert_eq!(
+                [
+                    scanned(vec![zombie(1), zombie(1)], vec![10]),
+                    scanned(vec![zombie(2), zombie(2)], vec![10]),
+                    scanned(vec![zombie(1), zombie(1)], vec![10, 11]),
+                    scanned(vec![zombie(1), Some(stat_line(10, 'Z', 1, 501))], vec![10]),
+                    scanned(vec![zombie(1), None], vec![10]),
+                    scanned(vec![None], vec![10]),
+                ],
+                [
+                    Ok(vec![]),
+                    raced.clone(),
+                    raced.clone(),
+                    raced.clone(),
+                    raced.clone(),
+                    raced,
+                ]
+            );
+        }
+
+        /// A candidate is read on this host's `/proc` pinned to its start: this test's own
+        /// process, made non-dumpable as `sshd` is so that the kernel hides its environment, is
+        /// read with that environment taken as withheld; and pinned to another start, as a
+        /// process that took its pid would show, it is a race.
+        #[cfg(target_os = "linux")]
+        #[test]
+        fn reads_a_candidate_pinned_to_its_start_and_calls_another_start_a_race() {
+            use rustix::process::{DumpableBehavior, getpid, set_dumpable_behavior};
+            let me = getpid();
+            let started = start_time::start_ticks(&Proc.stat(me).unwrap()).unwrap();
+            set_dumpable_behavior(DumpableBehavior::NotDumpable).unwrap();
+            let hidden =
+                std::fs::read(format!("/proc/{}/environ", me.as_raw_pid())).map_err(|e| e.kind());
+            let read = crate::candidate_of(Candidate { pid: me, started });
+            let moved = crate::candidate_of(Candidate {
+                pid: me,
+                started: started + 1,
+            });
+            set_dumpable_behavior(DumpableBehavior::Dumpable).unwrap();
+            assert_eq!(
+                (
+                    hidden,
+                    read.map(|peer| (peer.pid, peer.environment_withheld))
+                        .map_err(|r| r.to_string()),
+                    moved.map(|peer| peer.pid).map_err(|r| r.to_string()),
+                ),
+                (
+                    Err(io::ErrorKind::PermissionDenied),
+                    Ok((me, true)),
+                    Err(Refused::Changed(
+                        "a process that may hold the caller's socket went while it was read"
+                    )
+                    .to_string()),
+                )
             );
         }
 

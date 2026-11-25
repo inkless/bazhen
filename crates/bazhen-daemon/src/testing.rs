@@ -41,6 +41,21 @@ pub(crate) fn connected(router: axum::Router) -> axum::Router {
     ))
 }
 
+/// `router` as the loopback listener serves a TCP caller from port 1000 to its port 7900.
+pub(crate) fn from_port_1000(router: axum::Router) -> axum::Router {
+    router.layer(axum::middleware::from_fn(
+        |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            request
+                .extensions_mut()
+                .insert(crate::peer::PeerSocket::tcp_accepted_now(
+                    Ok(std::net::SocketAddr::from(([127, 0, 0, 1], 1000))),
+                    Ok(std::net::SocketAddr::from(([127, 0, 0, 1], 7900))),
+                ));
+            next.run(request)
+        },
+    ))
+}
+
 /// A directory of the test's own, removed when the test ends, whether or not it passed.
 pub(crate) struct TempDir(PathBuf);
 

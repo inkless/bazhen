@@ -9,7 +9,7 @@ use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bazhen_peer::tcp::{self, ProcView, Scan};
+use bazhen_peer::tcp::{self, Candidate, ProcView, Scan};
 use bazhen_peer::{Peer, Refused};
 use bazhen_protocol::daemon::HttpCallers;
 use bazhen_protocol::ids::AgentId;
@@ -80,6 +80,7 @@ fn found_itself(read: PeerRead, itself: u32) -> HttpCallers {
             )
         }
         PeerRead::Unread(why) | PeerRead::Retry(why) => why,
+        PeerRead::Unheld(_) => "no process holding its own call's socket can be read".to_owned(),
         PeerRead::Late => "its own call wasn't read in time".to_owned(),
         PeerRead::Read(_) => "its own call read as a Unix socket's".to_owned(),
     };
@@ -144,29 +145,41 @@ impl PeerSocket {
 }
 
 /// A reading of a connection's peer: who it is, or each process holding a TCP caller's socket;
-/// nobody, and why; or late, when the reading was still running at its deadline, which says
-/// nothing of the caller but that it wasn't read in time; or to be tried again, when the caller
-/// changed while it was read.
+/// where no process holding it can be read, each one that may hold it unseen; nobody, and why; or
+/// late, when the reading was still running at its deadline, which says nothing of the caller but
+/// that it wasn't read in time; or to be tried again, when the caller changed while it was read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PeerRead {
     Read(Peer),
     Held(Vec<Peer>),
+    Unheld(Vec<Peer>),
     Unread(String),
     Late,
     Retry(String),
 }
 
+/// What a TCP caller's socket was found held by: processes that can be read, or, where none can,
+/// each process that may hold it unseen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Found {
+    Held(Vec<Peer>),
+    Unheld(Vec<Peer>),
+}
+
 type ReadFn = dyn Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync;
 type HolderFn = dyn Fn(Pid, u64) -> Result<Peer, Refused> + Send + Sync;
+type CandidateFn = dyn Fn(Candidate) -> Result<Peer, Refused> + Send + Sync;
 type View = dyn ProcView + Send + Sync;
 
 /// Reads loopback TCP callers: each one's socket from the connection tables, then the processes
 /// holding it, found by one pass over `/proc` for every caller waiting when the pass starts, so
 /// callers that arrive together cost one pass rather than one each; then each holder, as a Unix
-/// socket's peer is read.
+/// socket's peer is read. Where no holder can be read, each process that may hold the socket
+/// unseen is read instead, pinned to its start, and the socket is looked for again after.
 pub(crate) struct Tcp {
     view: Arc<View>,
     read: Arc<HolderFn>,
+    candidate: Arc<CandidateFn>,
     uid: u32,
     pass: Mutex<Pass>,
     passes: TaskTracker,
@@ -185,10 +198,12 @@ impl Tcp {
         view: Arc<View>,
         uid: u32,
         read: impl Fn(Pid, u64) -> Result<Peer, Refused> + Send + Sync + 'static,
+        candidate: impl Fn(Candidate) -> Result<Peer, Refused> + Send + Sync + 'static,
     ) -> Self {
         Self {
             view,
             read: Arc::new(read),
+            candidate: Arc::new(candidate),
             uid,
             pass: Mutex::new(Pass::default()),
             passes: TaskTracker::new(),
@@ -196,26 +211,84 @@ impl Tcp {
     }
 
     /// The processes holding the socket of the caller connected from `client` to `server`, each
-    /// read as one that started by `accepted`. Each read of `/proc` holds `turn` until it ends,
-    /// even once this is given up on.
+    /// read as one that started by `accepted`; or, where none can be read, each that may hold it
+    /// unseen, once the socket and those processes are found the same after they were read. Each
+    /// read of `/proc` holds `turn` until it ends, even once this is given up on.
     async fn read(
         self: Arc<Self>,
         client: SocketAddr,
         server: SocketAddr,
         accepted: u64,
         turn: Arc<OwnedSemaphorePermit>,
-    ) -> Result<Vec<Peer>, Refused> {
+    ) -> Result<Found, Refused> {
         let (view, uid) = (Arc::clone(&self.view), self.uid);
         let inode = blocking(&turn, move || tcp::end(&*view, client, server, uid)).await?;
         let scanned = self.scanned(inode).await;
         let (view, read) = (Arc::clone(&self.view), Arc::clone(&self.read));
-        blocking(&turn, move || {
-            let scan = scanned
-                .as_ref()
-                .as_ref()
-                .map_err(|why| Refused::Unreadable(io::Error::other(why.clone())))?;
-            let holders = tcp::holders(scan, inode)?;
-            tcp::peers(&*view, inode, &holders, |pid| read(pid, accepted))
+        let candidate = Arc::clone(&self.candidate);
+        let found = blocking(&turn, move || {
+            let scan = scan_of(&scanned)?;
+            match tcp::holders(scan, inode) {
+                Err(Refused::NoReadableHolder { unreadable }) if unreadable > 0 => {
+                    let candidates = tcp::candidates(scan)?.to_vec();
+                    let peers = candidates
+                        .iter()
+                        .map(|c| candidate(*c))
+                        .collect::<Result<_, _>>()?;
+                    Ok(Err((candidates, peers)))
+                }
+                holders => Ok(Ok(tcp::peers(&*view, inode, &holders?, |pid| {
+                    read(pid, accepted)
+                })?)),
+            }
+        })
+        .await?;
+        let (candidates, peers) = match found {
+            Ok(held) => return Ok(Found::Held(held)),
+            Err(unheld) => unheld,
+        };
+        self.unchanged(client, server, inode, candidates, &turn)
+            .await?;
+        Ok(Found::Unheld(peers))
+    }
+
+    /// Whether, once the processes that may hold `inode` unseen were read, the caller's socket is
+    /// still `inode`, no process holding it can be read, and those processes are still
+    /// `candidates`, each by its start: else one changed while they were read, which a request
+    /// made again may read for sure.
+    async fn unchanged(
+        self: &Arc<Self>,
+        client: SocketAddr,
+        server: SocketAddr,
+        inode: u64,
+        mut candidates: Vec<Candidate>,
+        turn: &Arc<OwnedSemaphorePermit>,
+    ) -> Result<(), Refused> {
+        let (view, uid) = (Arc::clone(&self.view), self.uid);
+        let again = blocking(turn, move || tcp::end(&*view, client, server, uid)).await?;
+        if again != inode {
+            return Err(Refused::Changed(
+                "the caller's socket changed while it was read",
+            ));
+        }
+        let rescanned = self.scanned(inode).await;
+        blocking(turn, move || {
+            let scan = scan_of(&rescanned)?;
+            let unheld = matches!(
+                tcp::holders(scan, inode),
+                Err(Refused::NoReadableHolder { .. })
+            );
+            let key = |c: &Candidate| (c.pid.as_raw_pid(), c.started);
+            let mut now = tcp::candidates(scan)?.to_vec();
+            now.sort_by_key(key);
+            candidates.sort_by_key(key);
+            if unheld && now == candidates {
+                Ok(())
+            } else {
+                Err(Refused::Changed(
+                    "the processes that may hold the caller's socket changed while they were read",
+                ))
+            }
         })
         .await
     }
@@ -273,6 +346,13 @@ impl Tcp {
             .waiting
             .len()
     }
+}
+
+/// What a pass found, or why it found nothing.
+fn scan_of(scanned: &Result<Scan, String>) -> Result<&Scan, Refused> {
+    scanned
+        .as_ref()
+        .map_err(|why| Refused::Unreadable(io::Error::other(why.clone())))
 }
 
 /// `read` on a blocking thread, which holds `turn` until it ends.
@@ -337,6 +417,7 @@ impl Peers {
                 Arc::new(tcp::Proc),
                 rustix::process::geteuid().as_raw(),
                 bazhen_peer::of_pid,
+                bazhen_peer::candidate_of,
             ))),
             #[cfg(target_os = "macos")]
             tcp: None,
@@ -368,7 +449,12 @@ impl Peers {
                 let reading = tcp.read(client, server, accepted, Arc::new(turn));
                 tokio::time::timeout(self.deadline, reading)
                     .await
-                    .map(|read| Some(read.map(PeerRead::Held)))
+                    .map(|read| {
+                        Some(read.map(|found| match found {
+                            Found::Held(peers) => PeerRead::Held(peers),
+                            Found::Unheld(peers) => PeerRead::Unheld(peers),
+                        }))
+                    })
             }
             Job::Unix(fd) => {
                 let read = Arc::clone(&self.read);
@@ -475,12 +561,15 @@ pub(crate) enum Via {
 
 /// What a socket peer's process says of the caller. `Withheld` is outside every agent's terminal
 /// with its environment unread, so only the thread the call presents can say it is Codex's.
+/// `Unheld` is a TCP caller whose socket no readable process holds, though each process that may
+/// hold it unseen reads as the human's: only a credential the request carries can say it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Reading {
     Agent(AgentId, How),
     Codex(Via),
     Outside,
     Withheld,
+    Unheld,
     Refused(String),
     Late,
 }
@@ -605,7 +694,44 @@ pub(crate) fn reading<E>(
         }
         PeerRead::Read(peer) => reading_of(&peer, &terminals()?),
         PeerRead::Held(peers) => held(&peers, &terminals()?),
+        PeerRead::Unheld(peers) => unheld(&peers, &terminals()?),
     })
+}
+
+/// What the processes that may hold a TCP caller's socket unseen say of it, where no process
+/// holding it can be read: `Unheld` when each reads as the human's, else refused, naming the
+/// first that doesn't, since it may be the caller.
+fn unheld(peers: &[Peer], terminals: &TerminalPids) -> Reading {
+    let pending = peers.iter().find_map(|peer| {
+        let pid = peer.pid.as_raw_pid();
+        match reading_of(peer, terminals) {
+            Reading::Outside | Reading::Withheld => None,
+            Reading::Agent(agent, how) => Some(format!(
+                "no process holding the caller's socket can be read, and pid {pid}, which may \
+                 hold it, is agent {agent}'s: {}",
+                how.of(&agent)
+            )),
+            Reading::Codex(_) => Some(format!(
+                "no process holding the caller's socket can be read, and pid {pid}, which may \
+                 hold it, reads as an agent's tool call"
+            )),
+            Reading::Refused(why) => Some(format!(
+                "no process holding the caller's socket can be read, and pid {pid}, which may \
+                 hold it, can't be read for sure: {why}"
+            )),
+            Reading::Unheld | Reading::Late => Some(format!(
+                "no process holding the caller's socket can be read, and pid {pid}, which may \
+                 hold it, wasn't read"
+            )),
+        }
+    });
+    match pending {
+        Some(why) => {
+            tracing::warn!("refused a caller: {why}");
+            Reading::Refused(why)
+        }
+        None => Reading::Unheld,
+    }
 }
 
 /// What the processes holding a TCP caller's socket say of it: their reading when they all agree,
@@ -621,6 +747,14 @@ fn held(peers: &[Peer], terminals: &TerminalPids) -> Reading {
         Some(first) if readings.all(|other| other.is_as(&first)) => first,
         Some(_) => refused("the processes holding the caller's socket read as different callers"),
     }
+}
+
+/// Readers that find a TCP caller from port 1000 to 7900 held by no process that can be read, and
+/// the one process that may hold it unseen outside every terminal: as a caller through a
+/// forwarder reads.
+#[cfg(test)]
+pub(crate) fn through_a_forwarder() -> Peers {
+    tests::tcp_readers(tests::View::of(1).unheld(vec![vec![960]], Vec::new())).0
 }
 
 #[cfg(test)]
@@ -1114,10 +1248,14 @@ mod tests {
     }
 
     /// `/proc` as a test sets it out: one table line per connection, each caller's socket held by
-    /// a process of its own; the first pass waits until `open`.
-    struct View {
+    /// a process of its own; the first pass waits until `open`. `hidden` are the processes whose
+    /// descriptors can't be read, in each pass (the last for every later one), and `rings` those
+    /// holding an `io_uring`.
+    pub(super) struct View {
         lines: Vec<String>,
         holders: Vec<(i32, u64)>,
+        hidden: Vec<Vec<i32>>,
+        rings: Vec<i32>,
         /// What a holder's descriptor reads once its line has been read, if not its socket.
         moved: Option<i32>,
         passes: AtomicUsize,
@@ -1126,7 +1264,7 @@ mod tests {
 
     impl View {
         /// Callers from ports 1000, 1001, … to the daemon's 7900, each held by pid 900 + its index.
-        fn of(callers: usize) -> Self {
+        pub(super) fn of(callers: usize) -> Self {
             Self {
                 lines: (0..callers)
                     .map(|at| {
@@ -1142,9 +1280,22 @@ mod tests {
                 holders: (0..callers)
                     .map(|at| (900 + i32::try_from(at).unwrap(), 70 + at as u64))
                     .collect(),
+                hidden: Vec::new(),
+                rings: Vec::new(),
                 moved: None,
                 passes: AtomicUsize::new(0),
                 open: (Mutex::new(true), Condvar::new()),
+            }
+        }
+
+        /// These callers' sockets held by no process that can be read, and maybe by `hidden`, by
+        /// pass, and `rings`.
+        pub(super) fn unheld(self, hidden: Vec<Vec<i32>>, rings: Vec<i32>) -> Self {
+            Self {
+                holders: Vec::new(),
+                hidden,
+                rings,
+                ..self
             }
         }
 
@@ -1164,7 +1315,8 @@ mod tests {
             Ok(vec![self.lines.join("\n"), String::new()])
         }
         fn processes(&self) -> io::Result<Vec<Pid>> {
-            if self.passes.fetch_add(1, Ordering::SeqCst) == 0 {
+            let pass = self.passes.fetch_add(1, Ordering::SeqCst);
+            if pass == 0 {
                 let open = self.open.0.lock().unwrap();
                 let (_open, waited) = self
                     .open
@@ -1173,11 +1325,39 @@ mod tests {
                     .unwrap();
                 assert!(!waited.timed_out(), "the first pass was never let through");
             }
-            Ok(self.holders.iter().map(|(p, _)| pid(*p)).collect())
+            let hidden = self
+                .hidden
+                .get(pass)
+                .or(self.hidden.last())
+                .map_or(&[][..], Vec::as_slice);
+            Ok(self
+                .holders
+                .iter()
+                .map(|(p, _)| *p)
+                .chain(hidden.iter().copied())
+                .chain(self.rings.iter().copied())
+                .map(pid)
+                .collect())
         }
         fn descriptors(&self, at: Pid) -> io::Result<Vec<(u32, Vec<u8>)>> {
-            let (_, inode) = self.holders.iter().find(|(p, _)| pid(*p) == at).unwrap();
-            Ok(vec![(3, format!("socket:[{inode}]").into_bytes())])
+            if self.rings.contains(&at.as_raw_pid()) {
+                return Ok(vec![(3, tcp::IO_URING.to_vec())]);
+            }
+            match self.holders.iter().find(|(p, _)| pid(*p) == at) {
+                Some((_, inode)) => Ok(vec![(3, format!("socket:[{inode}]").into_bytes())]),
+                None => Err(io::ErrorKind::PermissionDenied.into()),
+            }
+        }
+        fn stat(&self, at: Pid) -> io::Result<Vec<u8>> {
+            let raw = at.as_raw_pid();
+            Ok(format!(
+                "{raw} (p) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 {} 0 0",
+                100 + raw
+            )
+            .into_bytes())
+        }
+        fn tasks(&self, at: Pid) -> io::Result<Vec<Pid>> {
+            Ok(vec![at])
         }
         fn descriptor(&self, at: Pid, fd: u32) -> io::Result<Vec<u8>> {
             if self.moved == Some(at.as_raw_pid()) {
@@ -1191,15 +1371,25 @@ mod tests {
     }
 
     /// Readers of TCP callers through `view`, each holder read as a line under `AGENT`'s pane
-    /// when it is pid 900, else outside every terminal.
-    fn tcp_readers(view: View) -> (Peers, Arc<Tcp>) {
-        let tcp = Arc::new(Tcp::new(Arc::new(view), 1000, |at, _| {
-            Ok(if at.as_raw_pid() == 900 {
-                chain(900, 900, &[100, 10, 1])
-            } else {
-                chain(at.as_raw_pid(), at.as_raw_pid(), &[1])
-            })
-        }));
+    /// when it is pid 900, else outside every terminal; and each process that may hold a socket
+    /// unseen so too when it is pid 950, as changed while read when it is 951.
+    pub(super) fn tcp_readers(view: View) -> (Peers, Arc<Tcp>) {
+        let tcp = Arc::new(Tcp::new(
+            Arc::new(view),
+            1000,
+            |at, _| {
+                Ok(if at.as_raw_pid() == 900 {
+                    chain(900, 900, &[100, 10, 1])
+                } else {
+                    chain(at.as_raw_pid(), at.as_raw_pid(), &[1])
+                })
+            },
+            |candidate: Candidate| match candidate.pid.as_raw_pid() {
+                950 => Ok(chain(950, 950, &[100, 10, 1])),
+                951 => Err(Refused::Changed("it went")),
+                at => Ok(chain(at, at, &[1])),
+            },
+        ));
         let peers =
             Peers::with(READ, |_, _| Err(Refused::Endless)).with_tcp(Some(Arc::clone(&tcp)));
         (peers, tcp)
@@ -1236,6 +1426,7 @@ mod tests {
                 found_itself(PeerRead::Unread("hidden".to_owned()), 900),
                 found_itself(PeerRead::Retry("moved".to_owned()), 900),
                 found_itself(PeerRead::Late, 900),
+                found_itself(PeerRead::Unheld(vec![chain(900, 900, &[1])]), 900),
             ],
             [
                 HttpCallers::Identified,
@@ -1245,6 +1436,7 @@ mod tests {
                 unidentified("hidden"),
                 unidentified("moved"),
                 unidentified("its own call wasn't read in time"),
+                unidentified("no process holding its own call's socket can be read"),
             ]
         );
     }
@@ -1299,9 +1491,12 @@ mod tests {
     #[test]
     fn finds_the_holders_of_tcp_callers_that_wait_together_in_one_pass() {
         let view = Arc::new(View::of(3).shut());
-        let tcp = Arc::new(Tcp::new(Arc::clone(&view) as Arc<View>, 1000, |at, _| {
-            Ok(chain(at.as_raw_pid(), 0, &[1]))
-        }));
+        let tcp = Arc::new(Tcp::new(
+            Arc::clone(&view) as Arc<View>,
+            1000,
+            |at, _| Ok(chain(at.as_raw_pid(), 0, &[1])),
+            |_| Err(Refused::Endless),
+        ));
         let peers =
             Peers::with(READ, |_, _| Err(Refused::Endless)).with_tcp(Some(Arc::clone(&tcp)));
         let reads = runtime().block_on(async {
@@ -1388,6 +1583,87 @@ mod tests {
                 Ok(Reading::Refused(
                     "no process holds the caller's socket".to_owned()
                 )),
+            ]
+        );
+    }
+
+    /// Where no process holding a caller's socket can be read, each that may hold it unseen, one
+    /// whose descriptors are hidden and one holding an `io_uring`, is read, and found again by a
+    /// second pass; the caller is the human's only as a credential says, and refused where one
+    /// of them is an agent's.
+    #[test]
+    fn reads_each_process_that_may_hold_an_unheld_socket_and_refuses_it_where_one_is_an_agents() {
+        let reads = runtime().block_on(async {
+            let mut reads = Vec::new();
+            for view in [
+                View::of(1).unheld(vec![vec![960]], vec![961]),
+                View::of(1).unheld(vec![vec![960]], vec![950]),
+                View::of(1).unheld(vec![], vec![]),
+            ] {
+                reads.push(tcp_readers(view).0.read(&from_port(1000)).await);
+            }
+            reads
+        });
+        let outside = |at: i32| chain(at, at, &[1]);
+        assert_eq!(
+            reads
+                .iter()
+                .map(|read| reading(read.clone(), || Ok::<_, ()>(terminals())))
+                .collect::<Vec<_>>(),
+            [
+                Ok(Reading::Unheld),
+                Ok(Reading::Refused(format!(
+                    "no process holding the caller's socket can be read, and pid 950, which may \
+                     hold it, is agent {AGENT}'s: {}",
+                    How {
+                        pid: 950,
+                        by: By::Ancestry
+                    }
+                    .of(&id(AGENT))
+                ))),
+                Ok(Reading::Refused(
+                    "the caller's process can't be read for sure: no process holding the \
+                     caller's socket can be read (0 of this user's processes can't be)"
+                        .to_owned()
+                )),
+            ]
+        );
+        assert_eq!(
+            reads[..2],
+            [
+                PeerRead::Unheld(vec![outside(960), outside(961)]),
+                PeerRead::Unheld(vec![outside(960), chain(950, 950, &[100, 10, 1])]),
+            ]
+        );
+    }
+
+    /// One that may hold the socket changing while it is read, or another showing up or one
+    /// going by the second pass, may mean another holds it now: the caller is told to try again.
+    #[test]
+    fn tells_the_caller_to_try_again_when_the_processes_that_may_hold_its_socket_change() {
+        let reads = runtime().block_on(async {
+            let mut reads = Vec::new();
+            for view in [
+                View::of(1).unheld(vec![vec![951]], vec![]),
+                View::of(1).unheld(vec![vec![960], vec![960, 962]], vec![]),
+                View::of(1).unheld(vec![vec![960, 962], vec![960]], vec![]),
+            ] {
+                reads.push(tcp_readers(view).0.read(&from_port(1000)).await);
+            }
+            reads
+        });
+        let changed = PeerRead::Retry(
+            Refused::Changed(
+                "the processes that may hold the caller's socket changed while they were read",
+            )
+            .to_string(),
+        );
+        assert_eq!(
+            reads,
+            [
+                PeerRead::Retry(Refused::Changed("it went").to_string()),
+                changed.clone(),
+                changed,
             ]
         );
     }
