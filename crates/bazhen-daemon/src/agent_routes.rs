@@ -7,6 +7,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use bazhen_harness::BoxFuture;
 use bazhen_protocol::agents::{
     AgentCommandResponse, CloseAgentRequest, RespawnAgentRequest, SignalAgentRequest,
 };
@@ -147,12 +148,16 @@ pub(crate) async fn respawn(
     Path(reference): Path<String>,
     body: Bytes,
 ) -> Response {
+    let hooks = shared.clone();
     command(
         &shared,
         reference,
         &body,
         |agents, id, req: RespawnAgentRequest| async move {
-            agents.respawn(&id, &req, |_agent| Box::pin(async {})).await
+            let replaced = move |agent: AgentId| -> BoxFuture<'static, ()> {
+                Box::pin(async move { crate::hooks::replaced(&hooks, &agent).await })
+            };
+            agents.respawn(&id, &req, replaced).await
         },
     )
     .await
