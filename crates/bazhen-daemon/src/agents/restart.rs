@@ -307,7 +307,7 @@ impl Agents {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
 
     use bazhen_harness::LaunchError;
@@ -322,7 +322,7 @@ mod tests {
 
     /// An agent launched on `stub` asking for a light theme, which it draws dark, whose process
     /// has since exited; and its generation.
-    fn exited(stub: &StubHarness) -> (Fixture, AgentId, u64) {
+    pub(crate) fn exited(stub: &StubHarness) -> (Fixture, AgentId, u64) {
         let f = stubbed(stub);
         let launch = LaunchAgentRequest {
             theme: Some(TuiTheme::Light),
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
-    fn starts_an_exited_agent_again_on_its_session_at_the_next_generation() {
+    fn starts_an_exited_agent_again_on_its_session_at_the_next_generation_waiting_on_its_harness() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
         let (f, agent, generation) = exited(&stub);
@@ -457,7 +457,7 @@ mod tests {
                 vec![(agent.clone(), Some("agent.respawn_requested".to_owned()))],
                 vec![Some(TuiTheme::Dark)],
                 vec![(terminal.clone(), argv, generation + 1, Some(id.to_owned()))],
-                (AgentState::Running, Some(generation + 1), Some(terminal)),
+                (AgentState::Starting, Some(generation + 1), Some(terminal)),
             )
         );
     }

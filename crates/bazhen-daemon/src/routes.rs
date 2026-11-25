@@ -785,6 +785,60 @@ mod tests {
         );
     }
 
+    /// Respawns `agent` over the socket with `key` at `generation`.
+    fn respawn(shared: &Shared, agent: &str, key: &str, generation: u64) -> (u16, Value) {
+        let body = json!({ "idempotencyKey": key, "generation": generation });
+        send(
+            socket_router(shared.clone()),
+            post(&format!("/v1/agents/{agent}/respawn"), &[], &body),
+        )
+    }
+
+    #[test]
+    fn starts_an_exited_agent_again_answering_a_repeat_as_the_first_and_refusing_it_while_it_starts()
+     {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let (f, agent, generation) =
+            crate::agents::restart::tests::exited(&StubHarness::new(pull()).resuming());
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let before = f.types().len() as u64;
+        let id = agent.as_str();
+        let answered = json!({ "agentId": id, "eventIds": [before + 1, before + 2] });
+        assert_eq!(
+            [
+                respawn(&shared, id, "r-1", generation),
+                respawn(&shared, id, "r-1", generation),
+                respawn(&shared, id, "r-2", generation),
+            ],
+            [
+                (200, answered.clone()),
+                (200, answered),
+                (409, refused("conflict", &format!("agent {id} is starting"))),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_to_start_again_an_agent_whose_session_cant_resume() {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let (f, agent, generation) =
+            crate::agents::restart::tests::exited(&StubHarness::new(pull()));
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let id = agent.as_str();
+        assert_eq!(
+            respawn(&shared, id, "r-1", generation),
+            (
+                409,
+                refused(
+                    "not_resumable",
+                    &format!("agent {id} has no session to resume")
+                )
+            )
+        );
+    }
+
     fn http(pairing_required: bool) -> Router {
         let gate = Gate {
             allow: guard::allowlists(7900, None, &[]),
