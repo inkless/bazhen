@@ -3,10 +3,12 @@
 //! reads, each under its gate, one hook of an agent at a time.
 //!
 //! A hook fails open: whatever goes wrong, its harness goes on as it would, so every hook is
-//! answered quiet but one whose caller wasn't read in time, which is told to try again.
+//! answered quiet but one whose caller wasn't read in time, which is told to try again, and the
+//! agent's waiter, which is held until a newer one replaces it.
 
 mod activity;
 mod binding;
+mod waiters;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -17,7 +19,9 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use bazhen_harness::{Gate, HarnessId, IngestContext, Key, Observed, Origin, Report, SessionRef};
+use bazhen_harness::{
+    Gate, HarnessId, Held, IngestContext, Key, Observed, Origin, Reply, Report, SessionRef,
+};
 use bazhen_peer::Peer;
 use bazhen_protocol::agent_events::CompactedHook;
 use bazhen_protocol::agents::{Activity, ActivitySource};
@@ -30,6 +34,8 @@ use bazhen_protocol::mail::{
 use bazhen_store::{AgentBinding, Store};
 
 use self::activity::{Change, Tracker};
+use self::waiters::{Waiters, Waiting};
+use crate::accept::Holdable;
 use crate::callers::{Identity, Presented, identified, presented_by};
 use crate::peer::{PeerRead, PeerSocket, root_of};
 use crate::routes::{Shared, fail};
@@ -44,10 +50,11 @@ const CLIP_CHARS: usize = 80;
 
 const NO_SUCH_AGENT: &str = "the daemon runs no such agent";
 
-/// What the hooks keep between requests: what each agent is doing, and each agent's turn.
+/// What the hooks keep between requests: what each agent is doing, its waiter, and its turn.
 #[derive(Debug)]
 pub(crate) struct Hooks {
     activity: StdMutex<Tracker>,
+    waiters: Arc<Waiters>,
     /// One hook of an agent at a time, from its binding's read to its last fact.
     order: StdMutex<HashMap<AgentId, Arc<tokio::sync::Mutex<()>>>>,
     start_wait: Duration,
@@ -136,12 +143,17 @@ fn late(reason: &str) -> Response {
 pub(crate) async fn hook(
     State(shared): State<Shared>,
     socket: Option<Extension<PeerSocket>>,
+    holdable: Option<Extension<Holdable>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let read = peer_of(&shared, socket).await;
     match edge::<HookRequest>(&body) {
-        Ok(hook) => taken(&shared, &hook, presented_by(&headers).token, read).await,
+        Ok(hook) => {
+            let token = presented_by(&headers).token;
+            let holdable = holdable.map(|Extension(holdable)| holdable);
+            taken(&shared, &hook, token, read, holdable.as_ref()).await
+        }
         Err(refused) => {
             tracing::warn!("dropped a hook request it can't read: {}", clip(&refused.0));
             framed(&quiet())
@@ -154,6 +166,7 @@ async fn taken(
     hook: &HookRequest,
     token: Option<String>,
     read: Option<PeerRead>,
+    holdable: Option<&Holdable>,
 ) -> Response {
     let (event, said) = (hook.event.as_str(), hook.agent_id.as_str());
     let version = hook.protocol_version.as_str();
@@ -200,14 +213,21 @@ async fn taken(
             return framed(&quiet());
         }
     };
-    if let Err(why) = shared
+    match shared
         .hooks
         .ingest(shared, &agent, hook, peer.as_ref())
         .await
     {
-        dropped(event, said, &why);
+        Ok(Some(mut waiting)) => {
+            let _holding = holdable.map(Holdable::hold);
+            framed(&waiting.answered().await)
+        }
+        Ok(None) => framed(&quiet()),
+        Err(why) => {
+            dropped(event, said, &why);
+            framed(&quiet())
+        }
     }
-    framed(&quiet())
 }
 
 /// `POST /v1/hooks/ack`: the hook client wrote a reply's offered messages. An ack that can't be
@@ -267,6 +287,9 @@ async fn write<T: Send + 'static>(
 struct Passes {
     in_session: bool,
     owner: bool,
+    /// That the agent is starting, and the hook ran from the TUI its terminal started, so a sign
+    /// of life in it is the agent's harness up (`startedHere`).
+    started_here: bool,
 }
 
 impl Passes {
@@ -284,19 +307,21 @@ impl Hooks {
     pub(crate) fn waiting(start_wait: Duration) -> Self {
         Self {
             activity: StdMutex::new(Tracker::default()),
+            waiters: Arc::default(),
             order: StdMutex::new(HashMap::new()),
             start_wait,
         }
     }
 
-    /// Reads `hook` for `agent` through its harness, and applies what it says.
+    /// Reads `hook` for `agent` through its harness, and applies what it says. A waiter its gate
+    /// passes is registered, and comes back to be held.
     async fn ingest(
         &self,
         shared: &Shared,
         agent: &AgentId,
         hook: &HookRequest,
         peer: Option<&Peer>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<Waiting>, String> {
         let binding = binding_of(&shared.store, agent)
             .await?
             .ok_or(NO_SUCH_AGENT)?;
@@ -336,7 +361,13 @@ impl Hooks {
         // Only the agent's own session, and no subagent of it, can own the agent.
         let may_own = asks_owner && origin.subagent.is_none() && origin.session.is_some();
         let rebinds = may_own && starts && !binding::in_session(&binding, &origin);
-        if rebinds {
+        let readies = may_own
+            && binding.state == "starting"
+            && ingested
+                .observed
+                .iter()
+                .any(|keyed| owned(keyed.gate) && matches!(keyed.fact, Observed::Ready { .. }));
+        if rebinds || readies {
             self.started(&shared.store, agent).await?;
         }
         let turn = self.turn_of(agent);
@@ -353,8 +384,14 @@ impl Hooks {
                 };
                 Err(why)
             } else {
-                self.apply(shared, agent, hook, &origin, passes, &ingested.observed)
+                let waits = ingested.reply == Reply::Hold(Held::Waiter);
+                match self
+                    .apply(shared, agent, hook, &origin, passes, &ingested.observed)
                     .await
+                {
+                    Ok(()) => self.waits(shared, agent, waits).await,
+                    Err(why) => Err(why),
+                }
             }
         };
         self.release(agent, turn);
@@ -379,6 +416,7 @@ impl Hooks {
         let owner = may_own
             && (in_session
                 || (rebinds && rebind(&shared.store, agent, &binding, origin, peer).await?));
+        let started_here = owner && binding.state == "starting" && ran_from_pane(&binding, peer);
         if owner && let (Some(session), Some(path)) = (&origin.session, &origin.transcript) {
             let (agent, session, path) = (agent.clone(), session.id.clone(), path.clone());
             write(&shared.store, move |w| {
@@ -389,6 +427,7 @@ impl Hooks {
         Ok(Passes {
             in_session: in_session || owner,
             owner,
+            started_here,
         })
     }
 
@@ -410,6 +449,13 @@ impl Hooks {
                 continue;
             }
             let change = match &keyed.fact {
+                Observed::Ready { sign } => {
+                    if passes.started_here {
+                        let (agent, sign) = (agent.clone(), *sign);
+                        write(&shared.store, move |w| w.record_ready(&agent, sign)).await?;
+                    }
+                    continue;
+                }
                 Observed::Activity(doing) => Change::Doing(doing.clone()),
                 Observed::SubagentStarted { id } => Change::SubagentStarted(id.clone()),
                 Observed::SubagentStopped { id } => Change::SubagentStopped(id.clone()),
@@ -446,6 +492,24 @@ impl Hooks {
             write(&shared.store, move |w| w.record_activity(&agent, &activity)).await?;
         }
         Ok(())
+    }
+
+    /// Registers `agent`'s waiter, where the report holds one, but for an agent that has closed,
+    /// whose waiter is answered at once. A newer waiter answers the one it replaces, as does a
+    /// session that started over, whose start only a waiter reports.
+    async fn waits(
+        &self,
+        shared: &Shared,
+        agent: &AgentId,
+        waits: bool,
+    ) -> Result<Option<Waiting>, String> {
+        if !waits {
+            return Ok(None);
+        }
+        let closed = binding_of(&shared.store, agent)
+            .await?
+            .is_none_or(|binding| binding.state == "closed");
+        Ok((!closed).then(|| self.waiters.wait(agent)))
     }
 
     fn tracker(&self) -> std::sync::MutexGuard<'_, Tracker> {
@@ -499,6 +563,14 @@ impl Hooks {
     }
 }
 
+/// Whether the hook's caller ran from the TUI `binding`'s terminal started, on the line the
+/// kernel vouched for.
+fn ran_from_pane(binding: &AgentBinding, peer: Option<&Peer>) -> bool {
+    let root = binding.locator.as_deref().and_then(root_of);
+    peer.zip(root)
+        .is_some_and(|(peer, root)| binding::ran_by_pane(peer, root))
+}
+
 /// Moves `agent` to the session `origin` started, when its caller ran from the agent's terminal
 /// itself: a nested session's start never moves it.
 async fn rebind(
@@ -511,11 +583,7 @@ async fn rebind(
     let Some(session) = &origin.session else {
         return Ok(false);
     };
-    let root = binding.locator.as_deref().and_then(root_of);
-    let ran = peer
-        .zip(root)
-        .is_some_and(|(peer, root)| binding::ran_by_pane(peer, root));
-    if !ran {
+    if !ran_from_pane(binding, peer) {
         tracing::warn!(
             "agent {} stays on its session: SessionStart of {} wasn't its pane's",
             agent.as_str(),

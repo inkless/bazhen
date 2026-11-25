@@ -14,7 +14,7 @@ use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tokio_util::task::task_tracker::TaskTrackerToken;
@@ -60,6 +60,29 @@ pub(crate) const SOCKET: Limits = Limits {
 #[derive(Debug, Clone)]
 pub(crate) struct Held {
     _place: Arc<(OwnedSemaphorePermit, TaskTrackerToken)>,
+}
+
+/// Whether a connection's request is held open for its answer, as a waiter is. When the daemon
+/// stops, a held connection is dropped unanswered, so its client asks again of the next daemon;
+/// one that answered quiet would end its client instead.
+#[derive(Debug, Clone)]
+pub(crate) struct Holdable(Arc<watch::Sender<bool>>);
+
+/// A request held open, until it is dropped.
+#[derive(Debug)]
+pub(crate) struct Holding(Arc<watch::Sender<bool>>);
+
+impl Holdable {
+    pub(crate) fn hold(&self) -> Holding {
+        self.0.send_replace(true);
+        Holding(Arc::clone(&self.0))
+    }
+}
+
+impl Drop for Holding {
+    fn drop(&mut self) {
+        self.0.send_replace(false);
+    }
 }
 
 /// A connection's own socket, kept for its requests to read who is at the other end: a Unix
@@ -112,8 +135,11 @@ pub(crate) async fn serve_on<L>(
             _place: Arc::new((permit, tracker.token())),
         };
         let peer = io.peer();
+        let holding = Arc::new(watch::channel(false).0);
+        let holdable = Holdable(Arc::clone(&holding));
         let service = service_fn(move |mut request: Request<Incoming>| {
             request.extensions_mut().insert(held.clone());
+            request.extensions_mut().insert(holdable.clone());
             if let Some(peer) = &peer {
                 request.extensions_mut().insert(peer.clone());
             }
@@ -133,7 +159,12 @@ pub(crate) async fn serve_on<L>(
                 _ = connection.as_mut() => return,
                 () = stopping.cancelled() => connection.as_mut().graceful_shutdown(),
             }
-            let _ = connection.await;
+            let mut held = holding.subscribe();
+            tokio::select! {
+                _ = connection => {}
+                // Dropped, the connection ends with no answer.
+                _ = held.wait_for(|held| *held) => {}
+            }
         });
     }
     stopped();
