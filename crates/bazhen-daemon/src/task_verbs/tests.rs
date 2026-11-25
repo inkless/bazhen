@@ -1153,3 +1153,560 @@ fn refuses_to_unassign_on_no_task_or_a_path_that_names_none() {
         ]
     );
 }
+
+/// Asks, as `caller`, that `task` be finished as `body` says.
+fn finish_as(f: &Fixture, caller: Option<&AgentId>, task: &str, body: &Value) -> (u16, Value) {
+    let response = f.runtime.block_on(finish(
+        State(f.shared.clone()),
+        Some(Extension(Caller(caller.cloned()))),
+        Path(task.to_owned()),
+        Bytes::from(body.to_string()),
+    ));
+    let status = response.status().as_u16();
+    let bytes = f
+        .runtime
+        .block_on(axum::body::to_bytes(response.into_body(), 1 << 20))
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+/// A finish's body.
+fn finishing(key: &str, outcome: &str, note: Option<&str>, cascade: bool) -> Value {
+    let mut body = json!({ "idempotencyKey": key, "outcome": outcome, "cascade": cascade });
+    if let Some(note) = note {
+        body["note"] = json!(note);
+    }
+    body
+}
+
+/// An agent as mail names it, by the name the store has for it.
+fn agent_named(f: &Fixture, agent: &AgentId) -> String {
+    let agent = agent.clone();
+    sql(f, move |db| {
+        db.query_row(
+            "SELECT name FROM agent_sessions WHERE id = ?",
+            [agent.as_str()],
+            |row| row.get(0),
+        )
+    })
+}
+
+/// Each task's state and note, oldest first.
+fn finished(f: &Fixture) -> Vec<(String, Option<String>)> {
+    sql(f, |db| {
+        db.prepare("SELECT state, note FROM tasks ORDER BY created_event_id")?
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect()
+    })
+}
+
+const UNDER_WORKER: &str = "task_0190a1b2c3d47abc8def0123456789e1";
+const UNDER_WORKER_ASGN: &str = "asgn_0190a1b2c3d47abc8def0123456789e2";
+
+/// A subtask of `task` delegated by `worker` from its assignment `from`, with `agent` granted on
+/// it under that assignment: what a worker holds no role to make, and a role book edited since
+/// can leave.
+fn under_a_worker(f: &Fixture, task: &str, worker: &AgentId, from: &str, agent: &AgentId) {
+    let sql_text = format!(
+        "INSERT INTO tasks (id, title, brief, state, owner_agent_id, parent_task_id,
+           delegated_from, created_event_id, updated_event_id)
+           SELECT '{UNDER_WORKER}', 'Part of it', 'b', 'open', '{worker}', '{task}', '{from}',
+             max(id), max(id) FROM events;
+         INSERT INTO assignments (id, task_id, agent_session_id, role, parent_assignment_id,
+           state, created_event_id, updated_event_id)
+           SELECT '{UNDER_WORKER_ASGN}', '{UNDER_WORKER}', '{agent}', 'worker', '{from}',
+             'active', max(id), max(id) FROM events;"
+    );
+    sql(f, move |db| db.execute_batch(&sql_text));
+}
+
+#[test]
+fn finishes_a_task_ending_every_assignment_telling_who_gave_it_out_and_who_was_on_it_apart() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let lead = granted_id(&assign_as(&f, None, &task, "a", f.peer.as_str(), "lead"));
+    let worker = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        "w",
+        f.to.as_str(),
+        "worker",
+    ));
+    let before = bodies(&f).len();
+    let answer = finish_as(
+        &f,
+        None,
+        &task,
+        &finishing("f", "cancelled", Some("moot"), false),
+    );
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let named = named(&f, &task);
+    let ended = |id: &str| {
+        (
+            id.to_owned(),
+            "ended".to_owned(),
+            Some("task_finished".to_owned()),
+        )
+    };
+    assert_eq!(
+        (
+            finished(&f),
+            assignments(&f),
+            bodies(&f)[before..].to_vec(),
+            answer.1["eventIds"].as_array().unwrap().len(),
+            items(&f)
+        ),
+        (
+            vec![("cancelled".to_owned(), Some("moot".to_owned()))],
+            vec![ended(&lead), ended(&worker)],
+            vec![
+                finished_mail(&named, TaskOutcome::Cancelled, None, Some("moot")),
+                cancelled_mail(&named, None)
+            ],
+            3,
+            Vec::new()
+        )
+    );
+}
+
+#[test]
+fn completes_a_workers_part_telling_its_giver_and_those_under_it_and_lifting_what_it_strands() {
+    let f = fixture(pull());
+    let (_, task) = create_as(
+        &f,
+        Some(&f.peer),
+        &json!({ "idempotencyKey": "o", "title": "Fix the build", "brief": "b" }),
+    );
+    let task = task["taskId"].as_str().unwrap().to_owned();
+    let worker = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        "w",
+        f.to.as_str(),
+        "worker",
+    ));
+    under_a_worker(&f, &task, &f.to, &worker, &f.peer);
+    let before = bodies(&f).len();
+    let answer = finish_as(
+        &f,
+        Some(&f.to),
+        &task,
+        &finishing("f", "done", Some("tests pass"), false),
+    );
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let name = agent_named(&f, &f.to);
+    let by = Agent {
+        id: &f.to,
+        name: &name,
+    };
+    let sub = named(&f, UNDER_WORKER);
+    let ended = |id: &str, why: &str| (id.to_owned(), "ended".to_owned(), Some(why.to_owned()));
+    assert_eq!(
+        (
+            finished(&f)[0].0.clone(),
+            assignments(&f),
+            tasks_made(&f)[1].clone(),
+            bodies(&f)[before..].to_vec(),
+            items(&f)
+        ),
+        (
+            "open".to_owned(),
+            vec![
+                ended(&worker, "completed"),
+                ended(UNDER_WORKER_ASGN, "parent_ended"),
+            ],
+            (
+                UNDER_WORKER.to_owned(),
+                Some(f.peer.as_str().to_owned()),
+                None
+            ),
+            vec![
+                completed_mail(&named(&f, &task), by, Some("tests pass")),
+                line_ended_mail(&sub),
+                crate::task_mail::owned_mail(&sub),
+            ],
+            Vec::new()
+        )
+    );
+}
+
+#[test]
+fn raises_task_done_for_the_human_on_whoever_finished_its_task_or_part_and_on_no_other_finish() {
+    let f = fixture(pull());
+    // The human gave the worker its part: no agent to tell, so the human hears.
+    let part = made(&f, "c1", "b");
+    granted_id(&assign_as(&f, None, &part, "a1", f.to.as_str(), "worker"));
+    granted_id(&assign_as(&f, None, &part, "a2", f.peer.as_str(), "lead"));
+    assert_eq!(
+        finish_as(
+            &f,
+            Some(&f.to),
+            &part,
+            &finishing("f1", "done", None, false)
+        )
+        .0,
+        200
+    );
+    // An agent finished the human's task.
+    let task = made(&f, "c2", "b");
+    granted_id(&assign_as(&f, None, &task, "a3", f.peer.as_str(), "lead"));
+    let done = finish_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        &finishing("f2", "done", Some("all\nof it"), false),
+    );
+    assert_eq!(done.0, 200, "{}", done.1);
+    // None for the human's own finish, or an agent's on its own task.
+    let own = made(&f, "c3", "b");
+    assert_eq!(
+        finish_as(&f, None, &own, &finishing("f3", "done", None, false)).0,
+        200
+    );
+    let (_, mine) = create_as(
+        &f,
+        Some(&f.peer),
+        &json!({ "idempotencyKey": "o", "title": "T", "brief": "b" }),
+    );
+    let mine = mine["taskId"].as_str().unwrap().to_owned();
+    assert_eq!(
+        finish_as(
+            &f,
+            Some(&f.peer),
+            &mine,
+            &finishing("f4", "done", None, false)
+        )
+        .0,
+        200
+    );
+    let name = agent_named(&f, &f.to);
+    let worker = Agent {
+        id: &f.to,
+        name: &name,
+    };
+    assert_eq!(
+        items(&f),
+        vec![
+            (
+                f.to.as_str().to_owned(),
+                "task_done".to_owned(),
+                printable(&completed_mail(&named(&f, &part), worker, None)),
+                Some(part)
+            ),
+            (
+                f.peer.as_str().to_owned(),
+                "task_done".to_owned(),
+                done_summary(&named(&f, &task), Some("all\nof it")),
+                Some(task)
+            ),
+        ]
+    );
+}
+
+#[test]
+fn cancels_open_subtasks_with_their_parent_deepest_first_telling_each_as_its_own_finish() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    granted_id(&assign_as(&f, None, &task, "a1", f.peer.as_str(), "lead"));
+    let (_, sub) = create_as(&f, Some(&f.peer), &under("s", &task));
+    let sub = sub["taskId"].as_str().unwrap().to_owned();
+    granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &sub,
+        "a2",
+        f.to.as_str(),
+        "worker",
+    ));
+    let (_, deeper) = create_as(&f, Some(&f.peer), &under("d", &sub));
+    let deeper = deeper["taskId"].as_str().unwrap().to_owned();
+    let before = bodies(&f).len();
+    let answer = finish_as(&f, None, &task, &finishing("f", "done", None, true));
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let finishes: Vec<String> = sql(&f, |db| {
+        db.prepare("SELECT entity_id FROM events WHERE type = 'task.finished' ORDER BY id")?
+            .query_map((), |row| row.get(0))?
+            .collect()
+    });
+    let with_it = Some(CANCELLED_WITH_PARENT);
+    let cancelled = |id: &str| finished_mail(&named(&f, id), TaskOutcome::Cancelled, None, with_it);
+    let note = Some(CANCELLED_WITH_PARENT.to_owned());
+    assert_eq!(
+        (finishes, finished(&f), bodies(&f)[before..].to_vec()),
+        (
+            vec![deeper.clone(), sub.clone(), task.clone()],
+            vec![
+                ("done".to_owned(), None),
+                ("cancelled".to_owned(), note.clone()),
+                ("cancelled".to_owned(), note),
+            ],
+            vec![
+                cancelled(&deeper),
+                cancelled(&sub),
+                cancelled_mail(&named(&f, &sub), None),
+                finished_mail(&named(&f, &task), TaskOutcome::Done, None, None),
+            ]
+        )
+    );
+}
+
+#[test]
+fn refuses_what_it_cant_finish_recording_nothing() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    granted_id(&assign_as(&f, None, &task, "a1", f.peer.as_str(), "lead"));
+    let (_, sub) = create_as(&f, None, &under("s", &task));
+    let sub = sub["taskId"].as_str().unwrap().to_owned();
+    let gone = made(&f, "c2", "b");
+    assert_eq!(
+        finish_as(&f, None, &gone, &finishing("f0", "done", None, false)).0,
+        200
+    );
+    let (_, theirs) = create_as(
+        &f,
+        Some(&f.peer),
+        &json!({ "idempotencyKey": "o", "title": "T", "brief": "b" }),
+    );
+    let theirs = theirs["taskId"].as_str().unwrap().to_owned();
+    granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &theirs,
+        "a3",
+        f.to.as_str(),
+        "worker",
+    ));
+    // No one to tell, so only the finish's own check keeps its mail within the mailbox's limit.
+    let lonely = made(&f, "c3", "b");
+    let lines = vec!["a"; 10_000].join("\n");
+    let mail = length(&finished_mail(
+        &named(&f, &lonely),
+        TaskOutcome::Done,
+        None,
+        Some(&lines),
+    ));
+    let before = events(&f);
+    let long = "n".repeat(bazhen_protocol::edge::FINISH_NOTE_MAX_CHARS + 1);
+    assert_eq!(
+        [
+            refused(&finish_as(
+                &f,
+                Some(&f.to),
+                &theirs,
+                &finishing("f1", "cancelled", None, false)
+            )),
+            refused(&finish_as(
+                &f,
+                None,
+                &gone,
+                &finishing("f2", "done", None, false)
+            )),
+            refused(&finish_as(
+                &f,
+                None,
+                &task,
+                &finishing("f3", "done", None, false)
+            )),
+            refused(&finish_as(
+                &f,
+                Some(&f.peer),
+                &task,
+                &finishing("f4", "cancelled", None, true)
+            )),
+            refused(&finish_as(
+                &f,
+                Some(&f.peer),
+                &task,
+                &finishing("f5", "done", None, true)
+            )),
+            (
+                finish_as(
+                    &f,
+                    None,
+                    &task,
+                    &finishing("f6", "done", Some(&long), false)
+                )
+                .0,
+                String::new()
+            ),
+            refused(&finish_as(
+                &f,
+                None,
+                &lonely,
+                &finishing("f7", "done", Some(&lines), false)
+            )),
+        ],
+        [
+            (
+                403,
+                "only its owner, coordinator, lead or the human can mark the task cancelled"
+                    .to_owned()
+            ),
+            (409, "the task is already done".to_owned()),
+            (
+                409,
+                format!(
+                    "the task has open subtasks ({sub}): finish them first, or cancel them with it"
+                )
+            ),
+            (
+                403,
+                "the human's task: only the human cancels it".to_owned()
+            ),
+            (
+                403,
+                format!("subtasks {sub} are the human's: only the human cancels them")
+            ),
+            (400, String::new()),
+            (
+                400,
+                format!(
+                    "the message to the agent would be {mail} characters, over the {MAIL_LIMIT} \
+                     a message may be: shorten what you wrote"
+                )
+            ),
+        ]
+    );
+    assert_eq!(events(&f), before);
+}
+
+#[test]
+fn answers_a_replayed_finish_as_it_first_did_and_refuses_its_key_for_another() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    granted_id(&assign_as(&f, None, &task, "a", f.to.as_str(), "worker"));
+    let first = finish_as(&f, None, &task, &finishing("f", "done", None, false));
+    assert_eq!(first.0, 200, "{}", first.1);
+    let mail = bodies(&f).len();
+    assert_eq!(
+        [
+            finish_as(&f, None, &task, &finishing("f", "done", None, false)),
+            (
+                finish_as(&f, None, &task, &finishing("f", "cancelled", None, false)).0,
+                Value::Null
+            ),
+        ],
+        [first.clone(), (409, Value::Null)]
+    );
+    assert_eq!(bodies(&f).len(), mail);
+}
+
+#[test]
+fn finishes_nothing_when_a_lift_in_its_write_fails_and_hands_nothing_over() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    granted_id(&assign_as(&f, None, &task, "a", f.peer.as_str(), "lead"));
+    let worker = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        "w",
+        f.to.as_str(),
+        "worker",
+    ));
+    under_a_worker(&f, &task, &f.to, &worker, &f.peer);
+    f.hand_over();
+    sql(&f, |db| {
+        db.execute_batch(
+            "CREATE TEMP TRIGGER failing BEFORE INSERT ON events
+               WHEN NEW.type = 'task.owner_changed'
+             BEGIN SELECT RAISE(ABORT, 'an append this test fails'); END",
+        )
+    });
+    let before = (events(&f), assignments(&f));
+    let answer = finish_as(&f, Some(&f.to), &task, &finishing("f", "done", None, false));
+    assert_eq!(
+        (answer.0, (events(&f), assignments(&f)), f.hand_over().len()),
+        (500, before, 0)
+    );
+}
+
+#[test]
+fn refuses_an_agent_on_the_socket_that_cant_finish_where_the_human_can() {
+    let f = fixture(pull());
+    let (_, task) = create_as(
+        &f,
+        Some(&f.peer),
+        &json!({ "idempotencyKey": "o", "title": "T", "brief": "b" }),
+    );
+    let task = task["taskId"].as_str().unwrap().to_owned();
+    granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        "a",
+        f.to.as_str(),
+        "worker",
+    ));
+    let worker = f.to.clone();
+    sql(&f, move |db| {
+        db.execute(
+            "UPDATE agent_sessions SET token_hash = ? WHERE id = ?",
+            (crate::tokens::hash_of(PEER_TOKEN), worker.as_str()),
+        )
+    });
+    let ask = |key: &str, token: Option<&str>| {
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/v1/tasks/{task}/finish"))
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("bazhen-agent-token", token);
+        }
+        let body = finishing(key, "cancelled", None, false);
+        let request = request.body(Body::from(body.to_string())).unwrap();
+        let router = crate::routes::socket_router(f.shared.clone());
+        let response = f.runtime.block_on(router.oneshot(request)).unwrap();
+        let status = response.status().as_u16();
+        let bytes = f
+            .runtime
+            .block_on(axum::body::to_bytes(response.into_body(), 1 << 20))
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        (status, body["message"].as_str().map(str::to_owned))
+    };
+    assert_eq!(
+        [ask("k1", Some(PEER_TOKEN)), ask("k2", None)],
+        [
+            (
+                403,
+                Some(
+                    "only its owner, coordinator, lead or the human can mark the task cancelled"
+                        .to_owned()
+                )
+            ),
+            (200, None)
+        ]
+    );
+}
+
+#[test]
+fn refuses_to_finish_no_task_or_a_path_that_names_none() {
+    let f = fixture(pull());
+    let unknown = "task_0190a1b2c3d47abc8def0123456789ff";
+    assert_eq!(
+        [
+            refused(&finish_as(
+                &f,
+                None,
+                unknown,
+                &finishing("f1", "done", None, false)
+            )),
+            refused(&finish_as(
+                &f,
+                None,
+                "nonsense",
+                &finishing("f2", "done", None, false)
+            )),
+        ],
+        [
+            (404, format!("no task {unknown}")),
+            (404, "no task nonsense".to_owned())
+        ]
+    );
+}

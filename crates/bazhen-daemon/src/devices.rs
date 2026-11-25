@@ -181,10 +181,15 @@ pub(crate) fn device_name(requested: Option<&str>) -> String {
     }
 }
 
-/// `\p{Cc}`, `\p{Cf}` (as of Unicode 16), `\p{Zl}` and `\p{Zp}`.
+/// `\p{Cc}`, `\p{Cf}`, `\p{Zl}` and `\p{Zp}`.
 fn unprintable(c: char) -> bool {
+    control_or_format(c) || matches!(c, '\u{2028}' | '\u{2029}')
+}
+
+/// `\p{Cc}` and `\p{Cf}` (as of Unicode 16): control characters, and those that only shape the
+/// text around them.
+pub(crate) fn control_or_format(c: char) -> bool {
     c.is_control()
-        || matches!(c, '\u{2028}' | '\u{2029}')
         || matches!(c as u32,
             0xad | 0x600..=0x605 | 0x61c | 0x6dd | 0x70f | 0x890..=0x891 | 0x8e2 | 0x180e
             | 0x200b..=0x200f | 0x202a..=0x202e | 0x2060..=0x2064 | 0x2066..=0x206f | 0xfeff

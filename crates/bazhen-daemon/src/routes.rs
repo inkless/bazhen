@@ -427,6 +427,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/tasks/{id}/notes", post(crate::task_verbs::note))
         .route("/v1/tasks/{id}/assign", post(crate::task_verbs::assign))
         .route("/v1/tasks/{id}/unassign", post(crate::task_verbs::unassign))
+        .route("/v1/tasks/{id}/finish", post(crate::task_verbs::finish))
         .route("/v1/pairing/codes", post(paired::issue))
         .route("/v1/devices", get(paired::list))
         .route("/v1/devices/{id}/revoke", post(paired::revoke))
@@ -507,6 +508,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/tasks/{id}/notes", post(crate::task_verbs::note))
         .route("/tasks/{id}/assign", post(crate::task_verbs::assign))
         .route("/tasks/{id}/unassign", post(crate::task_verbs::unassign))
+        .route("/tasks/{id}/finish", post(crate::task_verbs::finish))
         .route("/pairing", post(paired::pair))
         .route("/notices/{id}/dismiss", post(paired::dismiss))
         .route("/agents", post(agent_routes::launch))
@@ -1809,6 +1811,31 @@ mod tests {
         assert_eq!(
             [(status, invalid["error"].clone()), {
                 let body = json!({ "idempotencyKey": "b", "assignmentId": asgn });
+                let (status, answer) = send(socket, post(path, &[], &body));
+                (status, answer["message"].clone())
+            },],
+            [
+                (400, json!("invalid_request")),
+                (503, json!("this daemon runs no terminals"))
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_a_finish_it_cant_read_or_run_without_agents() {
+        let (socket, _, _path, _finish) = over_a_store();
+        let path = "/v1/tasks/task_01900000000070008000000000000009/finish";
+        let (status, invalid) = send(
+            socket.clone(),
+            post(
+                path,
+                &[],
+                &json!({ "idempotencyKey": "a", "outcome": "finished" }),
+            ),
+        );
+        assert_eq!(
+            [(status, invalid["error"].clone()), {
+                let body = json!({ "idempotencyKey": "b", "outcome": "done" });
                 let (status, answer) = send(socket, post(path, &[], &body));
                 (status, answer["message"].clone())
             },],
