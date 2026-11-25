@@ -793,6 +793,69 @@ mod tests {
         );
     }
 
+    /// What a waiter `agent` held was answered with, after a close `ahead` of its generation over the
+    /// socket: its status, and the answer, where one came within `within`.
+    fn closed_holding(
+        ahead: u64,
+        within: std::time::Duration,
+    ) -> (
+        u16,
+        Result<bazhen_protocol::mail::HookReply, tokio::time::error::Elapsed>,
+    ) {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let f = crate::agents::tests::stubbed(&StubHarness::new(pull()));
+        let (agent, generation) = crate::testing::runtime().block_on(async {
+            let agent = f
+                .launch(crate::agents::tests::request("k-1"))
+                .await
+                .unwrap()
+                .agent_id;
+            let generation = f
+                .store
+                .reader()
+                .unwrap()
+                .reads()
+                .agent_terminal(agent.as_str())
+                .unwrap()
+                .and_then(|found| found.generation)
+                .unwrap();
+            (agent, generation)
+        });
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let mut waiting = shared.hooks.waiter(&agent);
+        let body = json!({ "idempotencyKey": "c-1", "generation": generation + ahead });
+        let (status, _) = send(
+            socket_router(shared),
+            post(&format!("/v1/agents/{agent}/close"), &[], &body),
+        );
+        let answered = crate::testing::runtime()
+            .block_on(async { tokio::time::timeout(within, waiting.answered()).await });
+        (status, answered)
+    }
+
+    #[test]
+    fn answers_the_waiter_a_closed_agent_held_quiet() {
+        assert_eq!(
+            closed_holding(0, std::time::Duration::from_secs(5)),
+            (
+                200,
+                Ok(bazhen_protocol::mail::HookReply {
+                    exit_code: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    offered: Vec::new(),
+                })
+            )
+        );
+    }
+
+    #[test]
+    fn keeps_the_waiter_of_an_agent_its_close_left_open() {
+        let (status, answered) = closed_holding(1, std::time::Duration::from_millis(200));
+        assert_eq!((status, answered.ok()), (409, None));
+    }
+
     /// Respawns `agent` over the socket with `key` at `generation`.
     fn respawn(shared: &Shared, agent: &str, key: &str, generation: u64) -> (u16, Value) {
         let body = json!({ "idempotencyKey": key, "generation": generation });
@@ -874,7 +937,7 @@ mod tests {
                 409,
                 refused(
                     "not_resumable",
-                    &format!("agent {id} has no session to resume")
+                    &format!("agent {id}'s harness can't resume its session")
                 )
             )
         );

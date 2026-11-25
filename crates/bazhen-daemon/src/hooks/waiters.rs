@@ -53,6 +53,14 @@ impl Waiters {
         }
     }
 
+    /// Answers `agent`'s waiter quiet and forgets it, as when the agent has closed.
+    pub(crate) fn release(&self, agent: &AgentId) {
+        if let Some(held) = self.held().remove(agent) {
+            // Its client may have gone already, with nothing left to answer.
+            let _ = held.answer.send(quiet());
+        }
+    }
+
     /// Whether `agent` holds a waiter, which mail sent to it would wake.
     #[cfg(test)]
     pub(crate) fn holds(&self, agent: &AgentId) -> bool {

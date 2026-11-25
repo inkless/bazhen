@@ -547,3 +547,38 @@ fn drops_a_held_waiters_connection_unanswered_when_the_daemon_stops() {
         (true, Some(Vec::new()))
     );
 }
+
+#[test]
+fn answers_the_waiter_a_hook_registers_after_the_close_it_read_the_agent_open_before() {
+    let f = fixture();
+    let (hooks, store, agent) = (&f.shared.hooks, &f.shared.store, f.agent.clone());
+    let answered = runtime().block_on(async {
+        // A hook has read the agent open, and holds its turn.
+        let turn = hooks.turn_of(&agent);
+        let held = turn.lock().await;
+        let closing = agent.clone();
+        write(store, move |w| {
+            w.connection().execute(
+                "UPDATE agent_sessions SET state = 'closed' WHERE id = ?",
+                [closing.as_str()],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let mut closed = std::pin::pin!(hooks.closed(store, &agent));
+        let ran = tokio::time::timeout(Duration::from_millis(50), &mut closed)
+            .await
+            .is_ok();
+        // The hook registers its waiter, as it read the agent open, then gives up its turn.
+        let mut waiting = hooks.waiters.wait(&agent);
+        drop(held);
+        if !ran {
+            closed.await;
+        }
+        tokio::time::timeout(Duration::from_secs(2), waiting.answered())
+            .await
+            .ok()
+    });
+    assert_eq!(answered, Some(quiet()));
+}

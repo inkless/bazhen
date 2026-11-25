@@ -518,6 +518,37 @@ impl Hooks {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Answers the waiter `agent` holds quiet, where its close is recorded, as a close answered
+    /// with its shells unsettled has. Taken in its turn, so a hook that read the agent as open
+    /// before the close registers its waiter first, to be answered here, and one after reads it
+    /// closed and holds none.
+    pub(crate) async fn closed(&self, store: &Writer, agent: &AgentId) {
+        let turn = self.turn_of(agent);
+        {
+            let _held = turn.lock().await;
+            match binding_of(store, agent).await {
+                Ok(binding)
+                    if binding
+                        .as_ref()
+                        .is_none_or(|binding| binding.state == "closed") =>
+                {
+                    self.waiters.release(agent);
+                }
+                Ok(_) => {}
+                Err(why) => tracing::warn!(
+                    "bazhen: agent {agent}'s waiter is kept: whether it closed can't be read: {why}"
+                ),
+            }
+        }
+        self.release(agent, turn);
+    }
+
+    /// A waiter for `agent`, as a hook that holds one registers it.
+    #[cfg(test)]
+    pub(crate) fn waiter(&self, agent: &AgentId) -> Waiting {
+        self.waiters.wait(agent)
+    }
+
     /// `agent`'s turn, which a hook holds from its binding's read to its last fact.
     fn turn_of(&self, agent: &AgentId) -> Arc<tokio::sync::Mutex<()>> {
         let mut order = self
