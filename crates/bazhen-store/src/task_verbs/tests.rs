@@ -258,6 +258,68 @@ fn ends_an_assignment_and_those_under_it_and_refuses_one_already_ended() {
 }
 
 #[test]
+fn finishes_a_task_with_its_note_ending_those_on_it_and_under_them_and_refuses_it_finished() {
+    let (_dir, mut store) = holding(&[
+        Row::Task(1, "open", None, None, None, 1),
+        Row::Asgn(1, 1, 1, "lead", None, None, 2),
+        Row::Task(2, "open", Some(1), Some(1), Some(1), 3),
+        Row::Asgn(2, 2, 2, "worker", Some(1), None, 4),
+    ]);
+    let event = store
+        .write(|w| {
+            w.finish_task(
+                Some(&agent(1)),
+                &task(1),
+                bazhen_protocol::tasks::TaskOutcome::Done,
+                Some("shipped"),
+            )
+        })
+        .unwrap();
+    let ends: Vec<(String, String)> = store
+        .reads()
+        .0
+        .prepare("SELECT state, end_reason FROM assignments ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let (state, note, actor): (String, Option<String>, String) = store
+        .reads()
+        .0
+        .query_row(
+            "SELECT t.state, t.note, e.actor FROM tasks t, events e WHERE t.id = ? AND e.id = ?",
+            (task(1).as_str(), i64::try_from(event).unwrap()),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (ends, state, note, actor),
+        (
+            vec![
+                ("ended".to_owned(), "task_finished".to_owned()),
+                ("ended".to_owned(), "parent_ended".to_owned()),
+            ],
+            "done".to_owned(),
+            Some("shipped".to_owned()),
+            agent(1).as_str().to_owned()
+        )
+    );
+    let again = store.write(|w| {
+        w.finish_task(
+            None,
+            &task(1),
+            bazhen_protocol::tasks::TaskOutcome::Cancelled,
+            None,
+        )
+    });
+    assert!(
+        matches!(again, Err(AppendError::Refused { .. })),
+        "{again:?}"
+    );
+}
+
+#[test]
 fn moves_a_task_to_another_owner_as_the_systems_doing() {
     let (_dir, mut store) = holding(&tasks());
     let event = store
