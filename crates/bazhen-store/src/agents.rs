@@ -4,9 +4,10 @@
 //! each start's token. And a rename, once per key.
 
 use bazhen_protocol::agent_events::AgentRenamed;
-use bazhen_protocol::agents::AgentCommandResponse;
+use bazhen_protocol::agents::{AgentCommandResponse, ExternalRef, HarnessId};
 use bazhen_protocol::ids::AgentId;
-use bazhen_protocol::names::name_base;
+use bazhen_protocol::names::{Role, name_base};
+use rusqlite::OptionalExtension as _;
 use serde::Serialize;
 
 use crate::Store;
@@ -15,6 +16,33 @@ use crate::events::{AppendError, NewEvent, OnceError, Reads, Writer};
 
 /// The states an agent has ended in, which no rename changes.
 const ENDED: [&str; 2] = ["closed", "failed"];
+
+/// What an agent was launched with, and the harness session it is on: what starting it again
+/// starts it with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLaunch {
+    pub harness: HarnessId,
+    pub project: String,
+    /// The directory it was launched in, as resolved.
+    pub cwd: String,
+    /// The name its harness was started with, for one that has a name.
+    pub name: Option<String>,
+    /// The role whose prompt it was launched with.
+    pub role: Option<Role>,
+    /// The hash of the prompt its last start gave it, when a start recorded one.
+    pub prompt_hash: Option<String>,
+    /// The compaction window every start gives it; none for the harness's own.
+    pub compact_window_tokens: Option<u32>,
+    /// The harness session it is bound to, once one is.
+    pub external_ref: Option<ExternalRef>,
+    /// Where that session keeps its conversation, as one of its hooks reported it.
+    pub transcript: Option<String>,
+}
+
+/// A stored word, as the enum it names.
+fn word<T: serde::de::DeserializeOwned>(text: String) -> Result<T, serde_json::Error> {
+    serde_json::from_value(serde_json::Value::String(text))
+}
 
 /// A terminal not yet ended that a runtime holds, as its row records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +109,58 @@ impl Reads<'_> {
     /// `SQLite`'s.
     pub fn agent_state(self, agent_id: &str) -> rusqlite::Result<Option<String>> {
         self.first("SELECT state FROM agent_sessions WHERE id = ?", agent_id)
+    }
+
+    /// What the agent was launched with and the session it is on, or `None` for an agent the
+    /// store doesn't know.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no launch could have written.
+    pub fn agent_launch(self, agent_id: &str) -> rusqlite::Result<Option<AgentLaunch>> {
+        self.0
+            .query_row(
+                "SELECT harness, project, cwd, name, role, prompt_hash, compact_window,
+                   external_ref, transcript
+                 FROM agent_sessions WHERE id = ?",
+                [agent_id],
+                |row| {
+                    let unreadable = |i: usize, what: &str| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            i,
+                            rusqlite::types::Type::Text,
+                            format!("{what} isn't one a launch records").into(),
+                        )
+                    };
+                    let compact: Option<i64> = row.get(6)?;
+                    let external_ref: Option<String> = row.get(7)?;
+                    Ok(AgentLaunch {
+                        harness: word(row.get(0)?).map_err(|_| unreadable(0, "its harness"))?,
+                        project: row.get(1)?,
+                        cwd: row.get(2)?,
+                        name: row.get(3)?,
+                        role: row
+                            .get::<_, Option<String>>(4)?
+                            .map(word)
+                            .transpose()
+                            .map_err(|_| unreadable(4, "its role"))?,
+                        prompt_hash: row.get(5)?,
+                        compact_window_tokens: compact
+                            .map(|n| {
+                                u32::try_from(n).map_err(|_| unreadable(6, "its compaction window"))
+                            })
+                            .transpose()?,
+                        external_ref: external_ref
+                            .map(|text| {
+                                serde_json::from_str(&text)
+                                    .map_err(|_| unreadable(7, "its harness session"))
+                            })
+                            .transpose()?,
+                        transcript: row.get(8)?,
+                    })
+                },
+            )
+            .optional()
     }
 
     /// The directory the agent was launched in, as resolved: where a shell linked to it opens.
@@ -435,6 +515,60 @@ mod tests {
                 (id, state, locator, kind, agent),
             )
             .unwrap();
+    }
+
+    #[test]
+    fn reads_what_an_agent_was_launched_with_and_the_session_its_on_and_none_for_an_unknown_one() {
+        use bazhen_protocol::agents::{ExternalRef, HarnessId};
+        use bazhen_protocol::names::Role;
+        let dir = TempDir::new("agents");
+        let store = store(&dir);
+        let session = r#"{"environmentId":"env_01900000000070008000000000000001","kind":"claude-session","id":"s-1"}"#;
+        seed(
+            &store,
+            &Agent {
+                external_ref: Some(session),
+                ..AGENT
+            },
+        );
+        seed(
+            &store,
+            &Agent {
+                id: "agent_02",
+                ..AGENT
+            },
+        );
+        store
+            .db
+            .execute_batch(
+                "UPDATE agent_sessions SET name = 'lead', role = 'reviewer', prompt_hash = 'h1',
+                   compact_window = 120000, transcript = '/c/s-1.jsonl' WHERE id = 'agent_01';
+                 UPDATE agent_sessions SET harness = 'emacs' WHERE id = 'agent_02';",
+            )
+            .unwrap();
+        let reads = store.reads();
+        assert_eq!(
+            (
+                reads.agent_launch("agent_01").ok(),
+                reads.agent_launch("agent_02").is_err(),
+                reads.agent_launch("agent_03").ok(),
+            ),
+            (
+                Some(Some(crate::AgentLaunch {
+                    harness: HarnessId::ClaudeCode,
+                    project: "p".to_owned(),
+                    cwd: "/".to_owned(),
+                    name: Some("lead".to_owned()),
+                    role: Some(Role::parse("reviewer").unwrap()),
+                    prompt_hash: Some("h1".to_owned()),
+                    compact_window_tokens: Some(120_000),
+                    external_ref: Some(serde_json::from_str::<ExternalRef>(session).unwrap()),
+                    transcript: Some("/c/s-1.jsonl".to_owned()),
+                })),
+                true,
+                Some(None),
+            )
+        );
     }
 
     #[test]

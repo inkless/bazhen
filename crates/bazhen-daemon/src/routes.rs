@@ -703,6 +703,73 @@ mod tests {
         );
     }
 
+    #[test]
+    fn closes_an_agent_with_its_linked_shells_keeping_those_it_names_standalone() {
+        use crate::shells::tests::beside;
+        use crate::testing::stub_harness::{StubHarness, pull};
+        use bazhen_protocol::shells::TerminalState;
+        let f = crate::agents::tests::stubbed(&StubHarness::new(pull()));
+        let shells = f.shells();
+        let (agent, generation, taken, kept) = crate::testing::runtime().block_on(async {
+            let agent = f
+                .launch(crate::agents::tests::request("k-1"))
+                .await
+                .unwrap()
+                .agent_id;
+            let generation = f
+                .store
+                .reader()
+                .unwrap()
+                .reads()
+                .agent_terminal(agent.as_str())
+                .unwrap()
+                .and_then(|found| found.generation)
+                .unwrap();
+            let [taken, kept] = [
+                shells.open(&beside("s-1", &agent), None).await,
+                shells.open(&beside("s-2", &agent), None).await,
+            ]
+            .map(|opened| opened.unwrap().terminal_id);
+            (agent, generation, taken, kept)
+        });
+        let mut shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        shared.shells = Some(shells);
+        let body = json!({
+            "idempotencyKey": "c-1",
+            "generation": generation,
+            "keepShells": [kept.as_str()],
+        });
+        let (status, _) = send(
+            socket_router(shared),
+            post(&format!("/v1/agents/{agent}/close"), &[], &body),
+        );
+        let reader = f.store.reader().unwrap();
+        let reads = reader.reads();
+        let linked: Vec<String> = reads
+            .linked_shells(agent.as_str())
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id.as_str().to_owned())
+            .collect();
+        assert_eq!(
+            (
+                status,
+                reads.agent_state(agent.as_str()).unwrap(),
+                reads.terminal_state(taken.as_str()).unwrap(),
+                reads.terminal_state(kept.as_str()).unwrap(),
+                linked,
+            ),
+            (
+                200,
+                Some("closed".to_owned()),
+                Some(TerminalState::Closed),
+                Some(TerminalState::Running),
+                Vec::new(),
+            )
+        );
+    }
+
     fn http(pairing_required: bool) -> Router {
         let gate = Gate {
             allow: guard::allowlists(7900, None, &[]),

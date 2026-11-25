@@ -819,6 +819,30 @@ mod tests {
     }
 
     #[test]
+    fn starts_the_agents_and_shells_on_one_set_of_turns() {
+        let home = TempDir::new("turns");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let shared = runtime().block_on(async {
+            let started = shells(
+                &startup,
+                &store,
+                faked(&startup),
+                &TaskTracker::new(),
+                &CancellationToken::new(),
+                roles(),
+            )
+            .await;
+            started
+                .ok()
+                .map(|running| Arc::ptr_eq(running.agents.turns(), running.shells.turns()))
+        });
+        assert_eq!(shared, Some(true));
+        writer.finish();
+    }
+
+    #[test]
     fn tells_shells_to_report_only_with_retyping_on_the_hook_built_and_the_snippets_written() {
         use bazhen_protocol::shells::ShellReport;
         let h = crate::shells::tests::setup_with(100, Some(crate::shells::tests::integration()));

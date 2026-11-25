@@ -323,6 +323,12 @@ impl Agents {
         view::AgentsView::new(Arc::clone(self), self.deps.roles.current())
     }
 
+    /// The turns its commands take, which the shells share.
+    #[cfg(test)]
+    pub(crate) fn turns(&self) -> &Arc<crate::turns::Turns> {
+        &self.deps.turns
+    }
+
     pub(crate) fn harnesses(&self) -> &Harnesses {
         &self.deps.harnesses
     }
@@ -835,6 +841,22 @@ pub(crate) mod tests {
                 .unwrap()
                 .as_str()
                 .to_owned()
+        }
+
+        /// Shells on the agents' own runtime, store, budget and turns, as serve.rs builds them.
+        pub(crate) fn shells(&self) -> Arc<crate::shells::Shells> {
+            Arc::new(crate::shells::Shells::new(crate::shells::ShellsDeps {
+                turns: Arc::clone(&self.agents.deps.turns),
+                store: self.store.clone(),
+                terminals: Arc::new(self.fake.clone()),
+                budget: Arc::clone(&self.agents.deps.budget),
+                home: self.home.clone(),
+                shell: "/bin/zsh".to_owned(),
+                socket: "/run/b.sock".to_owned(),
+                tracker: TaskTracker::new(),
+                stop: tokio_util::sync::CancellationToken::new(),
+                integration: None,
+            }))
         }
 
         /// The fake runtime the agents run on.
