@@ -51,6 +51,46 @@ function reading(example: Awaited<ReturnType<typeof examplesOf>>[number]) {
 
 const examples = (await Promise.all(messages.map(examplesOf))).flat();
 
+/** Where `cargo xtask schema` writes the planted corpus, which `moon run :rust-schema-check` runs. */
+const CORPUS = new URL("../../../target/protocol-shadow/corpus.json", import.meta.url);
+
+/**
+ * A planted case: a fixture example of a message broken or stretched at one field, and whether the
+ * Rust protocol's schema takes it, as the keyword it was planted by says.
+ */
+const Case = z.object({
+  schema: z.string(),
+  path: z.string(),
+  kind: z.string(),
+  body: z.string(),
+  expect: z.enum(["accept", "refuse"]),
+});
+type Case = z.infer<typeof Case>;
+
+/** corpus.json, as a JSON module, or why it won't load. */
+async function corpus(): Promise<Case[]> {
+  try {
+    const loaded: unknown = await import(CORPUS.href, { with: { type: "json" } });
+    return z.object({ default: z.array(Case).min(1) }).parse(loaded).default;
+  } catch (error) {
+    throw new Error(`${CORPUS.pathname} won't load: run \`scripts/xtask.sh schema\``, {
+      cause: error,
+    });
+  }
+}
+
+/** Where the generated schema judges a case otherwise than its keyword says, or has no schema. */
+function misjudged(c: Case): string[] {
+  const schema = schemaOf(c.schema);
+  if (schema === undefined) return [`${c.schema}: no generated schema`];
+  const takes = schema.safeParse(JSON.parse(c.body)).success;
+  return takes === (c.expect === "accept")
+    ? []
+    : [`${c.schema}${c.path} (${c.kind}): ${takes ? "takes" : "refuses"} ${c.body}`];
+}
+
+const cases = await corpus();
+
 describe("the zod the Rust protocol writes", () => {
   it("has a schema for each message the protocol's fixtures hold", () => {
     expect(messages.length).toBeGreaterThan(0);
@@ -61,5 +101,10 @@ describe("the zod the Rust protocol writes", () => {
     expect(examples.length).toBeGreaterThan(messages.length);
     const readings = examples.map(reading);
     expect(readings.map((r) => r.read)).toEqual(readings.map((r) => r.expected));
+  });
+
+  it("judges each planted case as the Rust protocol's schema says", () => {
+    expect(new Set(cases.map((c) => c.expect))).toEqual(new Set(["accept", "refuse"]));
+    expect(cases.flatMap(misjudged)).toEqual([]);
   });
 });
