@@ -360,7 +360,6 @@ pub(crate) async fn create(shared: Shared, task: NewTask, assign: Option<TaskGra
     }
 }
 
-/// Refuses an agent caller that is gone, or was never there (`checkCaller`).
 /// The unassign as the TypeScript daemon keeps it under its key.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -516,6 +515,7 @@ pub(crate) fn tell(
     Ok(event_ids)
 }
 
+/// Refuses an agent caller that is gone, or was never there (`checkCaller`).
 fn check_caller(reads: Reads<'_>, caller: Option<&AgentId>) -> Result<(), Granting> {
     let Some(caller) = caller else {
         return Ok(());
