@@ -238,6 +238,31 @@ fn records_no_assignment_when_its_agent_takes_no_mail() {
 }
 
 #[test]
+fn hands_an_assignments_mail_over_only_once_its_write_commits() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    // The answer the key keeps is the write's last step: refusing it fails the write after the
+    // grant has queued its mail.
+    f.runtime
+        .block_on(f.shared.store.run(|store| {
+            store.write(|w| {
+                w.connection().execute_batch(
+                    "CREATE TEMP TRIGGER later AFTER INSERT ON main.idempotency_keys \
+                     BEGIN SELECT RAISE(ABORT, 'a later step fails'); END",
+                )?;
+                Ok::<_, AppendError>(())
+            })
+        }))
+        .unwrap()
+        .unwrap();
+    let answer = assign_as(&f, None, &task, "a", f.to.as_str(), "worker");
+    assert_eq!(
+        (answer.0, granted(&f), bodies(&f).len(), f.hand_over().len()),
+        (500, 0, 0, 0)
+    );
+}
+
+#[test]
 fn refuses_a_brief_too_long_for_the_mailbox_recording_nothing() {
     let f = fixture(pull());
     let task = made(&f, "c", &"x".repeat(19_950));
