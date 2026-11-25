@@ -10,7 +10,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bazhen_holder_proto::body::{
     Argv, Count, Env, ErrorCode, ExitStatus, Generation, HelloReply, HistoryLines, NonEmpty,
@@ -129,6 +129,14 @@ pub struct InventoryEntry {
     pub terminal: HolderRef,
     pub tags: TerminalTags,
     pub exit: Option<ExitStatus>,
+}
+
+/// What `listing` finds: each terminal a holder answers for, and each whose holder's socket is
+/// there but couldn't be read.
+#[derive(Debug, Clone)]
+pub struct Listing {
+    pub entries: Vec<InventoryEntry>,
+    pub unreadable: Vec<TerminalId>,
 }
 
 /// What holds a terminal's foreground: its leader's command, whether that is the terminal's own
@@ -1060,6 +1068,24 @@ impl HolderRuntime {
         }
     }
 
+    /// Every terminal a holder answers for, each watched from now on, with the terminals whose
+    /// holders couldn't be read named rather than failing the rest: for a reader that concludes
+    /// on each terminal by what was read of that terminal alone.
+    ///
+    /// # Errors
+    ///
+    /// When the holders can't be listed.
+    pub async fn listing(&self) -> Result<Listing, RuntimeError> {
+        let (entries, unreadable) = self.listed().await?;
+        Ok(Listing {
+            entries,
+            unreadable: unreadable
+                .iter()
+                .filter_map(|socket| terminal_at(socket))
+                .collect(),
+        })
+    }
+
     /// Watches `terminal` from now on, unless its holder is watched already.
     ///
     /// # Errors
@@ -1085,6 +1111,21 @@ impl HolderRuntime {
         };
         let (_, reached) = reach(socket, self.client_options(), false, self.options.request).await;
         matches!(reached, Reached::Not(Unreached::None { .. })) && !self.recorded_runs(terminal)
+    }
+
+    /// Nothing answers at the socket `terminal_id`'s holder would bind, and twice the holder's
+    /// hello deadline has passed since `since`, a moment after which nothing could start one for
+    /// it: a holder started before then has bound its socket by now, or never will. For a
+    /// terminal whose start recorded nothing to prove gone by.
+    pub async fn unstarted(&self, terminal_id: &TerminalId, since: Instant) -> bool {
+        if since.elapsed() < self.options.hello.saturating_mul(2) {
+            return false;
+        }
+        let Ok(socket) = self.socket_of(terminal_id) else {
+            return false;
+        };
+        let (_, reached) = reach(socket, self.client_options(), false, self.options.request).await;
+        matches!(reached, Reached::Not(Unreached::None { .. }))
     }
 
     /// A stream of the terminal, on a connection of its own, attached on its holder's snapshot:

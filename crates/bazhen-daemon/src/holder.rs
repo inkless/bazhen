@@ -30,8 +30,8 @@ use tokio::sync::broadcast;
 use crate::config::RuntimeKind;
 use crate::failure::detail;
 use crate::terminals::{
-    Answer, Compatibility, Event, Events, Exit, FoundShell, Kind, NewTerminal, Recorded, Restart,
-    ShellForeground, TerminalError, Terminals,
+    AgentsFound, Answer, Compatibility, Event, Events, Exit, FoundAgent, FoundShell, Kind,
+    NewTerminal, Recorded, Restart, ShellForeground, TerminalError, Terminals,
 };
 
 /// The size a terminal starts at, until a view attaches and sets its own (`DEFAULT_SIZE`).
@@ -450,12 +450,13 @@ impl Events for HolderTold {
                     Ok(RuntimeEvent::Exited {
                         terminal_id,
                         generation,
-                        ..
+                        status,
                     }) => {
                         let found = self.ended(&terminal_id, generation);
                         return Some(Event::Exited(Exit {
                             terminal_id,
                             generation: generation.get(),
+                            status,
                             found,
                         }));
                     }
@@ -642,6 +643,44 @@ impl Terminals for Holder {
                     TerminalTags::Agent { .. } => None,
                 })
                 .collect())
+        })
+    }
+
+    fn unstarted<'a>(
+        &'a self,
+        terminal: &'a TerminalId,
+        since: std::time::Instant,
+    ) -> Answer<'a, bool> {
+        Box::pin(self.runtime.unstarted(terminal, since))
+    }
+
+    fn agents(&self) -> Answer<'_, Result<AgentsFound, TerminalError>> {
+        Box::pin(async move {
+            let listing = self
+                .runtime
+                .listing()
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            let found = listing
+                .entries
+                .into_iter()
+                .filter_map(|entry| match entry.tags {
+                    TerminalTags::Agent {
+                        agent_id,
+                        harness_session,
+                    } => Some(FoundAgent {
+                        terminal: recorded_of(&entry.terminal)?,
+                        exit: entry.exit,
+                        agent_id,
+                        harness_session,
+                    }),
+                    TerminalTags::Shell { .. } => None,
+                })
+                .collect();
+            Ok(AgentsFound {
+                found,
+                unreadable: listing.unreadable,
+            })
         })
     }
 
@@ -1134,6 +1173,7 @@ mod tests {
             Event::Exited(Exit {
                 terminal_id: holder_at(0).terminal_id,
                 generation,
+                status: bazhen_holder_proto::body::ExitStatus::Unknown,
                 found,
             })
         };
@@ -1165,6 +1205,7 @@ mod tests {
             [Event::Exited(Exit {
                 terminal_id: holder_at(0).terminal_id,
                 generation: 1,
+                status: bazhen_holder_proto::body::ExitStatus::Unknown,
                 found: recorded_of(&holder_at(1)),
             })]
         );
@@ -1207,11 +1248,14 @@ mod tests {
         use tokio_util::sync::CancellationToken;
         use tokio_util::task::TaskTracker;
 
+        use bazhen_holder_proto::body::{ExitCode, ExitStatus};
+        use bazhen_protocol::ids::{AgentId, TerminalId};
+
         use super::super::Holder;
         use crate::budget::Budget;
         use crate::budget::tests::{Machine, roomy};
         use crate::shells::{Shells, ShellsDeps};
-        use crate::terminals::Terminals;
+        use crate::terminals::{Kind, NewTerminal, Terminals};
         use crate::testing::{TempDir, runtime};
         use crate::writer::{Thread, Writer};
 
@@ -1226,15 +1270,21 @@ mod tests {
                 .unwrap_or_else(|| panic!("no bazhen-holder above {}", exe.display()))
         }
 
-        /// Shells running `shell` on real holders under `dir`, none contained.
-        fn shells(dir: &TempDir, shell: &str) -> (Arc<Shells>, Writer, Thread) {
+        /// Real holders under `dir`, none contained, and where they bind.
+        fn holders(dir: &TempDir) -> (Arc<dyn Terminals>, HolderRoot) {
             let uid = rustix::process::getuid().as_raw();
             let root = HolderRoot::of(&dir.path().join("run"), uid);
             root.make_private(uid).unwrap();
-            let mut options = RuntimeOptions::new(root);
+            let mut options = RuntimeOptions::new(root.clone());
             options.binary = Some(holder_binary());
             let terminals: Arc<dyn Terminals> =
                 Arc::new(Holder::new(HolderRuntime::new(options), 1000));
+            (terminals, root)
+        }
+
+        /// Shells running `shell` on real holders under `dir`, none contained.
+        fn shells(dir: &TempDir, shell: &str) -> (Arc<Shells>, Writer, Thread) {
+            let (terminals, _) = holders(dir);
             let path = dir.path().join("bazhen.db");
             let (store, thread) =
                 crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
@@ -1306,6 +1356,114 @@ mod tests {
             });
             drop(shells);
             thread.finish();
+        }
+
+        /// An agent's terminal at `terminal`, running `script` in `sh`.
+        fn agent_terminal(terminal: &str, agent: &AgentId, script: &str) -> NewTerminal {
+            NewTerminal {
+                terminal_id: TerminalId::parse(terminal).unwrap(),
+                kind: Kind::Agent {
+                    agent_id: agent.clone(),
+                    harness_session: Some(r#"{"kind":"claude-session","id":"s"}"#.to_owned()),
+                },
+                argv: vec!["/bin/sh".to_owned(), "-c".to_owned(), script.to_owned()],
+                cwd: "/".to_owned(),
+                env: std::collections::BTreeMap::new(),
+                theme: None,
+                generation: 0,
+            }
+        }
+
+        #[test]
+        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+        fn lists_agents_holders_a_daemon_before_it_left_by_terminal_with_how_each_ended_and_names_one_it_cant_read()
+         {
+            bazhen_test_signal::require_sandbox().unwrap();
+            let dir = TempDir::new("real-agents");
+            let agent = AgentId::parse("agent_0190a1b2c3d47abc8def0123456789a1").unwrap();
+            let (ended, runs, wedged) = (
+                "term_0190a1b2c3d47abc8def0123456789aa",
+                "term_0190a1b2c3d47abc8def0123456789bb",
+                "term_0190a1b2c3d47abc8def0123456789cc",
+            );
+            runtime().block_on(async {
+                let (before, root) = holders(&dir);
+                before
+                    .create(agent_terminal(ended, &agent, "exit 3"))
+                    .await
+                    .unwrap();
+                before
+                    .create(agent_terminal(runs, &agent, "sleep 60"))
+                    .await
+                    .unwrap();
+                before.shutdown().await;
+                drop(before);
+                // Accepts, and never says hello.
+                let socket =
+                    root.socket(&bazhen_holder_proto::body::TerminalId::new(wedged).unwrap());
+                let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+                let (terminals, _) = holders(&dir);
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let read = loop {
+                    let read = terminals.agents().await.unwrap();
+                    let exited = read.found.iter().any(|found| {
+                        found.terminal.terminal_id.as_str() == ended && found.exit.is_some()
+                    });
+                    if exited || Instant::now() > deadline {
+                        break read;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                };
+                drop(listener);
+                std::fs::remove_file(&socket).unwrap();
+                let mut closed = Vec::new();
+                for found in &read.found {
+                    closed.push(terminals.close(&found.terminal).await);
+                }
+                let left = terminals.holders().await;
+                terminals.shutdown().await;
+                let mut found: Vec<_> = read
+                    .found
+                    .iter()
+                    .map(|found| {
+                        (
+                            found.terminal.terminal_id.as_str().to_owned(),
+                            found.exit.clone(),
+                            found.agent_id.clone(),
+                            found.harness_session.clone(),
+                        )
+                    })
+                    .collect();
+                found.sort_by(|a, b| a.0.cmp(&b.0));
+                let session = Some(r#"{"kind":"claude-session","id":"s"}"#.to_owned());
+                assert_eq!(
+                    (
+                        found,
+                        read.unreadable
+                            .iter()
+                            .map(|t| t.as_str().to_owned())
+                            .collect::<Vec<_>>(),
+                        closed.iter().all(Result::is_ok),
+                        left.map(|holders| holders.len()),
+                    ),
+                    (
+                        vec![
+                            (
+                                ended.to_owned(),
+                                Some(ExitStatus::Exited {
+                                    code: ExitCode::new(3).unwrap()
+                                }),
+                                agent.clone(),
+                                session.clone(),
+                            ),
+                            (runs.to_owned(), None, agent.clone(), session),
+                        ],
+                        vec![wedged.to_owned()],
+                        true,
+                        Ok(0),
+                    )
+                );
+            });
         }
 
         #[test]

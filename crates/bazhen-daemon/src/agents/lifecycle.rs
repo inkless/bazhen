@@ -3,7 +3,7 @@
 //! command accepts, at the generation it names (`Lifecycle.command`).
 
 use bazhen_core::agent::agent_commands;
-use bazhen_holder_proto::body::Exited;
+use bazhen_holder_proto::body::{ExitStatus, Exited};
 use bazhen_protocol::agent_events::{AgentExited, AgentSignalled};
 use bazhen_protocol::agents::{
     AgentCommand, AgentCommandResponse, AgentState, CloseAgentRequest, SignalAgentRequest,
@@ -103,19 +103,27 @@ pub(crate) fn told(
     terminal: &TerminalId,
     exit: &Exited,
 ) -> Result<(), AppendError> {
+    exited_at(w, terminal, exit.generation.get(), &exit.status)
+}
+
+/// `told`, of the process of `generation` that ended as `status` says, however the daemon heard.
+pub(crate) fn exited_at(
+    w: &StoreWriter<'_>,
+    terminal: &TerminalId,
+    generation: u64,
+    status: &ExitStatus,
+) -> Result<(), AppendError> {
     let Some(found) = w.reads().agent_of_terminal(terminal.as_str())? else {
         return Ok(());
     };
-    if found.generation != Some(exit.generation.get())
-        || !found.terminal_state.is_some_and(takes_exit)
-    {
+    if found.generation != Some(generation) || !found.terminal_state.is_some_and(takes_exit) {
         return Ok(());
     }
     w.append(&NewEvent::Agent {
         agent: found.agent_id,
         actor: Actor::System.as_str().to_owned(),
         change: AgentChange::Exited(AgentExited {
-            exit: crate::stream::hub::exit_status(&exit.status),
+            exit: crate::stream::hub::exit_status(status),
         }),
     })?;
     Ok(())
@@ -329,7 +337,6 @@ impl Agents {
         if found.state != AgentState::Lost {
             self.end(&found, force).await?;
         }
-        self.deps.tokens.forget(&agent);
         let closed = agent.clone();
         let response = self
             .finish(&agent, key, &request, move |w| {
@@ -338,8 +345,16 @@ impl Agents {
                 Ok(ids)
             })
             .await?;
-        self.deps.prompts.remove(&agent);
+        self.after_closed(&agent).await;
         Ok(response)
+    }
+
+    /// What follows an agent's close once it is recorded, whatever recorded it: no process runs
+    /// on its token or reads its prompt again, and the waiter it held is answered.
+    pub(super) async fn after_closed(&self, agent: &AgentId) {
+        self.deps.tokens.forget(agent);
+        self.deps.prompts.remove(agent);
+        self.deps.hooks.closed(&self.deps.store, agent).await;
     }
 
     /// Closes the agent's terminal. Force records closed only what a close could not end: a

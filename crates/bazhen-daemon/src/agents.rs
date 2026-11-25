@@ -5,11 +5,13 @@
 
 pub(crate) mod lifecycle;
 pub(crate) mod prompts;
+pub(crate) mod reconcile;
 pub(crate) mod restart;
 pub(crate) mod transcript;
 pub(crate) mod view;
+pub(crate) mod watch;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -254,6 +256,9 @@ pub(crate) struct AgentsDeps {
     /// Commands on agents and shells, one at a time by what each acts on, shared with the
     /// shells: a linked shell opens in its agent's turn.
     pub(crate) turns: Arc<Turns>,
+    /// What the agents' hooks keep between requests, which the routes take as theirs: a closed
+    /// agent's waiter is answered here, whatever closed it.
+    pub(crate) hooks: Arc<crate::hooks::Hooks>,
 }
 
 /// What a launch records of itself before anything starts.
@@ -294,11 +299,22 @@ struct Started {
 #[derive(Debug)]
 pub(crate) struct Agents {
     deps: AgentsDeps,
+    /// When this daemon started: nothing it didn't start could start a terminal after it.
+    started: std::time::Instant,
+    /// When each create this daemon asked for and saw refused returned: nothing starts the
+    /// terminal after it, though a holder it spawned may yet answer.
+    refused: std::sync::Mutex<HashMap<TerminalId, std::time::Instant>>,
+    unreconciled: std::sync::Mutex<reconcile::Unreconciled>,
 }
 
 impl Agents {
     pub(crate) fn new(deps: AgentsDeps) -> Self {
-        Self { deps }
+        Self {
+            deps,
+            started: std::time::Instant::now(),
+            refused: std::sync::Mutex::default(),
+            unreconciled: std::sync::Mutex::default(),
+        }
     }
 
     /// Runs `command` to its end on the daemon's tasks, whether or not its caller waits for the
@@ -605,7 +621,7 @@ impl Agents {
         };
         let (argv, env) = self.process_of(&agent, &token.file, argv, env);
         let spec = NewTerminal {
-            terminal_id: terminal,
+            terminal_id: terminal.clone(),
             kind: Kind::Agent {
                 agent_id: agent,
                 harness_session,
@@ -626,10 +642,36 @@ impl Agents {
                 })
             }
             Err(err) => {
+                self.refused(terminal);
                 token.abandoned().await;
                 Err(err.to_string())
             }
         }
+    }
+
+    /// What the agents' hooks keep between requests: a closed agent's waiter is answered there.
+    #[cfg(test)]
+    pub(crate) fn hooks(&self) -> &Arc<crate::hooks::Hooks> {
+        &self.deps.hooks
+    }
+
+    /// Notes that the create of `terminal` returned refused, now.
+    fn refused(&self, terminal: TerminalId) {
+        self.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(terminal, std::time::Instant::now());
+    }
+
+    /// A moment after which nothing could start `terminal`: when its create returned refused, or
+    /// else when this daemon started, for one a daemon before it asked for.
+    fn unstartable_since(&self, terminal: &TerminalId) -> std::time::Instant {
+        self.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(terminal)
+            .copied()
+            .unwrap_or(self.started)
     }
 
     /// The argv and variables an agent's process starts with, each start: its harness's, with
@@ -795,6 +837,7 @@ pub(crate) mod tests {
             Box::new(|_| {}),
         );
         let uid = rustix::process::getuid().as_raw();
+        let hooks = Arc::new(crate::hooks::Hooks::default());
         let agents = Agents::new(AgentsDeps {
             store: store.clone(),
             terminals: Arc::new(fake.clone()),
@@ -809,6 +852,7 @@ pub(crate) mod tests {
             prompts: prompts::daemon_prompts(&run, uid),
             login_shell: setup.login_shell,
             turns: Arc::default(),
+            hooks: Arc::clone(&hooks),
         });
         Fixture {
             agents: Arc::new(agents),
@@ -888,6 +932,28 @@ pub(crate) mod tests {
                 tracker: TaskTracker::new(),
                 stop: tokio_util::sync::CancellationToken::new(),
                 integration: None,
+            }))
+        }
+
+        /// Agents over the same store, runtime, token files and hooks, as a daemon started again
+        /// builds them: no command's turn held, and nothing a start remembered.
+        pub(crate) fn restarted(&self) -> Arc<Agents> {
+            let deps = &self.agents.deps;
+            Arc::new(Agents::new(AgentsDeps {
+                store: deps.store.clone(),
+                terminals: Arc::clone(&deps.terminals),
+                budget: Arc::clone(&deps.budget),
+                home: deps.home.clone(),
+                socket: deps.socket.clone(),
+                tracker: TaskTracker::new(),
+                roles: Arc::clone(&deps.roles),
+                harnesses: Harnesses::new(Vec::new()),
+                hook_built: deps.hook_built,
+                tokens: deps.tokens.clone(),
+                prompts: deps.prompts.clone(),
+                login_shell: None,
+                turns: Arc::default(),
+                hooks: Arc::clone(&deps.hooks),
             }))
         }
 

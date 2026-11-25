@@ -27,7 +27,6 @@ use crate::guard;
 use crate::lock::{Claim, Lock, claim};
 use crate::private_dir::ensure_private_dir;
 use crate::probe::{probe, silence};
-use crate::roles::Roles;
 use crate::routes::{self, Gate, Reason, Shared, Stop};
 use crate::runner::{self, Runner};
 use crate::shells::integration::{Integration, install_shell_integration};
@@ -242,14 +241,16 @@ async fn shell_integration(
 
 /// The shells over `runner`'s terminals, with this machine's environment registered, the shells
 /// kept from before reconciled with what runs, what the budget says of those still open, and the
-/// events told from before any of it. A wait on a restarted shell's prompt ends at `stop`.
+/// events told from before any of it. A wait on a restarted shell's prompt ends at `stop`. The
+/// agents beside them read `shared`'s roles and keep their hooks in `shared`'s, which the routes
+/// serve.
 async fn shells(
     startup: &Startup,
     store: &Writer,
     runner: Runner,
     tracker: &TaskTracker,
     stop: &CancellationToken,
-    roles: Arc<Roles>,
+    shared: &Shared,
 ) -> Result<Running, Refused> {
     let events = runner.terminals.events();
     store
@@ -270,13 +271,14 @@ async fn shells(
         home: startup.home.clone(),
         socket: startup.paths.socket.clone(),
         tracker: tracker.clone(),
-        roles,
+        roles: Arc::clone(&shared.roles),
         harnesses: runner.harnesses,
         hook_built: runner.hook.is_some(),
         tokens: AgentTokens::new(run.join("agents"), startup.uid, store.clone()),
         prompts: daemon_prompts(run, startup.uid),
         login_shell: startup.settings.config.login_shell.clone(),
         turns: Arc::clone(&turns),
+        hooks: Arc::clone(&shared.hooks),
     });
     let shells = Shells::new(ShellsDeps {
         turns,
@@ -293,6 +295,10 @@ async fn shells(
     if let Err(err) = shells.reconcile().await {
         return Err(unread_shells(startup, store, &err).await);
     }
+    agents
+        .reconcile()
+        .await
+        .map_err(|err| Refused::Said(format!("bazhen can't read its agents: {err}")))?;
     if let Err(err) = shells.sweep_restarts().await {
         tracing::warn!(
             "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
@@ -307,18 +313,18 @@ async fn shells(
         tracing::warn!("bazhen: {warning}");
     }
     Ok(Running {
-        shells: Arc::new(shells),
-        agents: Arc::new(agents),
-        events,
+        watched: Watched {
+            shells: Arc::new(shells),
+            agents: Arc::new(agents),
+            events,
+        },
         doctor: runner.doctor,
     })
 }
 
 /// What runs on the daemon's terminals, as its start sets it up.
 struct Running {
-    shells: Arc<Shells>,
-    agents: Arc<Agents>,
-    events: Box<dyn Events>,
+    watched: Watched,
     doctor: Settled,
 }
 
@@ -343,6 +349,54 @@ async fn unread_shells(startup: &Startup, store: &Writer, err: &ShellError) -> R
         ),
         None => format!("bazhen can't read its shells: {err}"),
     })
+}
+
+/// What the runtime runs, and what it tells of its terminals, as `follow` watches them.
+struct Watched {
+    shells: Arc<Shells>,
+    agents: Arc<Agents>,
+    events: Box<dyn Events>,
+}
+
+/// Runs the shells' tick every `tick`, and follows what the runtime tells of its terminals, until
+/// `stop`: each event goes to the shells and to the agents, each on `tracker`, and each takes only
+/// its own terminals' events.
+async fn follow(
+    Watched {
+        shells,
+        agents,
+        mut events,
+    }: Watched,
+    tick: Duration,
+    tracker: TaskTracker,
+    stop: CancellationToken,
+) {
+    tracker.spawn(every_tick(Arc::clone(&shells), tick, stop.clone()));
+    tracker.spawn(agents_tick(Arc::clone(&agents), tick, stop.clone()));
+    while let Some(Some(event)) = stop.run_until_cancelled(events.next()).await {
+        agents.heard(event.clone(), &tracker);
+        shells.heard(event, &tracker, &stop);
+    }
+}
+
+/// Tries again the agents the start's reconcile couldn't settle, `every` so often, until `stop`,
+/// on a task of its own, so a slow holder of the shells' doesn't hold up the agents', nor theirs
+/// the shells'. Each agent's settle is whole on its own: one a stop cuts short is tried again by
+/// the next start.
+async fn agents_tick(agents: Arc<Agents>, every: Duration, stop: CancellationToken) {
+    while stop
+        .run_until_cancelled(tokio::time::sleep(every))
+        .await
+        .is_some()
+    {
+        if stop
+            .run_until_cancelled(agents.reconcile_again())
+            .await
+            .is_none()
+        {
+            return;
+        }
+    }
 }
 
 /// Tries again the shells the start's reconcile couldn't settle, then reads the running shells'
@@ -438,16 +492,16 @@ async fn listen(
     let mut watching = None;
     if let Some(runner) = runner {
         let streaming = runner.streams.clone();
-        let roles = Arc::clone(&shared.roles);
-        let running = shells(startup, &store, runner, &tracker, stop.token(), roles).await?;
-        let bundle = running.doctor.bundle.clone();
+        let Running { watched, doctor } =
+            shells(startup, &store, runner, &tracker, stop.token(), &shared).await?;
+        let bundle = doctor.bundle.clone();
         shared = shared
-            .with_shells(Arc::clone(&running.shells), running.doctor)
-            .with_agents(running.agents)
+            .with_shells(Arc::clone(&watched.shells), doctor)
+            .with_agents(Arc::clone(&watched.agents))
             .with_web(bundle);
         shared.streams =
-            crate::stream::on_holders(&store, streaming, &running.shells, &tracker, stop.token());
-        watching = Some((running.shells, running.events));
+            crate::stream::on_holders(&store, streaming, &watched.shells, &tracker, stop.token());
+        watching = Some(watched);
     }
     crate::hooks::mailbox::requeue_in_flight(&store).await;
     let gate = Gate {
@@ -483,15 +537,15 @@ async fn listen(
 
     let token = stop.token();
     let retiring = token.clone();
-    let ending = watching.as_ref().map(|(running, _)| Arc::clone(running));
+    let ending = watching.as_ref().map(|watched| Arc::clone(&watched.shells));
     let streams = shared.streams.clone();
-    if let Some((running, events)) = watching {
-        tracker.spawn(every_tick(
-            Arc::clone(&running),
+    if let Some(watched) = watching {
+        tracker.spawn(follow(
+            watched,
             serving.tick,
+            tracker.clone(),
             token.clone(),
         ));
-        tracker.spawn(running.watch(events, tracker.clone(), token.clone()));
     }
     tracker.spawn(crate::paired::close_lapsed_every_minute(
         shared.clone(),
@@ -621,6 +675,52 @@ mod tests {
     use super::*;
     use crate::testing::{TempDir, runtime};
 
+    /// An agent's process that exits while no view watches its terminal is recorded exited, as
+    /// the runtime tells it, while the shells take only their own terminals' events.
+    #[test]
+    fn hands_an_agents_exit_no_view_heard_to_the_agents() {
+        use crate::terminals::Terminals as _;
+        let f = crate::agents::tests::setup_with(crate::agents::tests::Setup::default());
+        let agent = runtime()
+            .block_on(f.launch(crate::agents::tests::request("k-1")))
+            .unwrap()
+            .agent_id;
+        let terminal = f.terminal_of(agent.as_str());
+        let tracker = TaskTracker::new();
+        let stop = CancellationToken::new();
+        let state = |f: &crate::agents::tests::Fixture| {
+            f.store
+                .reader()
+                .unwrap()
+                .reads()
+                .agent_state(agent.as_str())
+                .unwrap()
+        };
+        let seen = runtime().block_on(async {
+            tracker.spawn(follow(
+                Watched {
+                    shells: f.shells(),
+                    agents: Arc::clone(&f.agents),
+                    events: f.fake().events(),
+                },
+                Duration::from_secs(3600),
+                tracker.clone(),
+                stop.clone(),
+            ));
+            tokio::task::yield_now().await;
+            f.fake().exit(&terminal);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while state(&f).as_deref() != Some("exited") && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            stop.cancel();
+            tracker.close();
+            tracker.wait().await;
+            state(&f)
+        });
+        assert_eq!(seen.as_deref(), Some("exited"));
+    }
+
     fn startup(home: &Path) -> Startup {
         let at = |name: &str| home.join(name).to_string_lossy().into_owned();
         let paths = Paths {
@@ -711,8 +811,9 @@ mod tests {
     }
 
     /// Terminals on a fake runtime, three at most, with no holder installed.
-    fn roles() -> Arc<Roles> {
-        Arc::new(Roles::new(None))
+    /// What the routes serve, which the agents are built on.
+    fn served(store: &Writer) -> Shared {
+        Shared::new(&"f".repeat(64), Stop::default(), store.clone())
     }
 
     fn faked(startup: &Startup) -> Runner {
@@ -799,7 +900,7 @@ mod tests {
                 runner,
                 &TaskTracker::new(),
                 &stop,
-                roles(),
+                &served(&store),
             )
             .await
             else {
@@ -832,12 +933,38 @@ mod tests {
                 faked(&startup),
                 &TaskTracker::new(),
                 &CancellationToken::new(),
-                roles(),
+                &served(&store),
             )
             .await;
             started
                 .ok()
-                .map(|running| Arc::ptr_eq(running.agents.turns(), running.shells.turns()))
+                .map(|running| running.watched)
+                .map(|watched| Arc::ptr_eq(watched.agents.turns(), watched.shells.turns()))
+        });
+        assert_eq!(shared, Some(true));
+        writer.finish();
+    }
+
+    #[test]
+    fn builds_the_agents_on_the_hooks_the_routes_serve() {
+        let home = TempDir::new("hooks");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let served = served(&store);
+        let shared = runtime().block_on(async {
+            let started = shells(
+                &startup,
+                &store,
+                faked(&startup),
+                &TaskTracker::new(),
+                &CancellationToken::new(),
+                &served,
+            )
+            .await;
+            started
+                .ok()
+                .map(|running| Arc::ptr_eq(running.watched.agents.hooks(), &served.hooks))
         });
         assert_eq!(shared, Some(true));
         writer.finish();
@@ -950,7 +1077,7 @@ mod tests {
                 runner,
                 &TaskTracker::new(),
                 &CancellationToken::new(),
-                roles(),
+                &served(&store),
             )
             .await
             {

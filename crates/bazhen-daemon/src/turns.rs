@@ -28,6 +28,22 @@ impl Turns {
             held: Some(lock.lock_owned().await),
         }
     }
+
+    /// `id`'s turn, if no command holds it now: for what would rather come back later than wait.
+    pub(crate) fn try_take(&self, id: &str) -> Option<Turn<'_>> {
+        let lock = {
+            let mut turns = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            Arc::clone(turns.entry(id.to_owned()).or_default())
+        };
+        let held = lock.try_lock_owned().ok();
+        // Built even when refused, so its drop forgets an entry no one else holds or waits for.
+        let turn = Turn {
+            turns: self,
+            id: id.to_owned(),
+            held,
+        };
+        turn.held.is_some().then_some(turn)
+    }
 }
 
 #[cfg(test)]
