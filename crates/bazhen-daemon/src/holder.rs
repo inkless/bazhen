@@ -380,7 +380,7 @@ impl Holder {
                 argv: spec.argv,
                 cwd: spec.cwd,
                 env: spec.env,
-                generation: Generation::new(0).map_err(invalid)?,
+                generation: Generation::new(spec.generation).map_err(invalid)?,
                 theme: spec.theme.map(theme),
             },
         })

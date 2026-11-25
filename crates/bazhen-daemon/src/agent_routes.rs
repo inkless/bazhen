@@ -9,7 +9,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bazhen_harness::BoxFuture;
 use bazhen_protocol::agents::{
-    AgentCommandResponse, CloseAgentRequest, RespawnAgentRequest, SignalAgentRequest,
+    AgentCommandResponse, CloseAgentRequest, RelaunchAgentRequest, RespawnAgentRequest,
+    SignalAgentRequest,
 };
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::{EdgeCheck, Refused, edge};
@@ -158,6 +159,28 @@ pub(crate) async fn respawn(
                 Box::pin(async move { crate::hooks::replaced(&hooks, &agent).await })
             };
             agents.respawn(&id, &req, replaced).await
+        },
+    )
+    .await
+}
+
+/// `POST /v1/agents/:id/relaunch`, over either listener: the lost agent started again on a new
+/// terminal, once its hooks have let go of the process it replaces.
+pub(crate) async fn relaunch(
+    State(shared): State<Shared>,
+    Path(reference): Path<String>,
+    body: Bytes,
+) -> Response {
+    let hooks = shared.clone();
+    command(
+        &shared,
+        reference,
+        &body,
+        |agents, id, req: RelaunchAgentRequest| async move {
+            let replaced = move |agent: AgentId| -> BoxFuture<'static, ()> {
+                Box::pin(async move { crate::hooks::replaced(&hooks, &agent).await })
+            };
+            agents.relaunch(&id, &req, replaced).await
         },
     )
     .await

@@ -812,6 +812,7 @@ impl Shells {
             cwd: opening.cwd,
             env,
             theme: opening.theme,
+            generation: 0,
         }
     }
 

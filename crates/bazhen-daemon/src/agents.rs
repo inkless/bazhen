@@ -605,6 +605,7 @@ impl Agents {
             cwd,
             env,
             theme,
+            generation: 0,
         };
         match self.deps.terminals.create(spec).await {
             Ok(locator) => {

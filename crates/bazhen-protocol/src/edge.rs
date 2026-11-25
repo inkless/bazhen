@@ -9,7 +9,9 @@
 
 use serde::de::DeserializeOwned;
 
-use crate::agents::{CloseAgentRequest, RespawnAgentRequest, SignalAgentRequest};
+use crate::agents::{
+    CloseAgentRequest, RelaunchAgentRequest, RespawnAgentRequest, SignalAgentRequest,
+};
 use crate::ids::TaskId;
 use crate::mail::{HookAck, HookRequest};
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
@@ -212,6 +214,14 @@ impl EdgeCheck for CloseAgentRequest {
 }
 
 impl EdgeCheck for SignalAgentRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        generation(self.generation)?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for RelaunchAgentRequest {
     fn checked(self) -> Result<Self, Refused> {
         keyed(&self.idempotency_key)?;
         generation(self.generation)?;
