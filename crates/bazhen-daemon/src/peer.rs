@@ -312,6 +312,7 @@ mod tests {
             codex_server: None,
             environment_withheld: false,
             ancestors: ancestors.iter().copied().map(pid).collect(),
+            names: vec![String::new(); ancestors.len()],
         }
     }
 
