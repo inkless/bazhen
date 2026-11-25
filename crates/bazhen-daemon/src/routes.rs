@@ -203,6 +203,20 @@ pub(crate) fn fail(status: StatusCode, error: ErrorCode, message: &str) -> Respo
     (status, axum::Json(body)).into_response()
 }
 
+/// A 503 that asks the caller to try again in a second: its process changed while it was read, or
+/// wasn't read in time, and soon it may be.
+pub(crate) fn retry_soon(reason: &str) -> Response {
+    let mut response = fail(
+        StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::Unavailable,
+        reason,
+    );
+    response
+        .headers_mut()
+        .insert("retry-after", axum::http::HeaderValue::from_static("1"));
+    response
+}
+
 /// This machine's name, as `os.hostname()` gives it.
 fn hostname() -> String {
     rustix::system::uname()

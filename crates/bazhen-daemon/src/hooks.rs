@@ -21,7 +21,7 @@ use std::time::Duration;
 use axum::Extension;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use bazhen_harness::{
     Gate, HarnessActivity, HarnessId, Held, IngestContext, Key, Observed, Origin, Reply, Report,
@@ -30,7 +30,6 @@ use bazhen_harness::{
 use bazhen_peer::Peer;
 use bazhen_protocol::agent_events::{CompactedHook, ReadySign};
 use bazhen_protocol::agents::{Activity, ActivitySource};
-use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
 use bazhen_protocol::ids::{AgentId, AttentionId};
 use bazhen_protocol::mail::{
@@ -49,7 +48,7 @@ use crate::accept::Holdable;
 use crate::callers::{Identity, Presented, identified, presented_by};
 use crate::peer::{PeerRead, PeerSocket, root_of};
 use crate::readiness::Signs;
-use crate::routes::{Shared, fail};
+use crate::routes::{Shared, retry_soon};
 use crate::writer::Writer;
 
 /// How long a hook that may move its agent to a new session waits for the agent's start to be
@@ -150,14 +149,6 @@ async fn peer_of(shared: &Shared, socket: Option<Extension<PeerSocket>>) -> Opti
     }
 }
 
-fn late(reason: &str) -> Response {
-    fail(
-        StatusCode::SERVICE_UNAVAILABLE,
-        ErrorCode::Unavailable,
-        reason,
-    )
-}
-
 /// `POST /v1/hooks`: a hook a harness ran, from the hook client.
 pub(crate) async fn hook(
     State(shared): State<Shared>,
@@ -217,7 +208,7 @@ async fn taken(
             } else {
                 dropped(event, said, &reason);
             }
-            return late(&reason);
+            return retry_soon(&reason);
         }
         Ok(Identity::Refused { reason, .. }) => {
             dropped(event, said, &format!("refused, {reason}"));
@@ -305,7 +296,7 @@ async fn acked(
         Ok(Identity::Refused {
             reason,
             retry: true,
-        }) => late(&reason),
+        }) => retry_soon(&reason),
         _ => answered(),
     }
 }

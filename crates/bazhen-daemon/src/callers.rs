@@ -2,7 +2,7 @@
 //! request presents and whose process made it; and the guard that holds each route to its callers.
 
 use axum::extract::{OriginalUri, Request, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use bazhen_protocol::daemon::ErrorCode;
@@ -10,7 +10,7 @@ use bazhen_protocol::ids::AgentId;
 
 use crate::paired::{ThroughForwarder, Viewer};
 use crate::peer::{self, PeerRead, PeerSocket, Reading, Via};
-use crate::routes::{Shared, fail, header, internal};
+use crate::routes::{Shared, fail, header, internal, retry_soon};
 use crate::writer::Writer;
 
 /// Who called, as the guard found it: an agent, or the human as none.
@@ -407,18 +407,7 @@ pub(crate) async fn guard(
         Identity::Refused {
             reason,
             retry: true,
-        } => {
-            // The caller changed while it was read, or wasn't read in time: soon, it may be.
-            let mut response = fail(
-                StatusCode::SERVICE_UNAVAILABLE,
-                ErrorCode::Unavailable,
-                &reason,
-            );
-            response
-                .headers_mut()
-                .insert("retry-after", HeaderValue::from_static("1"));
-            return response;
-        }
+        } => return retry_soon(&reason),
         Identity::Refused { reason, .. } => (None, Some(reason)),
         Identity::Human => (Some(None), None),
         Identity::Agent(agent) => (Some(Some(agent)), None),
