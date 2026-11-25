@@ -8,9 +8,11 @@ tests/api/events.test.ts
 tests/api/external-origin.test.ts
 tests/api/keys.test.ts
 tests/api/pairing.test.ts
+tests/api/prompt.test.ts
 tests/api/runtimes.test.ts
 tests/api/shells.test.ts
 tests/api/snapshot.test.ts
 tests/api/socket-stream.test.ts
+tests/api/stream.test.ts
 tests/api/streams.test.ts
 tests/api/web-page.test.ts
