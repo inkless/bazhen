@@ -1194,6 +1194,60 @@ mod tests {
         }
 
         #[test]
+        fn notes_the_humans_task_for_the_human_and_refuses_an_agent_off_it() {
+            let (_dir, store, thread) = daemon();
+            let token = ("bazhen-agent-token", TOKEN);
+            let json = ("content-type", "application/json");
+            let made = ask(
+                router(&store, None),
+                "POST",
+                "/v1/tasks",
+                &[json],
+                Some(json!({ "idempotencyKey": "k", "title": "T", "brief": "b" })),
+                false,
+            );
+            assert_eq!(made.0, 200, "{}", made.1);
+            let id = made.1["taskId"].as_str().unwrap().to_owned();
+            let note = |headers: &[(&str, &str)], key: &str, text: &str, on: &str| {
+                let (status, body) = ask(
+                    router(&store, None),
+                    "POST",
+                    &format!("/v1/tasks/{on}/notes"),
+                    headers,
+                    Some(json!({ "idempotencyKey": key, "text": text })),
+                    false,
+                );
+                (status, body["error"].as_str().map(str::to_owned))
+            };
+            let unknown = "task_0190a1b2c3d47abc8def0123456789ff";
+            assert_eq!(
+                [
+                    note(&[token, json], "k1", "mine now", &id),
+                    note(&[json], "k2", "tests pass", &id),
+                    note(&[json], "k3", "  ", &id),
+                    note(&[json], "k4", "x", unknown),
+                ],
+                [
+                    (403, Some("forbidden".to_owned())),
+                    (200, None),
+                    (400, Some("invalid_request".to_owned())),
+                    (404, Some("not_found".to_owned())),
+                ]
+            );
+            let shown = ask(
+                router(&store, None),
+                "GET",
+                &format!("/v1/tasks/{id}"),
+                &[],
+                None,
+                false,
+            );
+            assert_eq!(shown.1["notes"][0]["text"], "tests pass");
+            assert_eq!(shown.1["notes"][0]["agentId"], serde_json::Value::Null);
+            thread.finish();
+        }
+
+        #[test]
         fn takes_a_caller_under_an_agents_pane_as_that_agent_though_it_presents_nothing() {
             let (_dir, store, thread) = daemon();
             let under = |peer| {

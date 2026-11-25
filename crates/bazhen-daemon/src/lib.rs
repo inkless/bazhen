@@ -43,6 +43,7 @@ mod session;
 mod shell_routes;
 mod shells;
 mod stream;
+mod task_verbs;
 pub mod tasks;
 mod terminal_routes;
 mod terminals;
