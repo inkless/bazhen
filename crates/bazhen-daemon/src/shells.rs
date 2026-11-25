@@ -29,7 +29,8 @@ use bazhen_protocol::ids::{AgentId, DeviceId, TerminalId};
 use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::{
     BusyShell, CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
-    ShellCommand, ShellCommandResponse, TerminalState, TuiTheme, shell_commands,
+    ShellCommand, ShellCommandResponse, TerminalState, TuiTheme, UnlinkShellRequest,
+    shell_commands,
 };
 use bazhen_store::{
     Actor, AppendError, NewEvent, OnceError, ShellRow, TerminalChange, Writer as StoreWriter,
@@ -1124,6 +1125,48 @@ impl Shells {
         self.finish(&found.id, key, &request, last).await
     }
 
+    /// Makes a running linked shell standalone: its terminal stops naming the agent, then the
+    /// store records it unlinked, so its agent's close no longer takes it.
+    pub(crate) async fn unlink(
+        &self,
+        id: &str,
+        req: &UnlinkShellRequest,
+    ) -> Result<ShellCommandResponse, ShellError> {
+        let request = asked("unlink", Some(id), req)?;
+        let key = &req.idempotency_key;
+        let _turn = self.deps.turns.take(id).await;
+        let found = match self
+            .begin(
+                id,
+                key,
+                &request,
+                Some(req.generation),
+                offers(ShellCommand::Unlink),
+            )
+            .await?
+        {
+            Begun::Prior(prior) => return Ok(prior),
+            Begun::Found(found) => found,
+        };
+        self.untag(&found).await?;
+        let last = Last::Record {
+            done: Vec::new(),
+            then: vec![TerminalChange::Unlinked],
+        };
+        self.finish(&found.id, key, &request, last).await
+    }
+
+    /// Takes the agent's tag off the shell's terminal where it runs.
+    async fn untag(&self, found: &ShellRow) -> Result<(), ShellError> {
+        let terminal = recorded(found)
+            .ok_or_else(|| ShellError::Conflict("the shell has no terminal recorded".to_owned()))?;
+        self.deps
+            .terminals
+            .unlink(&terminal)
+            .await
+            .map_err(|cause| from_runtime(found.id.as_str(), cause))
+    }
+
     /// Follows what the runtime tells of each shell, until `stop`: one whose process ends is
     /// closed, a process started in one outside the daemon is adopted, and one whose holder is
     /// lost is marked so. Each is handled on `tracker`, so one slow close holds up no other.
@@ -1768,6 +1811,98 @@ pub(crate) mod tests {
             opened.unwrap();
             assert_eq!(listed_while_held, 0);
             assert_eq!(h.recoverable(), 1);
+        });
+    }
+
+    fn unlinking(key: &str, generation: u64) -> UnlinkShellRequest {
+        UnlinkShellRequest {
+            idempotency_key: key.to_owned(),
+            generation,
+        }
+    }
+
+    #[test]
+    fn unlinks_a_running_linked_shell_where_it_runs_then_in_the_store_once_for_a_repeated_key() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let live = agent(1);
+            h.launched(&live, "/repo/live").await;
+            let id = h
+                .shells
+                .open(&beside("o", &live), None)
+                .await
+                .unwrap()
+                .terminal_id;
+            let id = id.as_str();
+            let generation = h.shell(id).unwrap().generation;
+            let first = h
+                .shells
+                .unlink(id, &unlinking("u", generation))
+                .await
+                .unwrap();
+            let again = h
+                .shells
+                .unlink(id, &unlinking("u", generation))
+                .await
+                .unwrap();
+            let linked = h
+                .store
+                .reader()
+                .unwrap()
+                .reads()
+                .linked_shells(live.as_str())
+                .unwrap();
+            let unlinked = h.fake.state.lock().unwrap().unlinked.clone();
+            assert_eq!(
+                (
+                    first.event_ids.len(),
+                    again == first,
+                    unlinked,
+                    h.fake.spec_of(id).kind,
+                    h.shell(id).unwrap().linked_agent_id,
+                    linked.len(),
+                ),
+                (
+                    1,
+                    true,
+                    vec![id.to_owned()],
+                    Kind::Shell {
+                        linked_agent_id: None
+                    },
+                    None,
+                    0,
+                )
+            );
+        });
+    }
+
+    #[test]
+    fn refuses_to_unlink_a_standalone_shell_or_one_at_another_generation_untagging_nothing() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let live = agent(1);
+            h.launched(&live, "/repo/live").await;
+            let standalone = h.open("s").await.unwrap();
+            let linked = h
+                .shells
+                .open(&beside("o", &live), None)
+                .await
+                .unwrap()
+                .terminal_id;
+            let linked = linked.as_str();
+            let generation = h.shell(linked).unwrap().generation;
+            let alone = h.shells.unlink(&standalone, &unlinking("a", 0)).await;
+            let stale = h
+                .shells
+                .unlink(linked, &unlinking("b", generation + 1))
+                .await;
+            assert!(matches!(alone, Err(ShellError::Conflict(_))), "{alone:?}");
+            assert!(matches!(stale, Err(ShellError::Stale { .. })), "{stale:?}");
+            let unlinked = h.fake.state.lock().unwrap().unlinked.clone();
+            assert_eq!(
+                (unlinked, h.shell(linked).unwrap().linked_agent_id),
+                (Vec::<String>::new(), Some(live.as_str().to_owned()))
+            );
         });
     }
 

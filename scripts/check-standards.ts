@@ -989,6 +989,8 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
   "crates/bazhen-daemon/src/shell_routes.rs::restart_request":
     "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::unlink_request":
+    "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
   "crates/bazhen-daemon/src/shell_routes.rs::rename_request":
     "hands its body to parsed, then checks the name serde_json's derive gave it; reads no bytes itself",
   "crates/bazhen-daemon/src/shell_routes.rs::open":
@@ -997,6 +999,8 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to close_request; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::restart":
     "hands its body to restart_request; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::unlink":
+    "hands its body to unlink_request; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::rename":
     "hands its body to rename_request; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::reported":

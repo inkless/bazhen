@@ -405,6 +405,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/shells/{id}/close", post(shell_routes::close))
         .route("/v1/shells/{id}/restart", post(shell_routes::restart))
         .route("/v1/shells/{id}/rename", post(shell_routes::rename))
+        .route("/v1/shells/{id}/unlink", post(shell_routes::unlink))
         // A shell's integration reports over the socket only, never HTTP.
         .route(
             "/v1/shells/{id}/report",
@@ -457,6 +458,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))
         .route("/shells/{id}/rename", post(shell_routes::rename))
+        .route("/shells/{id}/unlink", post(shell_routes::unlink))
         .route("/terminals/{id}/screen", get(terminal_routes::screen))
         .fallback(unrouted)
         .method_not_allowed_fallback(unrouted)
