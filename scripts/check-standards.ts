@@ -984,6 +984,14 @@ const NOT_DECODERS: Record<string, string> = {
     "splits a file's bytes into lines at each newline, up to a fixed limit, and hands each as lossy UTF-8 to the harness's is_conversation_entry, whose Js::parse is listed; a proptest holds the lines it hands on to a whole split of the same bytes, for any chunk size and limit",
   "crates/bazhen-daemon/src/mail.rs::send":
     "hands its body to edge::edge for SendMessageRequest, which the protocol's edge target fuzzes; reads the path only as the agent's id or live name, for the store to resolve",
+  "crates/bazhen-daemon/src/attention.rs::answer":
+    "hands its body to edge::edge for AnswerAttentionRequest, which the protocol's edge target fuzzes; reads the path only as the item's id, for the store to look up",
+  "crates/bazhen-daemon/src/attention.rs::reply":
+    "hands its body to edge::edge for ReplyAttentionRequest, which the protocol's edge target fuzzes; reads the path only as the item's id, for the store to look up",
+  "crates/bazhen-daemon/src/attention.rs::dismiss":
+    "hands its body to edge::edge for DismissAttentionRequest, which the protocol's edge target fuzzes; reads the path only as the item's id, for the store to look up",
+  "crates/bazhen-daemon/src/attention.rs::resend":
+    "hands its body to edge::edge for ResendAttentionRequest, which the protocol's edge target fuzzes; reads the path only as the item's id, for the store to look up",
   "crates/bazhen-daemon/src/hooks.rs::hook":
     "hands its body to edge::edge for HookRequest, which the protocol's edge target fuzzes; decodes nothing itself",
   "crates/bazhen-daemon/src/hooks.rs::ack":
