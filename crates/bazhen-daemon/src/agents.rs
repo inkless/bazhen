@@ -323,6 +323,12 @@ impl Agents {
         view::AgentsView::new(Arc::clone(self), self.deps.roles.current())
     }
 
+    /// The turns its commands take, which the shells share.
+    #[cfg(test)]
+    pub(crate) fn turns(&self) -> &Arc<crate::turns::Turns> {
+        &self.deps.turns
+    }
+
     pub(crate) fn harnesses(&self) -> &Harnesses {
         &self.deps.harnesses
     }

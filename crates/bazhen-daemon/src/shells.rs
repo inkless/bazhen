@@ -450,6 +450,12 @@ fn incarnation(terminal: &Recorded) -> Result<TerminalIncarnation, ShellError> {
 }
 
 impl Shells {
+    /// The turns its commands take, which the agents share.
+    #[cfg(test)]
+    pub(crate) fn turns(&self) -> &Arc<crate::turns::Turns> {
+        &self.deps.turns
+    }
+
     pub(crate) fn new(deps: ShellsDeps) -> Self {
         let retypes = PendingRetypes::new(deps.tracker.clone(), deps.stop.clone());
         Self {
