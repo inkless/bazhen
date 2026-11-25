@@ -40,20 +40,22 @@ enum Failed {
     Terminal(TerminalError),
     /// The agent's new token couldn't be made.
     Token(String),
-    /// A holder still runs the terminal the agent was lost on: it has one terminal at a time.
+    /// What ran the terminal the agent was lost on isn't proved gone, and may still run it, as a
+    /// holder whose socket has gone may: the agent has one terminal at a time.
     Exists(TerminalId),
-    /// Whether a holder still runs the terminal the agent was lost on can't be told.
-    Unlisted(String),
+    /// No runtime confirmed where the terminal the agent was lost on ran, so nothing can prove
+    /// it gone.
+    Unlocated,
 }
 
 impl Failed {
     fn detail(&self) -> String {
         failure_detail(&match self {
             Self::Harness(LaunchError::Refused(why) | LaunchError::Unavailable(why))
-            | Self::Token(why)
-            | Self::Unlisted(why) => why.clone(),
+            | Self::Token(why) => why.clone(),
             Self::Terminal(err) => err.to_string(),
-            Self::Exists(terminal) => format!("terminal {terminal} still runs"),
+            Self::Exists(terminal) => format!("terminal {terminal} isn't proved gone"),
+            Self::Unlocated => "no runtime confirmed where its last terminal ran".to_owned(),
         })
     }
 
@@ -68,7 +70,7 @@ impl Failed {
             | Self::Terminal(_)
             | Self::Token(_)
             | Self::Exists(_)
-            | Self::Unlisted(_) => RespawnRejectedReason::Unavailable,
+            | Self::Unlocated => RespawnRejectedReason::Unavailable,
         };
         AgentRespawnRejected {
             reason,
@@ -85,7 +87,7 @@ impl Failed {
             Self::Harness(LaunchError::Unavailable(_))
             | Self::Terminal(_)
             | Self::Token(_)
-            | Self::Unlisted(_) => RelaunchRejectedReason::Unavailable,
+            | Self::Unlocated => RelaunchRejectedReason::Unavailable,
         };
         AgentRelaunchRejected {
             reason,
@@ -102,13 +104,13 @@ impl Failed {
                 AgentError::Conflict(format!("agent {id}'s harness won't {verb} it: {why}"))
             }
             Self::Exists(terminal) => AgentError::Conflict(format!(
-                "agent {id} already has a terminal: {terminal} still runs"
+                "agent {id} already has a terminal: {terminal} isn't proved gone"
             )),
             Self::Harness(LaunchError::Unavailable(why)) | Self::Token(why) => {
                 AgentError::Unavailable(format!("agent {id} could not be started again: {why}"))
             }
-            Self::Unlisted(why) => AgentError::Unavailable(format!(
-                "agent {id} could not be started again: whether its last terminal still runs can't be told: {why}"
+            Self::Unlocated => AgentError::Unavailable(format!(
+                "agent {id} could not be started again: no runtime confirmed where its last terminal ran, so nothing proves it gone"
             )),
         }
     }
@@ -285,7 +287,7 @@ impl Agents {
             Err(prior) => return Ok(prior),
         };
         let agent = found.agent_id.clone();
-        let (Some(lost), Some(generation)) = (found.terminal_id.clone(), found.generation) else {
+        let (Some(_), Some(generation)) = (found.terminal_id.as_ref(), found.generation) else {
             return Err(no_terminal(id));
         };
         let fresh = req.fresh == Some(true);
@@ -333,7 +335,10 @@ impl Agents {
             theme: req.theme.or(launch.theme),
         };
         let prompt_hash = again.prompt.hash.clone();
-        match self.start_new(&agent, &lost, terminal, again).await {
+        match self
+            .start_new(&agent, recorded(&found), terminal, again)
+            .await
+        {
             Err(failed) => {
                 let rejecting = agent.clone();
                 let rejected = AgentChange::RelaunchRejected(failed.relaunch_rejected());
@@ -497,16 +502,16 @@ impl Agents {
         }
     }
 
-    /// Starts the agent on the new terminal `terminal`, once no holder runs the one it was lost
-    /// on.
+    /// Starts the agent on the new terminal `terminal`, once the one it was lost on, `lost`, is
+    /// proved gone.
     async fn start_new(
         &self,
         agent: &AgentId,
-        lost: &TerminalId,
+        lost: Option<Recorded>,
         terminal: TerminalId,
         again: Again<'_>,
     ) -> Result<Resumed, Failed> {
-        self.refuse_still_running(lost).await?;
+        self.refuse_unless_gone(lost).await?;
         let (cwd, generation) = (again.launch.cwd.clone(), again.generation);
         let command = self.command_for(agent, again).await?;
         let harness_session = match command.session.as_ref().map(session_tag).transpose() {
@@ -544,24 +549,18 @@ impl Agents {
         }
     }
 
-    /// Refuses a new terminal for an agent whose lost one a holder still runs, as one whose
-    /// socket has gone does; or when the holders can't be listed, rather than risk two TUIs on
-    /// one agent. Only the last terminal is asked of: any before it was lost, and found not
-    /// running, when the agent was last relaunched.
-    async fn refuse_still_running(&self, lost: &TerminalId) -> Result<(), Failed> {
-        let holders = self
-            .deps
-            .terminals
-            .holders()
-            .await
-            .map_err(Failed::Unlisted)?;
-        if holders
-            .iter()
-            .any(|holder| holder.terminal_id == lost.as_str())
-        {
-            return Err(Failed::Exists(lost.clone()));
+    /// Refuses a new terminal for an agent until what ran its lost one is proved gone: no holder
+    /// answers for it, and its process is no longer the one recorded. One whose holder can't be
+    /// reached, or whose socket has gone while it runs, isn't proved gone, so two TUIs never run
+    /// one agent. Only the last terminal is asked of: any before it was proved gone when the
+    /// agent was last relaunched.
+    async fn refuse_unless_gone(&self, lost: Option<Recorded>) -> Result<(), Failed> {
+        let lost = lost.ok_or(Failed::Unlocated)?;
+        if self.deps.terminals.gone(&lost).await {
+            Ok(())
+        } else {
+            Err(Failed::Exists(lost.terminal_id))
         }
-        Ok(())
     }
 
     /// The harness's command to start the agent on its session, or on a fresh one, and the new
@@ -989,12 +988,16 @@ pub(crate) mod tests {
         }
     }
 
-    /// The agent's terminal now, and the command, generation and agent it was created with.
-    fn created(f: &Fixture, agent: &AgentId) -> (String, Vec<String>, u64, Option<String>) {
-        let terminal = f.terminal_of(agent.as_str());
-        let spec = f.fake().spec_of(&terminal);
+    /// The agent's terminal now, and the command, generation and agent it was created with,
+    /// where the runtime created one.
+    fn created(f: &Fixture, agent: &AgentId) -> Option<(String, Vec<String>, u64, Option<String>)> {
+        let terminal = found(f, agent).terminal_id?.as_str().to_owned();
+        let mut spec = None;
+        f.fake()
+            .set(|state| spec = state.running.get(&terminal).map(|r| r.spec.clone()));
+        let spec = spec?;
         let id = spec.env.get("BAZHEN_AGENT_ID").cloned();
-        (terminal, spec.argv, spec.generation, id)
+        Some((terminal, spec.argv, spec.generation, id))
     }
 
     #[test]
@@ -1020,10 +1023,10 @@ pub(crate) mod tests {
             .iter()
             .map(|(request, _)| request.theme)
             .collect();
-        let (terminal, argv, generation_now, agent_env) = created(&f, &agent);
+        let started = created(&f, &agent)
+            .map(|(terminal, argv, at, as_agent)| (terminal != was, argv, at, as_agent));
         let mut resumed: Vec<String> = STUB_RESUME_ARGV.map(str::to_owned).to_vec();
         resumed.push(STUB_SESSION.to_owned());
-        assert_ne!(terminal, was);
         assert_eq!(
             (
                 f.types().split_off(before),
@@ -1031,7 +1034,7 @@ pub(crate) mod tests {
                 first == again,
                 calls.lock().unwrap().clone(),
                 asked,
-                (argv, generation_now, agent_env),
+                started,
                 (now.state, now.generation),
             ),
             (
@@ -1043,7 +1046,7 @@ pub(crate) mod tests {
                 true,
                 vec![(agent.clone(), Some("agent.relaunch_requested".to_owned()))],
                 vec![Some(TuiTheme::Dark)],
-                (resumed, generation + 1, Some(id.to_owned())),
+                Some((true, resumed, generation + 1, Some(id.to_owned()))),
                 (AgentState::Starting, Some(generation + 1)),
             )
         );
@@ -1060,16 +1063,15 @@ pub(crate) mod tests {
             &relaunching("r-1", generation, Some(true)),
             recording(&f, &Calls::default()),
         ));
-        let (_, argv, started_at, _) = created(&f, &agent);
+        let started = created(&f, &agent).map(|(_, argv, at, _)| (argv == launched, at));
         assert_eq!(
             (
                 answer.map(|answer| answer.event_ids.len()),
                 stub.launches.lock().unwrap().len(),
                 stub.resumes_asked.lock().unwrap().len(),
-                argv == launched,
-                started_at,
+                started,
             ),
-            (Ok(2), 2, 0, true, generation + 1)
+            (Ok(2), 2, 0, Some((true, generation + 1)))
         );
     }
 
@@ -1123,21 +1125,28 @@ pub(crate) mod tests {
         assert_eq!(f.types().len(), before);
     }
 
-    /// A relaunch of a lost agent whose old terminal the fake's holders list as `holding`, or
-    /// can't list; with the answer, the events it recorded and the agent's state and terminal.
-    fn relaunched_beside(
-        holders: impl FnOnce(&mut crate::terminals::fake::State, &str),
-    ) -> (
-        Result<AgentCommandResponse, AgentError>,
-        Vec<String>,
-        AgentState,
-        bool,
-        String,
-    ) {
+    /// What a relaunch of a lost agent did.
+    struct Beside {
+        answer: Result<AgentCommandResponse, AgentError>,
+        id: String,
+        /// The terminal it was lost on.
+        was: String,
+        /// The events it recorded, the agent's state, whether it is still on the terminal it
+        /// was lost on, and the state its new terminal was left in.
+        after: (
+            Vec<String>,
+            AgentState,
+            bool,
+            Option<bazhen_protocol::shells::TerminalState>,
+        ),
+    }
+
+    /// A relaunch of a lost agent, once `prepare` was given the fixture and its old terminal.
+    fn relaunched_beside(prepare: impl FnOnce(&Fixture, &str)) -> Beside {
         let stub = StubHarness::new(pull()).resuming();
         let (f, agent, generation) = lost(&stub);
         let was = f.terminal_of(agent.as_str());
-        f.fake().set(|state| holders(state, &was));
+        prepare(&f, &was);
         let before = f.types().len();
         let answer = runtime().block_on(f.agents.relaunch(
             agent.as_str(),
@@ -1145,53 +1154,95 @@ pub(crate) mod tests {
             recording(&f, &Calls::default()),
         ));
         let now = found(&f, &agent);
-        (
+        let new = f
+            .last_of("agent.relaunch_requested")
+            .and_then(|p| p["terminalId"].as_str().map(str::to_owned))
+            .and_then(|new| {
+                f.store
+                    .reader()
+                    .unwrap()
+                    .reads()
+                    .terminal_state(&new)
+                    .unwrap()
+            });
+        Beside {
             answer,
-            f.types().split_off(before),
-            now.state,
-            now.terminal_id.is_some_and(|t| t.as_str() == was),
-            agent.as_str().to_owned(),
+            id: agent.as_str().to_owned(),
+            after: (
+                f.types().split_off(before),
+                now.state,
+                now.terminal_id.is_some_and(|t| t.as_str() == was),
+                new,
+            ),
+            was,
+        }
+    }
+
+    /// Requested then rejected, the agent lost on its old terminal, the new one failed.
+    fn rejected() -> (
+        Vec<String>,
+        AgentState,
+        bool,
+        Option<bazhen_protocol::shells::TerminalState>,
+    ) {
+        (
+            vec![
+                "agent.relaunch_requested".to_owned(),
+                "agent.relaunch_rejected".to_owned(),
+            ],
+            AgentState::Lost,
+            true,
+            Some(bazhen_protocol::shells::TerminalState::Failed),
         )
     }
 
     #[test]
-    fn refuses_a_relaunch_while_a_holder_still_runs_the_lost_terminal() {
-        let (answer, recorded, state, on_lost, id) =
-            relaunched_beside(|state, was| state.holding.push(was.to_owned()));
-        assert!(
-            matches!(&answer, Err(AgentError::Conflict(why)) if why.starts_with(&format!("agent {id} already has a terminal"))),
-            "{answer:?}"
-        );
+    fn refuses_a_relaunch_while_the_lost_terminal_isnt_proved_gone() {
+        let Beside {
+            answer,
+            id,
+            was,
+            after,
+        } = relaunched_beside(|f, was| {
+            f.fake().set(|state| {
+                state.unproven.insert(was.to_owned());
+            });
+        });
         assert_eq!(
-            (recorded, state, on_lost),
+            (answer, after),
             (
-                vec![
-                    "agent.relaunch_requested".to_owned(),
-                    "agent.relaunch_rejected".to_owned()
-                ],
-                AgentState::Lost,
-                true
+                Err(AgentError::Conflict(format!(
+                    "agent {id} already has a terminal: {was} isn't proved gone"
+                ))),
+                rejected()
             )
         );
     }
 
     #[test]
-    fn refuses_a_relaunch_when_whether_the_lost_terminal_still_runs_cant_be_told() {
-        let (answer, recorded, state, on_lost, _) =
-            relaunched_beside(|state, _| state.fail_holders = true);
-        assert!(
-            matches!(&answer, Err(AgentError::Unavailable(_))),
-            "{answer:?}"
-        );
+    fn refuses_a_relaunch_when_no_runtime_confirmed_where_the_lost_terminal_ran() {
+        let Beside {
+            answer, id, after, ..
+        } = relaunched_beside(|f, was| {
+            let was = was.to_owned();
+            runtime()
+                .block_on(f.store.run(move |store| {
+                    store.write(|w| {
+                        w.connection()
+                            .execute("UPDATE terminals SET locator = NULL WHERE id = ?", [was])?;
+                        Ok::<_, rusqlite::Error>(())
+                    })
+                }))
+                .unwrap()
+                .unwrap();
+        });
         assert_eq!(
-            (recorded, state, on_lost),
+            (answer, after),
             (
-                vec![
-                    "agent.relaunch_requested".to_owned(),
-                    "agent.relaunch_rejected".to_owned()
-                ],
-                AgentState::Lost,
-                true
+                Err(AgentError::Unavailable(format!(
+                    "agent {id} could not be started again: no runtime confirmed where its last terminal ran, so nothing proves it gone"
+                ))),
+                rejected()
             )
         );
     }
