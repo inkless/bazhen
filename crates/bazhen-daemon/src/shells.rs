@@ -7,12 +7,14 @@
 //! - `integration`: the snippets shells source to report the lines they run;
 //! - `reports`: what a shell's integration reports, proved with the shell's own token;
 //! - `retype`: the lines restarts type back into their new shells, held until the first prompt.
+//! - `with_agent`: closing an agent with its linked shells, keeping those it names standalone.
 
 pub(crate) mod foreground;
 pub(crate) mod integration;
 pub(crate) mod reconcile;
 pub(crate) mod reports;
 pub(crate) mod retype;
+pub(crate) mod with_agent;
 
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
@@ -906,7 +908,8 @@ impl Shells {
             })
         } else {
             if found.state == TerminalState::Running && req.confirm_busy != Some(true) {
-                self.refuse_busy(&found, req.confirmed_program.as_deref())
+                let confirmed = req.confirmed_program.as_deref();
+                self.refuse_busy(&format!("shell {}", found.id), [&found], |_| confirmed)
                     .await?;
             }
             let mut done = Vec::new();
@@ -929,36 +932,50 @@ impl Shells {
         self.finish(&found.id, key, &request, last).await
     }
 
-    /// Refuses a close while something other than the shell runs in it, but for the program the
-    /// user was shown running and chose to end. A shell already dead runs nothing.
-    async fn refuse_busy(
+    /// Refuses a close while something other than its shell runs in any running one of `shells`,
+    /// but for the program `confirmed` says the user was shown running there and chose to end,
+    /// naming `subject` and each busy shell. A shell already dead runs nothing.
+    async fn refuse_busy<'a>(
         &self,
-        found: &ShellRow,
-        confirmed: Option<&str>,
+        subject: &str,
+        shells: impl IntoIterator<Item = &'a ShellRow>,
+        confirmed: impl Fn(&TerminalId) -> Option<&'a str>,
     ) -> Result<(), ShellError> {
-        let Some(terminal) = recorded(found) else {
-            return Ok(());
-        };
-        let program = match self.deps.terminals.foreground(&terminal).await {
-            Ok(program) => program,
-            // A shell already dead runs nothing, as one whose holder died with it: the close ends
-            // what is left of it, where a refusal would leave the user no way past.
-            Err(TerminalError::ProcessState(_) | TerminalError::Gone(_)) => None,
-            Err(cause) => return Err(from_runtime(found.id.as_str(), cause)),
-        };
-        match program {
-            Some(program) if Some(program.as_str()) != confirmed => Err(ShellError::Busy {
-                message: format!(
-                    "{program} is running in shell {}; close anyway to end it",
-                    found.id
-                ),
-                busy: vec![BusyShell {
-                    terminal_id: found.id.clone(),
-                    program,
-                }],
-            }),
-            _ => Ok(()),
+        let mut busy = Vec::new();
+        for found in shells {
+            let Some(terminal) = recorded(found).filter(|_| found.state == TerminalState::Running)
+            else {
+                continue;
+            };
+            let program = match self.deps.terminals.foreground(&terminal).await {
+                Ok(program) => program,
+                // A shell already dead runs nothing, as one whose holder died with it: the close
+                // ends what is left of it, where a refusal would leave the user no way past.
+                Err(TerminalError::ProcessState(_) | TerminalError::Gone(_)) => None,
+                Err(cause) => return Err(from_runtime(found.id.as_str(), cause)),
+            };
+            match program {
+                Some(program) if Some(program.as_str()) != confirmed(&found.id) => {
+                    busy.push(BusyShell {
+                        terminal_id: found.id.clone(),
+                        program,
+                    });
+                }
+                _ => {}
+            }
         }
+        if busy.is_empty() {
+            return Ok(());
+        }
+        let programs: Vec<&str> = busy.iter().map(|b| b.program.as_str()).collect();
+        let verb = if busy.len() == 1 { "is" } else { "are" };
+        Err(ShellError::Busy {
+            message: format!(
+                "{} {verb} running in {subject}; close anyway to end it",
+                programs.join(", ")
+            ),
+            busy,
+        })
     }
 
     /// Ends the shell's terminal; a forced close records past what may still run it.
@@ -1740,12 +1757,12 @@ pub(crate) mod tests {
     }
 
     /// The agent `n` names.
-    fn agent(n: u8) -> bazhen_protocol::ids::AgentId {
+    pub(crate) fn agent(n: u8) -> bazhen_protocol::ids::AgentId {
         bazhen_protocol::ids::AgentId::parse(&format!("agent_0190a1b2c3d47abc8def01234567{n:04x}"))
             .unwrap()
     }
 
-    fn beside(key: &str, agent: &bazhen_protocol::ids::AgentId) -> OpenShellRequest {
+    pub(crate) fn beside(key: &str, agent: &bazhen_protocol::ids::AgentId) -> OpenShellRequest {
         OpenShellRequest {
             linked_agent_id: Some(agent.clone()),
             ..opening(key)

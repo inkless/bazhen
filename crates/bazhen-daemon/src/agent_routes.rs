@@ -36,6 +36,7 @@ pub(crate) fn refusal(err: &AgentError) -> Response {
         AgentError::NeedsRestart(_) => (StatusCode::CONFLICT, ErrorCode::NeedsRestart),
         AgentError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
         AgentError::Internal(_) => return internal(err),
+        AgentError::Shells(err) => return crate::shell_routes::refusal(err),
     };
     fail(status, code, &err.to_string())
 }
@@ -113,17 +114,23 @@ where
     }
 }
 
-/// `POST /v1/agents/:id/close`, over either listener.
+/// `POST /v1/agents/:id/close`, over either listener: the agent with its linked shells.
 pub(crate) async fn close(
     State(shared): State<Shared>,
     Path(reference): Path<String>,
     body: Bytes,
 ) -> Response {
+    let shells = shared.shells.clone();
     command(
         &shared,
         reference,
         &body,
-        |agents, id, req: CloseAgentRequest| async move { agents.close(&id, &req).await },
+        move |agents, id, req: CloseAgentRequest| async move {
+            match shells {
+                Some(shells) => shells.close_agent(&id, &req, agents.close(&id, &req)).await,
+                None => agents.close(&id, &req).await,
+            }
+        },
     )
     .await
 }
@@ -246,6 +253,12 @@ mod tests {
             },
             AgentError::ServerUnconfirmed("x".to_owned()),
             AgentError::NeedsRestart("x".to_owned()),
+            AgentError::Shells(crate::shells::ShellError::Busy {
+                message: "vim is running in agent x's shells".to_owned(),
+                busy: Vec::new(),
+            }),
+            AgentError::Shells(crate::shells::ShellError::Unavailable("x".to_owned())),
+            AgentError::Shells(crate::shells::ShellError::Conflict("x".to_owned())),
         ]
         .map(|err| {
             let response = refusal(&err);
@@ -275,6 +288,9 @@ mod tests {
                 (409, code("stale_generation")),
                 (409, code("server_unconfirmed")),
                 (409, code("needs_restart")),
+                (409, code("busy")),
+                (503, code("unavailable")),
+                (409, code("conflict")),
             ]
         );
     }

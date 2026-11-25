@@ -71,6 +71,9 @@ pub(crate) enum AgentError {
     /// The daemon can't do it as it runs now, or the environment couldn't just now.
     #[error("{0}")]
     Unavailable(String),
+    /// A step on the agent's linked shells, answered as the shells' own.
+    #[error(transparent)]
+    Shells(ShellError),
     /// A failure no command expects, which is the daemon's.
     #[error("{0}")]
     Internal(String),
