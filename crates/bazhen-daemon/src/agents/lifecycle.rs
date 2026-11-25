@@ -133,7 +133,7 @@ fn append(
 
 /// Records `agent` closed, and the mail still on its way to it undeliverable, as `actor` closed
 /// it (`recordClosed`): in the caller's transaction, so no mail is left on its way to an agent
-/// recorded closed.
+/// recorded closed but a row whose id no message could have, which `in_flight_mail` skips.
 pub(crate) fn record_closed(
     w: &StoreWriter<'_>,
     agent: &AgentId,

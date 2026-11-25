@@ -16,6 +16,7 @@ use serde::de::DeserializeOwned;
 use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::SnapshotView;
+use crate::agents::word;
 use crate::snapshot::SnapshotError;
 use crate::terminals::{attach_command, attachable, needs_restart};
 
@@ -347,11 +348,6 @@ fn item(row: AttentionRow, view: &dyn AttentionView) -> Result<Attention, Snapsh
         opened_at: row.opened_at,
         actions,
     })
-}
-
-/// A stored word, such as a state or an id, read as the protocol's type for it.
-fn word<T: DeserializeOwned>(text: String) -> Result<T, SnapshotError> {
-    Ok(serde_json::from_value(serde_json::Value::String(text))?)
 }
 
 /// A stored JSON column, or none where it is null.

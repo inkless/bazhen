@@ -25,7 +25,7 @@ pub struct AgentLaunch {
     pub project: String,
     /// The directory it was launched in, as resolved.
     pub cwd: String,
-    /// The name its harness was started with, for one that has a name.
+    /// Its name now, which a start gives its harness; none for an agent from before names.
     pub name: Option<String>,
     /// The role whose prompt it was launched with.
     pub role: Option<Role>,
@@ -39,8 +39,8 @@ pub struct AgentLaunch {
     pub transcript: Option<String>,
 }
 
-/// A stored word, as the enum it names.
-fn word<T: serde::de::DeserializeOwned>(text: String) -> Result<T, serde_json::Error> {
+/// A stored word, such as a state or an id, read as the protocol's type for it.
+pub(crate) fn word<T: serde::de::DeserializeOwned>(text: String) -> Result<T, serde_json::Error> {
     serde_json::from_value(serde_json::Value::String(text))
 }
 
@@ -125,17 +125,19 @@ impl Reads<'_> {
                  FROM agent_sessions WHERE id = ?",
                 [agent_id],
                 |row| {
-                    let unreadable = |i: usize, what: &str| {
+                    use rusqlite::types::Type;
+                    let unreadable = |i: usize, kind: Type, what: &str| {
                         rusqlite::Error::FromSqlConversionFailure(
                             i,
-                            rusqlite::types::Type::Text,
+                            kind,
                             format!("{what} isn't one a launch records").into(),
                         )
                     };
                     let compact: Option<i64> = row.get(6)?;
                     let external_ref: Option<String> = row.get(7)?;
                     Ok(AgentLaunch {
-                        harness: word(row.get(0)?).map_err(|_| unreadable(0, "its harness"))?,
+                        harness: word(row.get(0)?)
+                            .map_err(|_| unreadable(0, Type::Text, "its harness"))?,
                         project: row.get(1)?,
                         cwd: row.get(2)?,
                         name: row.get(3)?,
@@ -143,17 +145,19 @@ impl Reads<'_> {
                             .get::<_, Option<String>>(4)?
                             .map(word)
                             .transpose()
-                            .map_err(|_| unreadable(4, "its role"))?,
+                            .map_err(|_| unreadable(4, Type::Text, "its role"))?,
                         prompt_hash: row.get(5)?,
                         compact_window_tokens: compact
                             .map(|n| {
-                                u32::try_from(n).map_err(|_| unreadable(6, "its compaction window"))
+                                u32::try_from(n).map_err(|_| {
+                                    unreadable(6, Type::Integer, "its compaction window")
+                                })
                             })
                             .transpose()?,
                         external_ref: external_ref
                             .map(|text| {
                                 serde_json::from_str(&text)
-                                    .map_err(|_| unreadable(7, "its harness session"))
+                                    .map_err(|_| unreadable(7, Type::Text, "its harness session"))
                             })
                             .transpose()?,
                         transcript: row.get(8)?,
@@ -538,6 +542,13 @@ mod tests {
                 ..AGENT
             },
         );
+        seed(
+            &store,
+            &Agent {
+                id: "agent_04",
+                ..AGENT
+            },
+        );
         store
             .db
             .execute_batch(
@@ -552,6 +563,7 @@ mod tests {
                 reads.agent_launch("agent_01").ok(),
                 reads.agent_launch("agent_02").is_err(),
                 reads.agent_launch("agent_03").ok(),
+                reads.agent_launch("agent_04").ok(),
             ),
             (
                 Some(Some(crate::AgentLaunch {
@@ -567,6 +579,17 @@ mod tests {
                 })),
                 true,
                 Some(None),
+                Some(Some(crate::AgentLaunch {
+                    harness: HarnessId::ClaudeCode,
+                    project: "p".to_owned(),
+                    cwd: "/".to_owned(),
+                    name: None,
+                    role: None,
+                    prompt_hash: None,
+                    compact_window_tokens: None,
+                    external_ref: None,
+                    transcript: None,
+                })),
             )
         );
     }
