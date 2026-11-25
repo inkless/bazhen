@@ -1,56 +1,74 @@
-//! Starting an agent again (`Lifecycle.respawn` in `agents/lifecycle.ts`): its exited process
-//! is started again in the same terminal, resuming its harness session, at the next generation.
-//! `respawn_requested` is recorded first, so a daemon that dies meanwhile leaves a record of the
-//! respawn under way, for an agent reconcile to settle; none runs yet. One rejected returns the
-//! agent to exited, its terminal kept and still closable.
+//! Starting an agent again (`Lifecycle.respawn` and `Lifecycle.relaunch` in
+//! `agents/lifecycle.ts`), at the next generation. A respawn starts an exited agent's process
+//! again in the same terminal, resuming its harness session; a relaunch starts a lost agent on a
+//! new terminal, resuming its session or, when asked, on a fresh one. Each is recorded requested
+//! first, so a daemon that dies meanwhile leaves a record of the start under way, for an agent
+//! reconcile to settle; none runs yet. One rejected leaves the agent on the terminal it had,
+//! still closable.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bazhen_harness::{BoxFuture, LaunchError, LaunchRequest, LaunchSpec};
-use bazhen_protocol::agent_events::{AgentRespawnRejected, AgentRestarted, RespawnRejectedReason};
+use bazhen_protocol::agent_events::{
+    AgentRelaunchRejected, AgentRelaunchRequested, AgentRespawnRejected, AgentRestarted,
+    RelaunchRejectedReason, RespawnRejectedReason,
+};
 use bazhen_protocol::agents::{
-    AgentCommand, AgentCommandResponse, ExternalRef, RespawnAgentRequest,
+    AgentCommand, AgentCommandResponse, ExternalRef, RelaunchAgentRequest, RespawnAgentRequest,
 };
 use bazhen_protocol::events::RuntimeRefPayload;
-use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::ids::{AgentId, EnvironmentId, TerminalId};
 use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::TuiTheme;
-use bazhen_store::{Actor, AgentChange, AgentLaunch, Writer as StoreWriter};
+use bazhen_store::{Actor, AgentChange, AgentLaunch, AgentTerminal, Writer as StoreWriter};
 
 use super::lifecycle::{Begun, append, asked, from_runtime, offers, recorded};
 use super::prompts::{Composed, FLEET, compose};
-use super::{AgentError, Agents};
+use super::{AgentError, Agents, minted, session_tag};
+use crate::budget::Counts;
 use crate::failure::failure_detail;
 use crate::shells::RUNTIME;
-use crate::terminals::{Recorded, Restart, TerminalError};
+use crate::terminals::{Kind, NewTerminal, Recorded, Restart, TerminalError};
+use crate::tokens::Minted;
 
 /// What stopped a start once it was recorded requested.
 enum Failed {
-    /// The harness wouldn't, or couldn't, give the command to resume its session.
+    /// The harness wouldn't, or couldn't, give the command to start its session.
     Harness(LaunchError),
-    /// The runtime didn't start the process again.
+    /// The runtime didn't start the process.
     Terminal(TerminalError),
     /// The agent's new token couldn't be made.
     Token(String),
+    /// A holder still runs the terminal the agent was lost on: it has one terminal at a time.
+    Exists(TerminalId),
+    /// Whether a holder still runs the terminal the agent was lost on can't be told.
+    Unlisted(String),
 }
 
 impl Failed {
     fn detail(&self) -> String {
         failure_detail(&match self {
             Self::Harness(LaunchError::Refused(why) | LaunchError::Unavailable(why))
-            | Self::Token(why) => why.clone(),
+            | Self::Token(why)
+            | Self::Unlisted(why) => why.clone(),
             Self::Terminal(err) => err.to_string(),
+            Self::Exists(terminal) => format!("terminal {terminal} still runs"),
         })
     }
 
     /// Why the respawn was rejected, as `agent.respawn_rejected` records it (`rejection`).
-    fn rejected(&self) -> AgentRespawnRejected {
+    fn respawn_rejected(&self) -> AgentRespawnRejected {
         let reason = match self {
             Self::Harness(LaunchError::Refused(_)) => RespawnRejectedReason::HarnessRefused,
             Self::Terminal(
                 TerminalError::Stale(_) | TerminalError::Gone(_) | TerminalError::ProcessState(_),
             ) => RespawnRejectedReason::TerminalChanged,
-            Self::Harness(LaunchError::Unavailable(_)) | Self::Terminal(_) | Self::Token(_) => {
-                RespawnRejectedReason::Unavailable
-            }
+            Self::Harness(LaunchError::Unavailable(_))
+            | Self::Terminal(_)
+            | Self::Token(_)
+            | Self::Exists(_)
+            | Self::Unlisted(_) => RespawnRejectedReason::Unavailable,
         };
         AgentRespawnRejected {
             reason,
@@ -58,22 +76,46 @@ impl Failed {
         }
     }
 
-    /// The failure as the command's answer.
-    fn answer(self, id: &str) -> AgentError {
+    /// Why the relaunch was rejected, as `agent.relaunch_rejected` records it
+    /// (`relaunchRejection`).
+    fn relaunch_rejected(&self) -> AgentRelaunchRejected {
+        let reason = match self {
+            Self::Harness(LaunchError::Refused(_)) => RelaunchRejectedReason::HarnessRefused,
+            Self::Exists(_) => RelaunchRejectedReason::TerminalExists,
+            Self::Harness(LaunchError::Unavailable(_))
+            | Self::Terminal(_)
+            | Self::Token(_)
+            | Self::Unlisted(_) => RelaunchRejectedReason::Unavailable,
+        };
+        AgentRelaunchRejected {
+            reason,
+            detail: Some(self.detail()),
+        }
+    }
+
+    /// The failure as the command's answer, for a start that was `resuming` a session or not.
+    fn answer(self, id: &str, resuming: bool) -> AgentError {
         match self {
             Self::Terminal(err) => from_runtime(id, err),
             Self::Harness(LaunchError::Refused(why)) => {
-                AgentError::Conflict(format!("agent {id}'s harness won't resume it: {why}"))
+                let verb = if resuming { "resume" } else { "start" };
+                AgentError::Conflict(format!("agent {id}'s harness won't {verb} it: {why}"))
             }
+            Self::Exists(terminal) => AgentError::Conflict(format!(
+                "agent {id} already has a terminal: {terminal} still runs"
+            )),
             Self::Harness(LaunchError::Unavailable(why)) | Self::Token(why) => {
                 AgentError::Unavailable(format!("agent {id} could not be started again: {why}"))
             }
+            Self::Unlisted(why) => AgentError::Unavailable(format!(
+                "agent {id} could not be started again: whether its last terminal still runs can't be told: {why}"
+            )),
         }
     }
 }
 
-/// What a start again gave: where its terminal runs now, the session it resumed, and the theme
-/// it drew for.
+/// What a start again gave: where its terminal runs now, the session it is on, and the theme it
+/// drew for.
 struct Resumed {
     locator: Record<String>,
     session: Option<ExternalRef>,
@@ -83,26 +125,39 @@ struct Resumed {
 /// What a start again is started with, beside the agent.
 struct Again<'a> {
     launch: &'a AgentLaunch,
-    session: &'a ExternalRef,
-    terminal: Recorded,
+    /// The session it resumes, or none for a fresh one.
+    session: Option<&'a ExternalRef>,
+    /// The environment a session it starts is in.
+    environment: EnvironmentId,
     generation: u64,
     prompt: Composed,
     prompt_file: String,
     theme: Option<TuiTheme>,
 }
 
-/// A respawn that started, to be recorded with its key's answer.
+/// The harness's command for a start again, on the agent's new token.
+struct Command {
+    argv: Vec<String>,
+    env: BTreeMap<String, String>,
+    theme: Option<TuiTheme>,
+    session: Option<ExternalRef>,
+    token: Minted,
+}
+
+/// A start again that started, to be recorded with its key's answer.
 struct Done {
     agent: AgentId,
-    /// The session it resumed.
-    was: String,
+    /// `agent.respawned` or `agent.relaunched`.
+    change: fn(AgentRestarted) -> AgentChange,
+    /// The session it was bound to before it started.
+    was: Option<String>,
     harness_name: Option<String>,
     prompt_hash: String,
     resumed: Resumed,
 }
 
 impl Done {
-    /// Records the agent respawned. A TUI that moved its binding while it started, as a quick
+    /// Records the agent started. A TUI that moved its binding while it started, as a quick
     /// /clear does, is on the newer session, read here in the same transaction.
     fn recorded(self, w: &StoreWriter<'_>) -> Result<u64, AgentError> {
         let current = w
@@ -110,10 +165,10 @@ impl Done {
             .agent_launch(self.agent.as_str())?
             .and_then(|now| now.external_ref);
         let external_ref = match current {
-            Some(current) if current.id != self.was => Some(current),
+            Some(current) if Some(&current.id) != self.was.as_ref() => Some(current),
             _ => self.resumed.session,
         };
-        let respawned = AgentChange::Respawned(AgentRestarted {
+        let started = (self.change)(AgentRestarted {
             external_ref,
             runtime_ref: RuntimeRefPayload {
                 runtime: RUNTIME.to_owned(),
@@ -123,8 +178,14 @@ impl Done {
             harness_name: self.harness_name,
             prompt_hash: Some(self.prompt_hash),
         });
-        append(w, &self.agent, Actor::User, respawned)
+        append(w, &self.agent, Actor::User, started)
     }
+}
+
+/// An agent found for a command, and what it was launched with.
+struct Found {
+    found: AgentTerminal,
+    launch: AgentLaunch,
 }
 
 impl Agents {
@@ -144,48 +205,21 @@ impl Agents {
         let request = asked("respawn", id, req)?;
         let key = &req.idempotency_key;
         let _turn = self.deps.turns.take(id).await;
-        let found = match self
-            .begin(
-                id,
-                key,
-                &request,
-                req.generation,
-                offers(AgentCommand::Respawn),
-            )
+        let Found { found, launch } = match self
+            .found(id, key, &request, req.generation, AgentCommand::Respawn)
             .await?
         {
-            Begun::Prior(prior) => return Ok(prior),
-            Begun::Found(found) => found,
+            Ok(found) => found,
+            Err(prior) => return Ok(prior),
         };
         let agent = found.agent_id.clone();
-        let reading = agent.clone();
-        let launch = self
-            .write(move |w| Ok(w.reads().agent_launch(reading.as_str())?))
-            .await?;
-        let no_terminal = || AgentError::Conflict(format!("agent {id} has no terminal recorded"));
-        let (Some(launch), Some(terminal), Some(generation)) =
-            (launch, recorded(&found), found.generation)
-        else {
-            return Err(no_terminal());
+        let (Some(terminal), Some(generation)) = (recorded(&found), found.generation) else {
+            return Err(no_terminal(id));
         };
         // Known before anything happens, so it is refused with nothing recorded.
-        let session = launch
-            .external_ref
-            .as_ref()
-            .filter(|_| self.resumes(&launch))
-            .ok_or_else(|| AgentError::NotResumable(id.to_owned()))?;
+        let session = self.resumable(id, &launch)?;
         self.refuse_taken(&agent, &launch, session).await?;
-        let roles = self.deps.roles.current();
-        let prompt = compose(FLEET, &roles.book, launch.role.as_ref());
-        let prompt_file = self
-            .deps
-            .prompts
-            .write(&agent, &prompt.text)
-            .map_err(|err| {
-                AgentError::Internal(format!("agent {agent}'s prompt can't be written: {err}"))
-            })?
-            .to_string_lossy()
-            .into_owned();
+        let (prompt, prompt_file) = self.prompt_for(&agent, &launch)?;
         let requesting = agent.clone();
         let requested = self
             .write(move |w| append(w, &requesting, Actor::User, AgentChange::RespawnRequested))
@@ -193,8 +227,8 @@ impl Agents {
         replaced(agent.clone()).await;
         let again = Again {
             launch: &launch,
-            session,
-            terminal,
+            session: Some(session),
+            environment: session.environment_id.clone(),
             generation: generation + 1,
             prompt,
             prompt_file,
@@ -202,18 +236,19 @@ impl Agents {
             theme: req.theme.or(launch.theme),
         };
         let prompt_hash = again.prompt.hash.clone();
-        match self.start_again(&agent, again).await {
+        match self.start_again(&agent, terminal, again).await {
             Err(failed) => {
                 let rejecting = agent.clone();
-                let rejected = AgentChange::RespawnRejected(failed.rejected());
+                let rejected = AgentChange::RespawnRejected(failed.respawn_rejected());
                 self.write(move |w| append(w, &rejecting, Actor::User, rejected))
                     .await?;
-                Err(failed.answer(id))
+                Err(failed.answer(id, true))
             }
             Ok(resumed) => {
                 let done = Done {
                     agent: agent.clone(),
-                    was: session.id.clone(),
+                    change: AgentChange::Respawned,
+                    was: Some(session.id.clone()),
                     harness_name: launch.name.clone(),
                     prompt_hash,
                     resumed,
@@ -224,6 +259,164 @@ impl Agents {
                 .await
             }
         }
+    }
+
+    /// Starts a lost agent again on a new terminal, at the next generation, resuming its
+    /// harness session, or on a new one only when `fresh` asks. One that can't resume is refused
+    /// with nothing recorded. The new terminal is admitted to the budget in the transaction that
+    /// records it requested. `replaced` is as a respawn's.
+    pub(crate) async fn relaunch<F>(
+        &self,
+        id: &str,
+        req: &RelaunchAgentRequest,
+        replaced: F,
+    ) -> Result<AgentCommandResponse, AgentError>
+    where
+        F: FnOnce(AgentId) -> BoxFuture<'static, ()> + Send,
+    {
+        let request = asked("relaunch", id, req)?;
+        let key = &req.idempotency_key;
+        let _turn = self.deps.turns.take(id).await;
+        let Found { found, launch } = match self
+            .found(id, key, &request, req.generation, AgentCommand::Relaunch)
+            .await?
+        {
+            Ok(found) => found,
+            Err(prior) => return Ok(prior),
+        };
+        let agent = found.agent_id.clone();
+        let (Some(lost), Some(generation)) = (found.terminal_id.clone(), found.generation) else {
+            return Err(no_terminal(id));
+        };
+        let fresh = req.fresh == Some(true);
+        // Known before anything happens, so it is refused with nothing recorded.
+        let session = if fresh {
+            None
+        } else {
+            let session = self.resumable(id, &launch)?;
+            self.refuse_taken(&agent, &launch, session).await?;
+            Some(session)
+        };
+        let (prompt, prompt_file) = self.prompt_for(&agent, &launch)?;
+        let terminal: TerminalId = minted()?;
+        let generation = generation + 1;
+        let budget = Arc::clone(&self.deps.budget);
+        let (requesting, payload) = (
+            agent.clone(),
+            AgentRelaunchRequested {
+                terminal_id: terminal.clone(),
+                generation,
+                fresh,
+                runtime: Some(RUNTIME.to_owned()),
+            },
+        );
+        let (requested, environment) = self
+            .write(move |w| {
+                let reads = w.reads();
+                budget.admit(Counts {
+                    open: reads.open_terminals()?,
+                    starting: reads.starting_terminals()?,
+                })?;
+                let environment = w.local_environment()?;
+                let change = AgentChange::RelaunchRequested(payload);
+                Ok((append(w, &requesting, Actor::User, change)?, environment))
+            })
+            .await?;
+        replaced(agent.clone()).await;
+        let again = Again {
+            launch: &launch,
+            session,
+            environment,
+            generation,
+            prompt,
+            prompt_file,
+            theme: req.theme.or(launch.theme),
+        };
+        let prompt_hash = again.prompt.hash.clone();
+        match self.start_new(&agent, &lost, terminal, again).await {
+            Err(failed) => {
+                let rejecting = agent.clone();
+                let rejected = AgentChange::RelaunchRejected(failed.relaunch_rejected());
+                self.write(move |w| append(w, &rejecting, Actor::User, rejected))
+                    .await?;
+                Err(failed.answer(id, session.is_some()))
+            }
+            Ok(resumed) => {
+                let done = Done {
+                    agent: agent.clone(),
+                    change: AgentChange::Relaunched,
+                    was: launch
+                        .external_ref
+                        .as_ref()
+                        .map(|session| session.id.clone()),
+                    harness_name: launch.name.clone(),
+                    prompt_hash,
+                    resumed,
+                };
+                self.finish(&agent, key, &request, move |w| {
+                    Ok(vec![requested, done.recorded(w)?])
+                })
+                .await
+            }
+        }
+    }
+
+    /// The agent `id`, in a state `command` takes, at `generation`, with what it was launched
+    /// with; or the key's first answer.
+    async fn found(
+        &self,
+        id: &str,
+        key: &str,
+        request: &str,
+        generation: u64,
+        command: AgentCommand,
+    ) -> Result<Result<Found, AgentCommandResponse>, AgentError> {
+        let found = match self
+            .begin(id, key, request, generation, offers(command))
+            .await?
+        {
+            Begun::Prior(prior) => return Ok(Err(prior)),
+            Begun::Found(found) => found,
+        };
+        let reading = found.agent_id.clone();
+        let launch = self
+            .write(move |w| Ok(w.reads().agent_launch(reading.as_str())?))
+            .await?
+            .ok_or_else(|| no_terminal(id))?;
+        Ok(Ok(Found { found, launch }))
+    }
+
+    /// The session the agent is on, where its harness says it resumes.
+    fn resumable<'l>(
+        &self,
+        id: &str,
+        launch: &'l AgentLaunch,
+    ) -> Result<&'l ExternalRef, AgentError> {
+        launch
+            .external_ref
+            .as_ref()
+            .filter(|_| self.resumes(launch))
+            .ok_or_else(|| AgentError::NotResumable(id.to_owned()))
+    }
+
+    /// The prompt the agent's role gives now, written to the file its start reads.
+    fn prompt_for(
+        &self,
+        agent: &AgentId,
+        launch: &AgentLaunch,
+    ) -> Result<(Composed, String), AgentError> {
+        let roles = self.deps.roles.current();
+        let prompt = compose(FLEET, &roles.book, launch.role.as_ref());
+        let prompt_file = self
+            .deps
+            .prompts
+            .write(agent, &prompt.text)
+            .map_err(|err| {
+                AgentError::Internal(format!("agent {agent}'s prompt can't be written: {err}"))
+            })?
+            .to_string_lossy()
+            .into_owned();
+        Ok((prompt, prompt_file))
     }
 
     /// Refuses to start `agent` again on a session another agent holds, for a harness whose
@@ -272,8 +465,108 @@ impl Agents {
             })
     }
 
-    /// Starts the agent's process again in its terminal, on a new token, resuming its session.
-    async fn start_again(&self, agent: &AgentId, again: Again<'_>) -> Result<Resumed, Failed> {
+    /// Starts the agent's process again in its terminal, at its next generation.
+    async fn start_again(
+        &self,
+        agent: &AgentId,
+        terminal: Recorded,
+        again: Again<'_>,
+    ) -> Result<Resumed, Failed> {
+        let (cwd, generation) = (again.launch.cwd.clone(), again.generation);
+        let command = self.command_for(agent, again).await?;
+        let restart = Restart {
+            argv: command.argv,
+            cwd,
+            env: command.env,
+            theme: command.theme,
+            generation,
+        };
+        match self.deps.terminals.respawn(&terminal, restart).await {
+            Ok(locator) => {
+                command.token.kept().await;
+                Ok(Resumed {
+                    locator,
+                    session: command.session,
+                    theme: command.theme,
+                })
+            }
+            Err(err) => {
+                command.token.abandoned().await;
+                Err(Failed::Terminal(err))
+            }
+        }
+    }
+
+    /// Starts the agent on the new terminal `terminal`, once no holder runs the one it was lost
+    /// on.
+    async fn start_new(
+        &self,
+        agent: &AgentId,
+        lost: &TerminalId,
+        terminal: TerminalId,
+        again: Again<'_>,
+    ) -> Result<Resumed, Failed> {
+        self.refuse_still_running(lost).await?;
+        let (cwd, generation) = (again.launch.cwd.clone(), again.generation);
+        let command = self.command_for(agent, again).await?;
+        let harness_session = match command.session.as_ref().map(session_tag).transpose() {
+            Ok(tag) => tag,
+            Err(err) => {
+                command.token.abandoned().await;
+                return Err(Failed::Harness(LaunchError::Unavailable(err.to_string())));
+            }
+        };
+        let spec = NewTerminal {
+            terminal_id: terminal,
+            kind: Kind::Agent {
+                agent_id: agent.clone(),
+                harness_session,
+            },
+            argv: command.argv,
+            cwd,
+            env: command.env,
+            theme: command.theme,
+            generation,
+        };
+        match self.deps.terminals.create(spec).await {
+            Ok(locator) => {
+                command.token.kept().await;
+                Ok(Resumed {
+                    locator,
+                    session: command.session,
+                    theme: command.theme,
+                })
+            }
+            Err(err) => {
+                command.token.abandoned().await;
+                Err(Failed::Terminal(err))
+            }
+        }
+    }
+
+    /// Refuses a new terminal for an agent whose lost one a holder still runs, as one whose
+    /// socket has gone does; or when the holders can't be listed, rather than risk two TUIs on
+    /// one agent. Only the last terminal is asked of: any before it was lost, and found not
+    /// running, when the agent was last relaunched.
+    async fn refuse_still_running(&self, lost: &TerminalId) -> Result<(), Failed> {
+        let holders = self
+            .deps
+            .terminals
+            .holders()
+            .await
+            .map_err(Failed::Unlisted)?;
+        if holders
+            .iter()
+            .any(|holder| holder.terminal_id == lost.as_str())
+        {
+            return Err(Failed::Exists(lost.clone()));
+        }
+        Ok(())
+    }
+
+    /// The harness's command to start the agent on its session, or on a fresh one, and the new
+    /// token it starts with.
+    async fn command_for(&self, agent: &AgentId, again: Again<'_>) -> Result<Command, Failed> {
         let harness = self
             .deps
             .harnesses
@@ -294,19 +587,20 @@ impl Agents {
             name: again.launch.name.clone().filter(|name| !name.is_empty()),
             compact_window_tokens: again.launch.compact_window_tokens.map(u64::from),
         };
-        let resuming = harness
-            .resume(&request, again.session, None)
-            .ok_or_else(|| {
+        let starting = match again.session {
+            Some(session) => harness.resume(&request, session, None).ok_or_else(|| {
                 Failed::Harness(LaunchError::Refused(
                     "its harness starts no session again".to_owned(),
                 ))
-            })?;
+            })?,
+            None => harness.launch(&request, None),
+        };
         let LaunchSpec {
             argv,
             env,
             theme,
             session,
-        } = resuming.await.map_err(Failed::Harness)?;
+        } = starting.await.map_err(Failed::Harness)?;
         let token = self
             .deps
             .tokens
@@ -314,32 +608,23 @@ impl Agents {
             .await
             .map_err(|err| Failed::Token(err.to_string()))?;
         let (argv, env) = self.process_of(agent, &token.file, argv, env);
-        let restart = Restart {
+        Ok(Command {
             argv,
-            cwd: again.launch.cwd.clone(),
             env,
             theme,
-            generation: again.generation,
-        };
-        match self.deps.terminals.respawn(&again.terminal, restart).await {
-            Ok(locator) => {
-                token.kept().await;
-                Ok(Resumed {
-                    locator,
-                    session: session.map(|session| ExternalRef {
-                        environment_id: again.session.environment_id.clone(),
-                        kind: session.kind,
-                        id: session.id,
-                    }),
-                    theme,
-                })
-            }
-            Err(err) => {
-                token.abandoned().await;
-                Err(Failed::Terminal(err))
-            }
-        }
+            session: session.map(|session| ExternalRef {
+                environment_id: again.environment,
+                kind: session.kind,
+                id: session.id,
+            }),
+            token,
+        })
     }
+}
+
+/// Refused: the agent has no terminal recorded to start it again from.
+fn no_terminal(id: &str) -> AgentError {
+    AgentError::Conflict(format!("agent {id} has no terminal recorded"))
 }
 
 #[cfg(test)]
@@ -359,13 +644,44 @@ pub(crate) mod tests {
     /// An agent launched on `stub` asking for a light theme, which it draws dark, whose process
     /// has since exited; and its generation.
     pub(crate) fn exited(stub: &StubHarness) -> (Fixture, AgentId, u64) {
-        let f = stubbed(stub);
+        let (f, agent) = launched(stub);
+        f.fake_exit_unseen(&f.terminal_of(agent.as_str()));
+        ended(
+            f,
+            agent,
+            AgentChange::Exited(AgentExited {
+                exit: ExitStatus::Unknown,
+            }),
+        )
+    }
+
+    /// The same, but its terminal has since been lost.
+    pub(crate) fn lost(stub: &StubHarness) -> (Fixture, AgentId, u64) {
+        lost_on(stubbed(stub))
+    }
+
+    /// The same, on `f`.
+    fn lost_on(f: Fixture) -> (Fixture, AgentId, u64) {
+        let (f, agent) = launched_on(f);
+        f.fake().gone(&f.terminal_of(agent.as_str()));
+        ended(f, agent, AgentChange::Lost)
+    }
+
+    fn launched(stub: &StubHarness) -> (Fixture, AgentId) {
+        launched_on(stubbed(stub))
+    }
+
+    fn launched_on(f: Fixture) -> (Fixture, AgentId) {
         let launch = LaunchAgentRequest {
             theme: Some(TuiTheme::Light),
             ..request("k-1")
         };
         let agent = runtime().block_on(f.launch(launch)).unwrap().agent_id;
-        f.fake_exit_unseen(&f.terminal_of(agent.as_str()));
+        (f, agent)
+    }
+
+    /// `agent` recorded as `change` says its terminal ended; with its generation.
+    fn ended(f: Fixture, agent: AgentId, change: AgentChange) -> (Fixture, AgentId, u64) {
         let recorded = agent.clone();
         runtime()
             .block_on(f.store.run(move |store| {
@@ -373,9 +689,7 @@ pub(crate) mod tests {
                     w.append(&NewEvent::Agent {
                         agent: recorded,
                         actor: Actor::System.as_str().to_owned(),
-                        change: AgentChange::Exited(AgentExited {
-                            exit: ExitStatus::Unknown,
-                        }),
+                        change,
                     })
                 })
             }))
@@ -663,6 +977,222 @@ pub(crate) mod tests {
                     .map(|p| p["externalRef"]["id"].clone()),
             ),
             (Ok(2), Some(moved), Some(serde_json::json!("moved-session")))
+        );
+    }
+
+    fn relaunching(key: &str, generation: u64, fresh: Option<bool>) -> RelaunchAgentRequest {
+        RelaunchAgentRequest {
+            idempotency_key: key.to_owned(),
+            generation,
+            theme: None,
+            fresh,
+        }
+    }
+
+    /// The agent's terminal now, and the command, generation and agent it was created with.
+    fn created(f: &Fixture, agent: &AgentId) -> (String, Vec<String>, u64, Option<String>) {
+        let terminal = f.terminal_of(agent.as_str());
+        let spec = f.fake().spec_of(&terminal);
+        let id = spec.env.get("BAZHEN_AGENT_ID").cloned();
+        (terminal, spec.argv, spec.generation, id)
+    }
+
+    #[test]
+    fn relaunches_a_lost_agent_on_a_new_terminal_at_the_next_generation_resuming_its_session() {
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost(&stub);
+        let was = f.terminal_of(agent.as_str());
+        let before = f.types().len();
+        let calls = Calls::default();
+        let id = agent.as_str();
+        let [first, again] = [(); 2].map(|()| {
+            runtime().block_on(f.agents.relaunch(
+                id,
+                &relaunching("r-1", generation, None),
+                recording(&f, &calls),
+            ))
+        });
+        let now = found(&f, &agent);
+        let asked: Vec<Option<TuiTheme>> = stub
+            .resumes_asked
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(request, _)| request.theme)
+            .collect();
+        let (terminal, argv, generation_now, agent_env) = created(&f, &agent);
+        let mut resumed: Vec<String> = STUB_RESUME_ARGV.map(str::to_owned).to_vec();
+        resumed.push(STUB_SESSION.to_owned());
+        assert_ne!(terminal, was);
+        assert_eq!(
+            (
+                f.types().split_off(before),
+                first.as_ref().map(|first| first.event_ids.len()),
+                first == again,
+                calls.lock().unwrap().clone(),
+                asked,
+                (argv, generation_now, agent_env),
+                (now.state, now.generation),
+            ),
+            (
+                vec![
+                    "agent.relaunch_requested".to_owned(),
+                    "agent.relaunched".to_owned()
+                ],
+                Ok(2),
+                true,
+                vec![(agent.clone(), Some("agent.relaunch_requested".to_owned()))],
+                vec![Some(TuiTheme::Dark)],
+                (resumed, generation + 1, Some(id.to_owned())),
+                (AgentState::Starting, Some(generation + 1)),
+            )
+        );
+    }
+
+    #[test]
+    fn relaunches_a_lost_agent_its_harness_cant_resume_on_a_fresh_session_when_asked() {
+        let stub = StubHarness::new(pull());
+        let (f, agent, generation) = lost(&stub);
+        let launched = f.fake().spec_of(&f.terminal_of(agent.as_str())).argv;
+        let id = agent.as_str();
+        let answer = runtime().block_on(f.agents.relaunch(
+            id,
+            &relaunching("r-1", generation, Some(true)),
+            recording(&f, &Calls::default()),
+        ));
+        let (_, argv, started_at, _) = created(&f, &agent);
+        assert_eq!(
+            (
+                answer.map(|answer| answer.event_ids.len()),
+                stub.launches.lock().unwrap().len(),
+                stub.resumes_asked.lock().unwrap().len(),
+                argv == launched,
+                started_at,
+            ),
+            (Ok(2), 2, 0, true, generation + 1)
+        );
+    }
+
+    #[test]
+    fn refuses_to_relaunch_an_agent_whose_session_cant_resume_recording_nothing() {
+        let stub = StubHarness::new(pull());
+        let (f, agent, generation) = lost(&stub);
+        let before = f.types().len();
+        let calls = Calls::default();
+        let id = agent.as_str();
+        let refused = runtime().block_on(f.agents.relaunch(
+            id,
+            &relaunching("r-1", generation, None),
+            recording(&f, &calls),
+        ));
+        assert_eq!(
+            (
+                refused,
+                f.types().len(),
+                calls.lock().unwrap().len(),
+                found(&f, &agent).state
+            ),
+            (
+                Err(AgentError::NotResumable(id.to_owned())),
+                before,
+                0,
+                AgentState::Lost
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_relaunch_past_the_budget_recording_nothing() {
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost_on(crate::agents::tests::setup_with(
+            crate::agents::tests::Setup {
+                harnesses: stub.served_as(bazhen_protocol::agents::HarnessId::ClaudeCode),
+                max: 1,
+                ..crate::agents::tests::Setup::default()
+            },
+        ));
+        // The one slot, which the lost terminal gave up, taken by another agent.
+        runtime().block_on(f.launch(request("k-2"))).unwrap();
+        let before = f.types().len();
+        let refused = runtime().block_on(f.agents.relaunch(
+            agent.as_str(),
+            &relaunching("r-1", generation, None),
+            recording(&f, &Calls::default()),
+        ));
+        assert!(matches!(refused, Err(AgentError::Limit(_))), "{refused:?}");
+        assert_eq!(f.types().len(), before);
+    }
+
+    /// A relaunch of a lost agent whose old terminal the fake's holders list as `holding`, or
+    /// can't list; with the answer, the events it recorded and the agent's state and terminal.
+    fn relaunched_beside(
+        holders: impl FnOnce(&mut crate::terminals::fake::State, &str),
+    ) -> (
+        Result<AgentCommandResponse, AgentError>,
+        Vec<String>,
+        AgentState,
+        bool,
+        String,
+    ) {
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost(&stub);
+        let was = f.terminal_of(agent.as_str());
+        f.fake().set(|state| holders(state, &was));
+        let before = f.types().len();
+        let answer = runtime().block_on(f.agents.relaunch(
+            agent.as_str(),
+            &relaunching("r-1", generation, None),
+            recording(&f, &Calls::default()),
+        ));
+        let now = found(&f, &agent);
+        (
+            answer,
+            f.types().split_off(before),
+            now.state,
+            now.terminal_id.is_some_and(|t| t.as_str() == was),
+            agent.as_str().to_owned(),
+        )
+    }
+
+    #[test]
+    fn refuses_a_relaunch_while_a_holder_still_runs_the_lost_terminal() {
+        let (answer, recorded, state, on_lost, id) =
+            relaunched_beside(|state, was| state.holding.push(was.to_owned()));
+        assert!(
+            matches!(&answer, Err(AgentError::Conflict(why)) if why.starts_with(&format!("agent {id} already has a terminal"))),
+            "{answer:?}"
+        );
+        assert_eq!(
+            (recorded, state, on_lost),
+            (
+                vec![
+                    "agent.relaunch_requested".to_owned(),
+                    "agent.relaunch_rejected".to_owned()
+                ],
+                AgentState::Lost,
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_relaunch_when_whether_the_lost_terminal_still_runs_cant_be_told() {
+        let (answer, recorded, state, on_lost, _) =
+            relaunched_beside(|state, _| state.fail_holders = true);
+        assert!(
+            matches!(&answer, Err(AgentError::Unavailable(_))),
+            "{answer:?}"
+        );
+        assert_eq!(
+            (recorded, state, on_lost),
+            (
+                vec![
+                    "agent.relaunch_requested".to_owned(),
+                    "agent.relaunch_rejected".to_owned()
+                ],
+                AgentState::Lost,
+                true
+            )
         );
     }
 }

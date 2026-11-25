@@ -336,6 +336,8 @@ pub(crate) mod fake {
         /// What each close fails with, where it fails as no unreachable runtime does.
         pub(crate) closes_refused: Option<TerminalError>,
         pub(crate) fail_holders: bool,
+        /// The terminals a holder still runs, as its holders list them.
+        pub(crate) holding: Vec<String>,
         /// What each read of what the runtime holds fails with, where it can't be read: no
         /// inventory, foreground or compatibility.
         pub(crate) reads_refused: Option<TerminalError>,
@@ -860,10 +862,23 @@ pub(crate) mod fake {
 
         fn holders(&self) -> Answer<'_, Result<Vec<RunningHolder>, String>> {
             Box::pin(async {
-                if self.state.lock().unwrap().fail_holders {
+                let state = self.state.lock().unwrap();
+                if state.fail_holders {
                     return Err("the fake can't list its holders".to_owned());
                 }
-                Ok(Vec::new())
+                Ok(state
+                    .holding
+                    .iter()
+                    .map(|terminal| RunningHolder {
+                        terminal_id: terminal.clone(),
+                        build: None,
+                        protocol: Vec::new(),
+                        contained: bazhen_protocol::nullable::Nullable::Absent,
+                        socket: None,
+                        holder_pid: bazhen_protocol::nullable::Nullable::Absent,
+                        stats: bazhen_protocol::nullable::Nullable::Absent,
+                    })
+                    .collect())
             })
         }
 

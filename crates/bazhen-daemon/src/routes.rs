@@ -405,6 +405,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/close", post(agent_routes::close))
         .route("/v1/agents/{id}/signal", post(agent_routes::signal))
         .route("/v1/agents/{id}/respawn", post(agent_routes::respawn))
+        .route("/v1/agents/{id}/relaunch", post(agent_routes::relaunch))
         // A hook carries what its harness sent, such as a whole file an edit wrote, and the
         // TypeScript daemon bounds neither body.
         .route(
@@ -469,6 +470,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/agents/{id}/close", post(agent_routes::close))
         .route("/agents/{id}/signal", post(agent_routes::signal))
         .route("/agents/{id}/respawn", post(agent_routes::respawn))
+        .route("/agents/{id}/relaunch", post(agent_routes::relaunch))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))
@@ -810,6 +812,39 @@ mod tests {
                 respawn(&shared, id, "r-1", generation),
                 respawn(&shared, id, "r-1", generation),
                 respawn(&shared, id, "r-2", generation),
+            ],
+            [
+                (200, answered.clone()),
+                (200, answered),
+                (409, refused("conflict", &format!("agent {id} is starting"))),
+            ]
+        );
+    }
+
+    /// Relaunches `agent` over the socket with `key` at `generation`, on a fresh session.
+    fn relaunch_fresh(shared: &Shared, agent: &str, key: &str, generation: u64) -> (u16, Value) {
+        let body = json!({ "idempotencyKey": key, "generation": generation, "fresh": true });
+        send(
+            socket_router(shared.clone()),
+            post(&format!("/v1/agents/{agent}/relaunch"), &[], &body),
+        )
+    }
+
+    #[test]
+    fn relaunches_a_lost_agent_fresh_answering_a_repeat_as_the_first_and_refusing_it_while_it_starts()
+     {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let (f, agent, generation) = crate::agents::restart::tests::lost(&StubHarness::new(pull()));
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let before = f.types().len() as u64;
+        let id = agent.as_str();
+        let answered = json!({ "agentId": id, "eventIds": [before + 1, before + 2] });
+        assert_eq!(
+            [
+                relaunch_fresh(&shared, id, "r-1", generation),
+                relaunch_fresh(&shared, id, "r-1", generation),
+                relaunch_fresh(&shared, id, "r-2", generation),
             ],
             [
                 (200, answered.clone()),
