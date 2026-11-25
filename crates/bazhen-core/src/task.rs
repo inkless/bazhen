@@ -292,8 +292,7 @@ pub enum Finish<'v> {
 /// finishes the task, except that only the human cancels a task the human owns; a worker's
 /// `done` completes only its own assignment, since others may still be working on the task. A
 /// task with open subtasks finishes only when told to cancel them with it
-/// ([`Subtasks::CancelWithIt`]), so no
-/// subtask outlives the work it was part of.
+/// ([`Subtasks::CancelWithIt`]), so no subtask outlives the work it was part of.
 ///
 /// # Errors
 ///
