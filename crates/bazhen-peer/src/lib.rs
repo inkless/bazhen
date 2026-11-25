@@ -37,6 +37,10 @@ use rustix::process::{Pid, geteuid};
 /// Past any real process tree's depth: a walk this long is a cycle, and is refused.
 pub const MAX_ANCESTORS: usize = 256;
 
+/// The most processes read as holders of one TCP caller's socket. A socket is shared only by
+/// inheritance or by passing it on, so a real caller's is held by one or a few.
+pub const MAX_HOLDERS: usize = 16;
+
 /// How many times `line_of` reads a caller's line before it refuses one that keeps changing.
 pub const LINE_TRIES: usize = 8;
 
@@ -104,6 +108,26 @@ pub enum Refused {
     /// The walk went past `MAX_ANCESTORS` without reaching a process with no parent.
     #[error("the caller's ancestors go past {MAX_ANCESTORS} processes")]
     Endless,
+    /// No socket in the connection tables is the caller's end: it has closed, or the connection
+    /// isn't on this host's loopback.
+    #[error("no socket on this host is the caller's end of the connection")]
+    NoEnd,
+    /// More than one socket in the tables is the caller's end, which can't be told apart.
+    #[error("more than one socket on this host is listed as the caller's end of the connection")]
+    Ambiguous,
+    /// No process that holds the caller's socket can be read: only one this user can't read can
+    /// hold it, or none does any more.
+    #[error(
+        "no process holding the caller's socket can be read ({unreadable} of this user's processes \
+         can't be)"
+    )]
+    NoReadableHolder { unreadable: usize },
+    /// More processes hold the caller's socket than are read for one request.
+    #[error("{holders} processes hold the caller's socket, past the {MAX_HOLDERS} read")]
+    TooManyHolders { holders: usize },
+    /// A process that held the caller's socket didn't hold it any more once its line was read.
+    #[error("the caller's socket changed hands while its holder was read")]
+    HolderChanged,
 }
 
 /// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
@@ -118,7 +142,16 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
     if uid != geteuid().as_raw() {
         return Err(Refused::Foreign { uid });
     }
-    let pid = bazhen_pid::peer_pid(socket)?;
+    of_pid(bazhen_pid::peer_pid(socket)?, accepted)
+}
+
+/// Who `pid` is, as `of` reads a socket's peer: its session, its line and what that says of
+/// Codex, with its start pinned across the walk and no later than `accepted`.
+///
+/// # Errors
+///
+/// As `Refused` says.
+pub fn of_pid(pid: Pid, accepted: u64) -> Result<Peer, Refused> {
     let started = started(pid, accepted)?;
     let (ancestors, names, codex) = line_of(pid, step, own_args, own_environ, thread::sleep)?;
     let peer = Peer {
