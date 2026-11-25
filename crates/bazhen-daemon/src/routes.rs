@@ -404,6 +404,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/rename", post(agent_routes::rename))
         .route("/v1/agents/{id}/close", post(agent_routes::close))
         .route("/v1/agents/{id}/signal", post(agent_routes::signal))
+        .route("/v1/agents/{id}/respawn", post(agent_routes::respawn))
         // A hook carries what its harness sent, such as a whole file an edit wrote, and the
         // TypeScript daemon bounds neither body.
         .route(
@@ -467,6 +468,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/agents/{id}/rename", post(agent_routes::rename))
         .route("/agents/{id}/close", post(agent_routes::close))
         .route("/agents/{id}/signal", post(agent_routes::signal))
+        .route("/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))

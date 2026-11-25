@@ -5,6 +5,7 @@
 
 pub(crate) mod lifecycle;
 pub(crate) mod prompts;
+pub(crate) mod restart;
 pub(crate) mod transcript;
 pub(crate) mod view;
 
@@ -64,6 +65,9 @@ pub(crate) enum AgentError {
     Conflict(String),
     #[error("agent {id} is at generation {}", generation.map_or_else(|| "null".to_owned(), |g| g.to_string()))]
     Stale { id: String, generation: Option<u64> },
+    /// The agent has no harness session that starting it again could resume.
+    #[error("agent {0} has no session to resume")]
+    NotResumable(String),
     #[error("{0}")]
     ServerUnconfirmed(String),
     #[error("{0}")]
@@ -586,27 +590,16 @@ impl Agents {
                 return Err(err);
             }
         };
-        let mut vars: BTreeMap<String, String> = env.into_iter().collect();
-        vars.insert("BAZHEN_AGENT_ID".to_owned(), agent.as_str().to_owned());
-        // Not named for its token: Codex's default shell environment policy strips every
-        // variable whose name holds KEY, SECRET or TOKEN from the commands an agent runs.
-        vars.insert(
-            "BAZHEN_AGENT_AUTH_FILE".to_owned(),
-            token.file.to_string_lossy().into_owned(),
-        );
-        vars.insert("BAZHEN_SOCKET".to_owned(), self.deps.socket.clone());
+        let (argv, env) = self.process_of(&agent, &token.file, argv, env);
         let spec = NewTerminal {
             terminal_id: terminal,
             kind: Kind::Agent {
                 agent_id: agent,
                 harness_session,
             },
-            argv: match &self.deps.login_shell {
-                Some(shell) => login_argv(shell, argv),
-                None => argv,
-            },
+            argv,
             cwd,
-            env: vars,
+            env,
             theme,
         };
         match self.deps.terminals.create(spec).await {
@@ -623,6 +616,31 @@ impl Agents {
                 Err(err.to_string())
             }
         }
+    }
+
+    /// The argv and variables an agent's process starts with, each start: its harness's, with
+    /// the daemon's own for it, through the login shell where one is set.
+    fn process_of(
+        &self,
+        agent: &AgentId,
+        token_file: &Path,
+        argv: Vec<String>,
+        env: Vec<(String, String)>,
+    ) -> (Vec<String>, BTreeMap<String, String>) {
+        let mut vars: BTreeMap<String, String> = env.into_iter().collect();
+        vars.insert("BAZHEN_AGENT_ID".to_owned(), agent.as_str().to_owned());
+        // Not named for its token: Codex's default shell environment policy strips every
+        // variable whose name holds KEY, SECRET or TOKEN from the commands an agent runs.
+        vars.insert(
+            "BAZHEN_AGENT_AUTH_FILE".to_owned(),
+            token_file.to_string_lossy().into_owned(),
+        );
+        vars.insert("BAZHEN_SOCKET".to_owned(), self.deps.socket.clone());
+        let argv = match &self.deps.login_shell {
+            Some(shell) => login_argv(shell, argv),
+            None => argv,
+        };
+        (argv, vars)
     }
 
     /// Records the agent running on its terminal, and the key's answer with it.
@@ -903,7 +921,7 @@ pub(crate) mod tests {
         }
 
         /// The payload of the last event of `kind`.
-        fn last(&self, kind: &str) -> serde_json::Value {
+        pub(crate) fn last(&self, kind: &str) -> serde_json::Value {
             self.events()
                 .into_iter()
                 .rev()

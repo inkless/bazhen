@@ -32,7 +32,11 @@ struct Asked<'a, R> {
     request: &'a R,
 }
 
-fn asked<R: Serialize>(command: &str, agent_id: &str, request: &R) -> Result<String, AgentError> {
+pub(super) fn asked<R: Serialize>(
+    command: &str,
+    agent_id: &str,
+    request: &R,
+) -> Result<String, AgentError> {
     serde_json::to_string(&Asked {
         command,
         agent_id,
@@ -42,18 +46,18 @@ fn asked<R: Serialize>(command: &str, agent_id: &str, request: &R) -> Result<Str
 }
 
 /// What a command found: the first answer to its key, or the agent it may act on.
-enum Begun {
+pub(super) enum Begun {
     Prior(AgentCommandResponse),
     Found(AgentTerminal),
 }
 
 /// Whether the agent is offered `command` now (`agentCommands`).
-fn offers(command: AgentCommand) -> impl Fn(&AgentTerminal) -> bool {
+pub(super) fn offers(command: AgentCommand) -> impl Fn(&AgentTerminal) -> bool {
     move |found| agent_commands(found.state, found.terminal_state).contains(&command)
 }
 
 /// Where the agent's terminal runs, once a runtime has confirmed it.
-fn recorded(found: &AgentTerminal) -> Option<Recorded> {
+pub(super) fn recorded(found: &AgentTerminal) -> Option<Recorded> {
     Some(Recorded {
         terminal_id: found.terminal_id.clone()?,
         locator: found.locator.clone()?,
@@ -118,7 +122,7 @@ pub(crate) fn told(
 }
 
 /// Appends one change to `agent`, as `actor` made it.
-fn append(
+pub(super) fn append(
     w: &StoreWriter<'_>,
     agent: &AgentId,
     actor: Actor,
@@ -188,7 +192,7 @@ pub(crate) fn from_runtime(id: &str, cause: TerminalError) -> AgentError {
 impl Agents {
     /// The first answer to `key`, or the agent `id` names if it accepts the command at
     /// `generation`. Taken in the agent's turn.
-    async fn begin(
+    pub(super) async fn begin(
         &self,
         id: &str,
         key: &str,
@@ -225,7 +229,7 @@ impl Agents {
 
     /// Records a command's last steps, as `last` appends them, with the key's answer, in one
     /// transaction.
-    async fn finish(
+    pub(super) async fn finish(
         &self,
         agent: &AgentId,
         key: &str,
