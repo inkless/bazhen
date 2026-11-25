@@ -2,6 +2,9 @@
 //! store's task reads (`apps/daemon/src/store/store.ts`) read them: a task as its checks see it,
 //! a task in full, the line an assignment was granted under, what is active under one, what
 //! stands above a task, its open subtasks, and the subtasks whose owner no longer holds them.
+//!
+//! The recursive walks end because a parent id only ever names a row that exists when its child
+//! is written, and never changes after: no chain of parents can loop.
 
 use bazhen_core::task::{ActiveAssignment, TaskView};
 use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
@@ -70,15 +73,19 @@ struct ViewRow {
     stranded: Option<i64>,
 }
 
+/// A task's row with its brief and note, read in the one statement.
 #[derive(Deserialize)]
-struct Text {
+struct DetailRow {
+    #[serde(flatten)]
+    task: Task,
     brief: String,
     note: Option<String>,
 }
 
 impl Reads<'_> {
     /// Task `task` with its active assignments, for deciding whether a command on it is allowed,
-    /// or `None` for no such task.
+    /// or `None` for no such task. Its reads are several statements, so a verb calls it inside
+    /// the writer's transaction, where no other write lands between them.
     ///
     /// # Errors
     ///
@@ -117,44 +124,44 @@ impl Reads<'_> {
     }
 
     /// Task `task` in full: its brief and note, every assignment it has had, its subtasks and its
-    /// notes, oldest first; `None` for no such task.
+    /// notes, oldest first; `None` for no such task. It reads in a transaction of its own, so it
+    /// is called outside any other.
     ///
     /// # Errors
     ///
-    /// [`TaskReadError`] when a row doesn't read as the protocol's, or `SQLite` fails.
+    /// [`TaskReadError`] when a row doesn't read as the protocol's, or `SQLite` fails, as it does
+    /// when the connection is already in a transaction.
     pub fn task_detail(self, task: &TaskId) -> Result<Option<TaskDetail>, TaskReadError> {
+        // Every statement reads one snapshot of the database: the writer, on another thread, may
+        // finish the task between two of them, which would show it open beside assignments its
+        // finish ended. The transaction is only read, and rolled back when it drops.
+        let tx = self.0.unchecked_transaction()?;
         let id = task.as_str();
-        let Some(row) = rows::<Task>(self.0, &format!("{TASK} WHERE id = ?"), [id])?
-            .into_iter()
-            .next()
-        else {
+        let task_row = "SELECT id, title, state, owner_agent_id AS ownerAgentId,
+            parent_task_id AS parentTaskId, brief, note FROM tasks WHERE id = ?";
+        let Some(row) = rows::<DetailRow>(&tx, task_row, [id])?.into_iter().next() else {
             return Ok(None);
         };
-        let text: Vec<Text> = rows(self.0, "SELECT brief, note FROM tasks WHERE id = ?", [id])?;
-        let (brief, note) = text
-            .into_iter()
-            .next()
-            .map_or_else(Default::default, |t| (t.brief, t.note));
         Ok(Some(TaskDetail {
-            id: row.id,
-            title: row.title,
-            state: row.state,
-            owner_agent_id: row.owner_agent_id,
-            parent_task_id: row.parent_task_id,
-            brief,
-            note,
+            id: row.task.id,
+            title: row.task.title,
+            state: row.task.state,
+            owner_agent_id: row.task.owner_agent_id,
+            parent_task_id: row.task.parent_task_id,
+            brief: row.brief,
+            note: row.note,
             assignments: rows(
-                self.0,
+                &tx,
                 &format!("{ASSIGNMENT} WHERE task_id = ? ORDER BY created_event_id"),
                 [id],
             )?,
             subtasks: rows(
-                self.0,
+                &tx,
                 &format!("{TASK} WHERE parent_task_id = ? ORDER BY created_event_id"),
                 [id],
             )?,
             notes: rows(
-                self.0,
+                &tx,
                 &format!("{NOTE} WHERE n.task_id = ? ORDER BY n.event_id"),
                 [id],
             )?,
