@@ -318,6 +318,11 @@ impl Agents {
             .map_err(|err| AgentError::Internal(format!("an agent's command ended early: {err}")))?
     }
 
+    /// Runs `work` on the agents' tracker, which the daemon drains before it stops.
+    pub(crate) fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) {
+        self.deps.tracker.spawn(work);
+    }
+
     async fn write<T: Send + 'static>(
         &self,
         job: impl FnOnce(&StoreWriter<'_>) -> Result<T, AgentError> + Send + 'static,

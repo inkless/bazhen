@@ -2,6 +2,7 @@
 //! daemon drives it as it drives any, so a test under each id in turn proves the daemon asks the
 //! harness rather than naming one.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use bazhen_harness::{
@@ -38,6 +39,21 @@ pub(crate) struct StubHarness {
     resumes: bool,
     /// What it says of whether a session is one agent's at a time.
     held_alone: bool,
+    /// Why it takes no mail for any agent, if it takes none.
+    mail_refusal: Option<String>,
+    /// What each push answers, in turn; past the last, `NotNow`.
+    pushed: Arc<Mutex<VecDeque<Pushed>>>,
+    /// Each push it was handed, in order, with when, on the runtime's clock.
+    pub(crate) pushes: Arc<Mutex<Vec<StubPush>>>,
+}
+
+/// A message handed to the stub to push.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StubPush {
+    pub(crate) message_id: String,
+    pub(crate) body: String,
+    pub(crate) session: Option<String>,
+    pub(crate) at: tokio::time::Instant,
 }
 
 impl StubHarness {
@@ -50,6 +66,9 @@ impl StubHarness {
             resume_refusal: None,
             resumes: false,
             held_alone: false,
+            mail_refusal: None,
+            pushed: Arc::default(),
+            pushes: Arc::default(),
         }
     }
 
@@ -75,6 +94,18 @@ impl StubHarness {
             resume_refusal: Some(refusal),
             ..self
         }
+    }
+
+    /// The same, taking no mail for any agent, for `reason`.
+    pub(crate) fn refusing_mail(mut self, reason: &str) -> Self {
+        self.mail_refusal = Some(reason.to_owned());
+        self
+    }
+
+    /// The same, answering its pushes with `answers` in turn.
+    pub(crate) fn pushing(self, answers: impl IntoIterator<Item = Pushed>) -> Self {
+        self.pushed.lock().unwrap().extend(answers);
+        self
     }
 
     /// The same, refusing every launch with `refusal`.
@@ -202,15 +233,26 @@ impl Harness for StubHarness {
     }
 
     fn accepts_mail(&self, _agent: &AgentRef<'_>) -> Result<(), MailRefusal> {
-        Ok(())
+        self.mail_refusal.as_ref().map_or(Ok(()), |reason| {
+            Err(MailRefusal {
+                reason: reason.clone(),
+            })
+        })
     }
 
     fn push<'a>(
         &'a self,
-        _mail: &'a Outgoing<'a>,
+        mail: &'a Outgoing<'a>,
         _port: &'a dyn PushPort,
     ) -> BoxFuture<'a, Pushed> {
-        ready(Pushed::NotNow)
+        self.pushes.lock().unwrap().push(StubPush {
+            message_id: mail.message_id.to_owned(),
+            body: mail.body.to_owned(),
+            session: mail.session.map(|s| s.id.clone()),
+            at: tokio::time::Instant::now(),
+        });
+        let answer = self.pushed.lock().unwrap().pop_front();
+        ready(answer.unwrap_or(Pushed::NotNow))
     }
 
     fn answer(&self, _to: &Pending<'_>, _with: Resolution<'_>) -> Answer {

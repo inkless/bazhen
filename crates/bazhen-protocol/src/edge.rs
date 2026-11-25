@@ -13,14 +13,16 @@ use crate::agents::{
     CloseAgentRequest, RelaunchAgentRequest, RespawnAgentRequest, SignalAgentRequest,
 };
 use crate::ids::TaskId;
-use crate::mail::{HookAck, HookRequest};
+use crate::mail::{HookAck, HookRequest, SendMessageRequest};
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
 use crate::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
     SHELL_NAME_MAX_CHARS, ShellDecline, ShellPrompt, ShellReport, UnlinkShellRequest,
 };
 use crate::tasks::CreateTaskRequest;
-use crate::text::{TASK_BRIEF_MAX_CHARS, TASK_TITLE_MAX_CHARS, showable, title_safe, trim};
+use crate::text::{
+    MESSAGE_BODY_MAX_CHARS, TASK_BRIEF_MAX_CHARS, TASK_TITLE_MAX_CHARS, showable, title_safe, trim,
+};
 
 /// The most code points an idempotency key has.
 pub const IDEMPOTENCY_KEY_MAX_CHARS: usize = 200;
@@ -110,6 +112,9 @@ pub const TITLE_RULE: &str = "title is 1 to 200 characters once trimmed, with no
 /// The rule a task's brief holds to, as a refusal names it.
 pub const BRIEF_RULE: &str = "brief is 1 to 20000 characters";
 
+/// The rule a message's body holds to, as a refusal names it.
+pub const MESSAGE_BODY_RULE: &str = "body is 1 to 20000 characters";
+
 /// The rule a task's parent holds to, as a refusal names it.
 pub const PARENT_RULE: &str = "parentTaskId is a task id";
 
@@ -167,6 +172,17 @@ impl EdgeCheck for CreateTaskRequest {
                 .as_deref()
                 .is_none_or(|id| TaskId::parse(id).is_some()),
             PARENT_RULE,
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for SendMessageRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        holds(
+            (1..=MESSAGE_BODY_MAX_CHARS).contains(&chars(&self.body)),
+            MESSAGE_BODY_RULE,
         )?;
         Ok(self)
     }
@@ -359,6 +375,26 @@ mod tests {
     }
 
     const KEY: &str = "k1";
+
+    #[test]
+    fn a_message_is_taken_with_a_body_of_1_to_20000_code_points_and_a_key() {
+        let send = |key: &str, body: &str| json!({ "idempotencyKey": key, "body": body });
+        let longest = "\u{1f600}".repeat(20_000);
+        assert_eq!(
+            [
+                verdict::<SendMessageRequest>(&send(KEY, &longest)).is_ok(),
+                refused::<SendMessageRequest>(&send(KEY, "")),
+                refused::<SendMessageRequest>(&send(KEY, &"b".repeat(20_001))),
+                refused::<SendMessageRequest>(&send("", "b")),
+                refused::<SendMessageRequest>(&json!({ "idempotencyKey": KEY })),
+            ],
+            [true; 5]
+        );
+        assert_eq!(
+            verdict::<SendMessageRequest>(&send(KEY, "")),
+            Err(MESSAGE_BODY_RULE.to_owned())
+        );
+    }
 
     #[test]
     fn a_hook_is_taken_with_its_payload_as_sent_and_refused_past_a_safe_pid() {

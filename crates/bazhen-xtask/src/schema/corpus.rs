@@ -174,6 +174,20 @@ pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
         LONE,
     ),
     (
+        "SendMessageRequest",
+        "/body",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "SendMessageRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
         "ShellDecline",
         "/token",
         "loneSurrogate",

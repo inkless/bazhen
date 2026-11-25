@@ -63,6 +63,11 @@ const ROUTES: &[(&str, &str, bool)] = &[
     ("ShellReport", "/v1/shells/term_1/report", false),
     ("ShellPrompt", "/v1/shells/term_1/prompt", false),
     ("ShellDecline", "/v1/shells/term_1/decline", false),
+    (
+        "SendMessageRequest",
+        "/v1/agents/agent_01900000000070008000000000000001/messages",
+        false,
+    ),
     ("PairRequest", "/v1/pairing", true),
 ];
 

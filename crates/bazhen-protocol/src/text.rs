@@ -64,6 +64,8 @@ pub fn task_note_text(text: &str) -> Result<String, NoteRefused> {
 /// them.
 pub const TASK_TITLE_MAX_CHARS: usize = 200;
 pub const TASK_BRIEF_MAX_CHARS: usize = 20_000;
+/// The most code points a message's body has, as zod's `.max` counts them.
+pub const MESSAGE_BODY_MAX_CHARS: usize = 20_000;
 
 /// Whether a title holds nothing that could end or disguise its line of mail: no control
 /// character, bidirectional override, invisible or tag character.

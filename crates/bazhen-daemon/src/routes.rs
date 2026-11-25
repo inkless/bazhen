@@ -106,6 +106,9 @@ pub(crate) struct Shared {
     pub(crate) roles: Arc<Roles>,
     /// What the agents' hooks keep between requests.
     pub(crate) hooks: Arc<crate::hooks::Hooks>,
+    /// What a harness that takes mail by push is handed it through; with none, its mail stays
+    /// queued. No harness this daemon serves takes mail by push yet.
+    pub(crate) push: Option<crate::mail::PushTo>,
 }
 
 impl Shared {
@@ -131,6 +134,7 @@ impl Shared {
             streams: None,
             roles: Arc::new(Roles::new(None)),
             hooks: Arc::new(crate::hooks::Hooks::default()),
+            push: None,
         }
     }
 
@@ -406,6 +410,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/signal", post(agent_routes::signal))
         .route("/v1/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/v1/agents/{id}/relaunch", post(agent_routes::relaunch))
+        .route("/v1/agents/{id}/messages", post(crate::mail::send))
         // A hook carries what its harness sent, such as a whole file an edit wrote, and the
         // TypeScript daemon bounds neither body.
         .route(
@@ -471,6 +476,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/agents/{id}/signal", post(agent_routes::signal))
         .route("/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/agents/{id}/relaunch", post(agent_routes::relaunch))
+        .route("/agents/{id}/messages", post(crate::mail::send))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))

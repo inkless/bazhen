@@ -17,6 +17,7 @@ mod fixture;
 mod hooks;
 mod mail;
 mod mail_events;
+mod mailbox;
 mod migrations;
 mod private;
 mod projections;
@@ -53,6 +54,7 @@ pub use events::{
 pub use hooks::{AgentBinding, MAX_TRANSCRIPT_PATH};
 pub use mail::IN_FLIGHT;
 pub use mail_events::{AttentionChange, MailChange};
+pub use mailbox::{Message, Sender};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::{SnapshotError, SnapshotView};
 pub use task_events::{AssignmentChange, TaskChange};
