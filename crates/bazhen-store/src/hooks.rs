@@ -178,6 +178,31 @@ impl Writer<'_> {
         self.append(&system(agent, change)).map(Some)
     }
 
+    /// Records the usage the agent's harness reports (`store.ts` `recordUsage`), unless the agent
+    /// isn't in a state that reports, or it is what the agent's usage already holds.
+    ///
+    /// # Errors
+    ///
+    /// The read's and the append's.
+    pub fn record_usage(&self, agent: &AgentId, usage: &Usage) -> Result<Option<u64>, AppendError> {
+        if !self.reporting(agent)? {
+            return Ok(None);
+        }
+        let held: Option<String> = self.reads().first_text(
+            "SELECT usage FROM agent_sessions WHERE id = ?",
+            agent.as_str(),
+        )?;
+        if held
+            .and_then(|text| serde_json::from_str::<Usage>(&text).ok())
+            .as_ref()
+            == Some(usage)
+        {
+            return Ok(None);
+        }
+        let change = AgentChange::Usage(usage.clone());
+        self.append(&system(agent, change)).map(Some)
+    }
+
     /// Records that the agent's session compacted its context (`store.ts` `recordCompaction`),
     /// with the usage recorded last as what it held before, unless the agent isn't in a state that
     /// reports, or the same hook, by its session and process, reported it already.
@@ -281,7 +306,7 @@ fn system(agent: &AgentId, change: AgentChange) -> NewEvent {
 mod tests {
     use bazhen_protocol::agent_events::{CompactedHook, CompactedSign, ReadySign};
     use bazhen_protocol::agents::{
-        Activity, ActivitySource, ActivityValue, ExternalRef, ExternalRefKind,
+        Activity, ActivitySource, ActivityValue, ExternalRef, ExternalRefKind, Usage,
     };
     use bazhen_protocol::ids::{AgentId, EnvironmentId};
 
@@ -584,6 +609,48 @@ mod tests {
             Some(
                 r#"{"sign":"claude_hook","before":{"model":"opus","contextUsedPercent":80},"hook":{"sessionId":"s-1","pid":7}}"#
             )
+        );
+    }
+
+    #[test]
+    fn records_usage_only_when_it_changes_and_only_while_the_agent_reports() {
+        let dir = TempDir::new("usage");
+        let mut store = store(&dir, Some(BOUND));
+        let usage = |percent: f64| Usage {
+            model: Some("opus".to_owned()),
+            context_used_percent: Some(percent),
+            context_window_tokens: None,
+            limits: None,
+        };
+        let mut record = |usage: Usage| {
+            store
+                .write(|w| w.record_usage(&agent(), &usage))
+                .unwrap()
+                .is_some()
+        };
+        let recorded = [
+            record(usage(10.0)),
+            record(usage(10.0)),
+            record(usage(20.0)),
+        ];
+        store
+            .db
+            .execute_batch("UPDATE agent_sessions SET state = 'exited'")
+            .unwrap();
+        let exited = store
+            .write(|w| w.record_usage(&agent(), &usage(30.0)))
+            .unwrap()
+            .is_some();
+        assert_eq!((recorded, exited), ([true, false, true], false));
+        assert_eq!(
+            events(&store)
+                .into_iter()
+                .map(|(kind, payload)| format!("{kind} {payload}"))
+                .collect::<Vec<_>>(),
+            [
+                r#"agent.usage {"model":"opus","contextUsedPercent":10}"#,
+                r#"agent.usage {"model":"opus","contextUsedPercent":20}"#,
+            ]
         );
     }
 

@@ -318,7 +318,7 @@ impl Writer<'_> {
 }
 
 /// An item Bazhen opens for `agent` itself, about no tool call.
-fn raised(
+pub(crate) fn raised(
     agent: &AgentId,
     kind: AttentionKind,
     summary: &str,
@@ -335,9 +335,35 @@ fn raised(
     }
 }
 
+/// How `change` ends the start an open stuck-starting item is about, if it does: the harness came
+/// up, or the start is over, as its process went or another start replaced it.
+fn start_ended(change: &AgentChange) -> Option<AttentionClosedReason> {
+    match change {
+        AgentChange::Ready(_) => Some(AttentionClosedReason::AnsweredInTui),
+        AgentChange::Exited(_)
+        | AgentChange::Lost
+        | AgentChange::Closing
+        | AgentChange::Failed(_)
+        | AgentChange::RespawnRequested
+        | AgentChange::RespawnRejected(_)
+        | AgentChange::RelaunchRequested(_)
+        | AgentChange::RelaunchRejected(_) => Some(AttentionClosedReason::Stale),
+        _ => None,
+    }
+}
+
 /// Opens or closes the items `event`, just recorded, causes (`Inbox.react`): mail given up on opens
-/// one, and an agent closing closes those only it could have answered.
+/// one, the end of a start closes the item saying it hasn't come up, and an agent closing closes
+/// those only it could have answered.
 pub(crate) fn react(w: &Writer<'_>, event: &NewEvent) -> Result<(), AppendError> {
+    if let NewEvent::Agent { agent, change, .. } = event
+        && let Some(reason) = start_ended(change)
+    {
+        let stuck: Vec<AttentionId> = w.open_of(agent, &AttentionKind::StuckStarting)?.collect();
+        for id in stuck {
+            w.close_attention(&id, reason, "system")?;
+        }
+    }
     match event {
         NewEvent::Mail {
             message,
