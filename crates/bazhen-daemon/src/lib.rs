@@ -24,6 +24,7 @@ mod hook_link;
 mod hooks;
 mod lock;
 mod log;
+mod mail;
 mod paired;
 mod pairing;
 mod peer;
