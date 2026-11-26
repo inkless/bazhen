@@ -438,6 +438,30 @@ impl Writer<'_> {
     pub fn connection(&self) -> &Connection {
         &self.tx
     }
+
+    /// Runs `step` as a part of this transaction that may fail alone: where it errs, all it wrote
+    /// is undone, and the transaction goes on without it. Answers what `step` answered.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, in marking the step or undoing it: the transaction can't be trusted then, and
+    /// its caller is to return the error.
+    pub fn undoable<T, E>(
+        &self,
+        step: impl FnOnce(&Self) -> Result<T, E>,
+    ) -> rusqlite::Result<Result<T, E>> {
+        let scrub = self.scrub.get();
+        self.tx.execute_batch("SAVEPOINT undoable")?;
+        let out = step(self);
+        if out.is_ok() {
+            self.tx.execute_batch("RELEASE undoable")?;
+        } else {
+            self.tx
+                .execute_batch("ROLLBACK TO undoable; RELEASE undoable")?;
+            self.scrub.set(scrub);
+        }
+        Ok(out)
+    }
 }
 
 /// An event as stored: its payload is the text it was written as, whichever build wrote it.
@@ -856,6 +880,43 @@ mod tests {
 
     fn append(store: &mut Store, event: &NewEvent) -> u64 {
         store.write(|w| w.append(event)).unwrap()
+    }
+
+    #[test]
+    fn undoes_a_step_that_fails_and_keeps_what_the_transaction_wrote_around_it() {
+        let dir = TempDir::new("undoable");
+        let mut store = Store::open(&dir.db("undoable.db")).unwrap();
+        let written = store
+            .write(|w| {
+                let before = w.append(&created(task(1), None))?;
+                let failed = w.undoable(|w| {
+                    w.append(&created(task(2), None))?;
+                    Err::<(), _>(AppendError::Refused {
+                        event: "task.created",
+                        reason: "a step that fails".to_owned(),
+                    })
+                })?;
+                let kept = w.undoable(|w| w.append(&created(task(3), None)))??;
+                let after = w.append(&created(task(4), None))?;
+                Ok::<_, AppendError>((before, failed.is_err(), kept, after))
+            })
+            .unwrap();
+        let tasks: Vec<String> = store
+            .db
+            .prepare("SELECT id FROM tasks ORDER BY created_event_id")
+            .unwrap()
+            .query_map((), |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            (written, ids(&store), tasks),
+            (
+                (1, true, 2, 3),
+                vec![1, 2, 3],
+                [1, 3, 4].map(|n| task(n).as_str().to_owned()).to_vec()
+            )
+        );
     }
 
     #[test]

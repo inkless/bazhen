@@ -308,7 +308,7 @@ async fn shells(
         socket: startup.paths.socket.clone(),
         tracker: tracker.clone(),
         roles: Arc::clone(&shared.roles),
-        harnesses: runner.harnesses,
+        harnesses: Arc::new(runner.harnesses),
         hook_built: runner.hook.is_some(),
         tokens: AgentTokens::new(run.join("agents"), startup.uid, store.clone()),
         prompts: daemon_prompts(run, startup.uid),

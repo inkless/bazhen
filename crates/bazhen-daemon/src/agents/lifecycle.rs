@@ -2,7 +2,10 @@
 //! turn, a repeated key gets the first answer, and otherwise the agent must be in a state the
 //! command accepts, at the generation it names (`Lifecycle.command`).
 
+use std::sync::Arc;
+
 use bazhen_core::agent::agent_commands;
+use bazhen_harness::Harnesses;
 use bazhen_holder_proto::body::{ExitStatus, Exited};
 use bazhen_protocol::agent_events::{AgentExited, AgentSignalled};
 use bazhen_protocol::agents::{
@@ -18,6 +21,10 @@ use bazhen_store::{
 use serde::Serialize;
 
 use super::{AgentError, Agents};
+use crate::mail::{Handing, Queued, Sending};
+use crate::task_lift::lift_stranded;
+use crate::task_mail::line_ended_mail;
+use crate::task_verbs::{Tell, tell};
 use crate::terminals::{Recorded, TerminalError};
 
 /// The request as the idempotency key keeps it, as `JSON.stringify` writes
@@ -143,14 +150,65 @@ pub(super) fn append(
     })?)
 }
 
+/// What a close's write needs to tell those it ends and lift what it strands: the harnesses its
+/// mail goes through, and where that mail is handed once the write commits.
+#[derive(Debug, Clone)]
+pub(crate) struct Closing {
+    harnesses: Arc<Harnesses>,
+    handing: Handing,
+}
+
+/// A close as its write recorded it.
+#[derive(Debug)]
+pub(crate) struct Closed {
+    pub(crate) ids: Vec<u64>,
+    pub(crate) mail: ClosedMail,
+}
+
+/// The mail a close's write queued, handed over for delivery when this drops: after the write
+/// commits, whichever way its caller lets go of it, so none is left queued until a restart. One
+/// dropped where its write rolled back hands over mail that isn't queued, which delivers nothing.
+#[derive(Debug)]
+#[must_use = "it hands its mail over as it drops: drop it after the write commits"]
+pub(crate) struct ClosedMail {
+    handing: Handing,
+    queued: Vec<Queued>,
+}
+
+impl Drop for ClosedMail {
+    fn drop(&mut self) {
+        for queued in self.queued.drain(..) {
+            if self.handing.send(queued).is_err() {
+                return;
+            }
+        }
+    }
+}
+
 /// Records `agent` closed, and the mail still on its way to it undeliverable, as `actor` closed
 /// it (`recordClosed`): in the caller's transaction, so no mail is left on its way to an agent
-/// recorded closed but a row whose id no message could have, which `in_flight_mail` skips.
+/// recorded closed but a row whose id no message could have, which `in_flight_mail` skips. Each
+/// agent granted under one the close ends is told its line has ended, and what the close
+/// strands is lifted, in the same write, so no restart between them leaves a subtask stranded or
+/// an agent untold. Telling and lifting never stop the close: where either fails, both are
+/// undone and the close is recorded without them.
 pub(crate) fn record_closed(
     w: &StoreWriter<'_>,
+    closing: &Closing,
     agent: &AgentId,
     actor: Actor,
-) -> Result<Vec<u64>, AgentError> {
+) -> Result<Closed, AgentError> {
+    let under = w
+        .reads()
+        .active_assignments_of(agent)
+        .and_then(|held| {
+            let held: Vec<_> = held.into_iter().map(|held| held.id).collect();
+            w.reads().active_under(&held)
+        })
+        .unwrap_or_else(|err| {
+            tracing::warn!("bazhen: agent {agent} closes telling no one granted under it: {err}");
+            Vec::new()
+        });
     let mut ids = vec![append(w, agent, actor, AgentChange::Closed)?];
     for message in w.reads().in_flight_mail(agent.as_str())? {
         ids.push(w.append(&NewEvent::Mail {
@@ -161,6 +219,51 @@ pub(crate) fn record_closed(
             }),
         })?);
     }
+    let mut queued = Vec::new();
+    match w.undoable(|w| tell_and_lift(w, &closing.harnesses, under, &mut queued))? {
+        Ok(told) => ids.extend(told),
+        Err(err) => {
+            queued.clear();
+            tracing::warn!(
+                "bazhen: agent {agent} closes leaving those under it untold and what it strands \
+                 where it is, for the next start to lift: {err}"
+            );
+        }
+    }
+    Ok(Closed {
+        ids,
+        mail: ClosedMail {
+            handing: closing.handing.clone(),
+            queued,
+        },
+    })
+}
+
+/// Tells each of `under` that the line it was on has ended, then lifts what the close stranded.
+/// A lift that outruns its bound keeps what it lifted, and the close goes ahead.
+fn tell_and_lift(
+    w: &StoreWriter<'_>,
+    harnesses: &Harnesses,
+    under: Vec<bazhen_protocol::tasks::Assignment>,
+    queued: &mut Vec<Queued>,
+) -> Result<Vec<u64>, Sending> {
+    let mut to = Vec::new();
+    for ended in under {
+        let task = w
+            .reads()
+            .task(&ended.task_id)?
+            .ok_or_else(|| Sending::Internal(format!("no task {}", ended.task_id)))?;
+        to.push(Tell {
+            body: line_ended_mail(&task),
+            agent: ended.agent_id,
+        });
+    }
+    let mut ids = tell(w, harnesses, to, None, queued)?;
+    let lifted = lift_stranded(w, harnesses, queued)?;
+    if lifted.outran {
+        tracing::warn!("bazhen: subtasks are still stranded after a close lifted every level");
+    }
+    ids.extend(lifted.event_ids);
     Ok(ids)
 }
 
@@ -290,16 +393,39 @@ impl Agents {
         request: &str,
         last: impl FnOnce(&StoreWriter<'_>) -> Result<Vec<u64>, AgentError> + Send + 'static,
     ) -> Result<AgentCommandResponse, AgentError> {
+        self.finish_with(agent, key, request, move |w| Ok((last(w)?, ())))
+            .await
+            .map(|(response, ())| response)
+    }
+
+    /// As [`Agents::finish`], passing out what `last` returns beside its events once the write
+    /// commits.
+    async fn finish_with<T: Send + 'static>(
+        &self,
+        agent: &AgentId,
+        key: &str,
+        request: &str,
+        last: impl FnOnce(&StoreWriter<'_>) -> Result<(Vec<u64>, T), AgentError> + Send + 'static,
+    ) -> Result<(AgentCommandResponse, T), AgentError> {
         let (agent, key, request) = (agent.clone(), key.to_owned(), request.to_owned());
         self.write(move |w| {
+            let (event_ids, out) = last(w)?;
             let response = AgentCommandResponse {
-                event_ids: last(w)?,
+                event_ids,
                 agent_id: agent,
             };
             w.answered(&key, &request, &response)?;
-            Ok(response)
+            Ok((response, out))
         })
         .await
+    }
+
+    /// What a close's write needs, to move into it.
+    pub(super) fn closing(&self) -> Closing {
+        Closing {
+            harnesses: Arc::clone(&self.deps.harnesses),
+            handing: self.deps.handing.clone(),
+        }
     }
 
     /// Ends an agent and its terminal. `closing` is recorded before the terminal is touched; if
@@ -347,22 +473,24 @@ impl Agents {
         if found.state != AgentState::Lost {
             self.end(&found, force).await?;
         }
-        let closed = agent.clone();
-        let response = self
-            .finish(&agent, key, &request, move |w| {
+        let (closed, deps) = (agent.clone(), self.closing());
+        let (response, mail) = self
+            .finish_with(&agent, key, &request, move |w| {
                 let mut ids: Vec<u64> = closing.into_iter().collect();
-                ids.extend(record_closed(w, &closed, Actor::User)?);
-                Ok(ids)
+                let recorded = record_closed(w, &deps, &closed, Actor::User)?;
+                ids.extend(recorded.ids);
+                Ok((ids, recorded.mail))
             })
             .await?;
-        self.after_closed(&agent).await;
+        self.after_closed(&agent, mail).await;
         Ok(response)
     }
 
-    /// What follows an agent's close once it is recorded, whatever recorded it: no process runs
-    /// on its token or reads its prompt again, the waiter it held is answered, and its mail is
-    /// forgotten.
-    pub(super) async fn after_closed(&self, agent: &AgentId) {
+    /// What follows an agent's close once it is recorded, whatever recorded it: the mail its
+    /// write queued is handed over, no process runs on its token or reads its prompt again, the
+    /// waiter it held is answered, and its mail is forgotten.
+    pub(super) async fn after_closed(&self, agent: &AgentId, mail: ClosedMail) {
+        drop(mail);
         self.deps.tokens.forget(agent);
         self.deps.prompts.remove(agent);
         self.deps.hooks.closed(&self.deps.store, agent).await;
@@ -560,6 +688,68 @@ mod tests {
     /// The types of the events recorded after the first `from`.
     fn since(f: &Fixture, from: usize) -> Vec<String> {
         f.types().split_off(from)
+    }
+
+    #[test]
+    fn hands_over_the_mail_a_close_queued_however_its_caller_lets_go_of_it() {
+        let (handing, mut taken) = tokio::sync::mpsc::unbounded_channel();
+        let queued = |n: u8| Queued {
+            agent: AgentId::parse(&format!("agent_0190a1b2c3d47abc8def0123456789a{n}")).unwrap(),
+            message: bazhen_protocol::ids::MessageId::parse(&format!(
+                "msg_0190a1b2c3d47abc8def0123456789b{n}"
+            ))
+            .unwrap(),
+            delivery: bazhen_harness::Delivery::Push,
+        };
+        let mail = |n: u8| ClosedMail {
+            handing: handing.clone(),
+            queued: vec![queued(n)],
+        };
+        let _ = mail(1);
+        let Closed { ids, .. } = Closed {
+            ids: vec![7],
+            mail: mail(2),
+        };
+        drop(Some(mail(3)));
+        let handed: Vec<_> = std::iter::from_fn(|| taken.try_recv().ok()).collect();
+        assert_eq!(
+            (ids, handed),
+            (vec![7], vec![queued(1), queued(2), queued(3)])
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn tells_those_under_an_agent_it_closes_and_lifts_what_the_close_strands() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (f, lead, generation) = launched();
+        let worker = runtime()
+            .block_on(f.launch(request("k-2")))
+            .unwrap()
+            .agent_id;
+        let sub = f.leading(&lead, &worker);
+        runtime()
+            .block_on(f.agents.close(lead.as_str(), &closing("c-1", generation)))
+            .unwrap();
+        assert_eq!(f.left(&sub, &worker), f.left_by_close(&sub, &lead));
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn tells_those_under_a_lost_agent_it_closes_and_lifts_what_the_close_strands() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (f, lead, generation) = launched();
+        let worker = runtime()
+            .block_on(f.launch(request("k-2")))
+            .unwrap()
+            .agent_id;
+        let sub = f.leading(&lead, &worker);
+        mark(&f, &lead, AgentChange::Lost);
+        f.fake().set(|state| state.fail_closes = true);
+        runtime()
+            .block_on(f.agents.close(lead.as_str(), &closing("c-1", generation)))
+            .unwrap();
+        assert_eq!(f.left(&sub, &worker), f.left_by_close(&sub, &lead));
     }
 
     fn closed_terminals(f: &Fixture) -> Vec<String> {

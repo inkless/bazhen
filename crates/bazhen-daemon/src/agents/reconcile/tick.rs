@@ -12,7 +12,7 @@ use bazhen_protocol::agents::AgentState;
 use bazhen_protocol::ids::AgentId;
 use bazhen_store::{Actor, AgentTerminal};
 
-use super::{After, Cause, Listed, Unsettled};
+use super::{Cause, Listed, Unsettled};
 use crate::agents::Agents;
 use crate::agents::lifecycle::{Doing, from_runtime, record_closed, recorded};
 use crate::agents::watch::{adopt, adopts};
@@ -219,19 +219,18 @@ impl Agents {
             .close(&found.terminal)
             .await
             .map_err(|cause| Unsettled::Failed(from_runtime(id.as_str(), Doing::Close, cause)))?;
-        let after = {
-            let id = id.clone();
+        let mail = {
+            let (id, deps) = (id.clone(), self.closing());
             self.write(move |w| {
                 if !closing(w.reads().agent_terminal(id.as_str())?) {
-                    return Ok(After::Nothing);
+                    return Ok(None);
                 }
-                record_closed(w, &id, Actor::System)?;
-                Ok(After::Closed)
+                Ok(Some(record_closed(w, &deps, &id, Actor::System)?.mail))
             })
             .await?
         };
-        if after == After::Closed {
-            self.after_closed(id).await;
+        if let Some(mail) = mail {
+            self.after_closed(id, mail).await;
         }
         Ok(())
     }

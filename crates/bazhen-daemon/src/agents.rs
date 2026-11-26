@@ -263,7 +263,7 @@ pub(crate) struct AgentsDeps {
     /// The daemon's tasks, which every command runs on to its end.
     pub(crate) tracker: TaskTracker,
     pub(crate) roles: Arc<Roles>,
-    pub(crate) harnesses: Harnesses,
+    pub(crate) harnesses: Arc<Harnesses>,
     /// Whether a hook client is built, which every agent reports through.
     pub(crate) hook_built: bool,
     pub(crate) tokens: AgentTokens,
@@ -888,6 +888,7 @@ pub(crate) mod tests {
     use std::sync::Mutex as StdMutex;
 
     use bazhen_harness::{Delivery, LaunchError};
+    use bazhen_protocol::ids::TaskId;
     use bazhen_protocol::names::AgentName;
 
     use super::*;
@@ -905,6 +906,8 @@ pub(crate) mod tests {
         pub(crate) store: Writer,
         home: String,
         run: PathBuf,
+        /// What the agents hand over for delivery.
+        handed: StdMutex<tokio::sync::mpsc::UnboundedReceiver<crate::mail::Queued>>,
         _dir: TempDir,
         thread: Option<crate::writer::Thread>,
     }
@@ -952,6 +955,7 @@ pub(crate) mod tests {
         );
         let uid = rustix::process::getuid().as_raw();
         let hooks = Arc::new(crate::hooks::Hooks::default());
+        let (handing, handed) = tokio::sync::mpsc::unbounded_channel();
         let agents = Agents::new(AgentsDeps {
             store: store.clone(),
             terminals: Arc::new(fake.clone()),
@@ -960,14 +964,14 @@ pub(crate) mod tests {
             socket: "/run/b.sock".to_owned(),
             tracker: TaskTracker::new(),
             roles: Arc::new(Roles::new(None)),
-            harnesses: setup.harnesses,
+            harnesses: Arc::new(setup.harnesses),
             hook_built: setup.hook_built,
             tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),
             prompts: prompts::daemon_prompts(&run, uid),
             login_shell: setup.login_shell,
             turns: Arc::default(),
             hooks: Arc::clone(&hooks),
-            handing: tokio::sync::mpsc::unbounded_channel().0,
+            handing,
         });
         Fixture {
             agents: Arc::new(agents),
@@ -975,6 +979,7 @@ pub(crate) mod tests {
             store,
             home,
             run,
+            handed: StdMutex::new(handed),
             _dir: dir,
             thread: Some(thread),
         }
@@ -1062,7 +1067,7 @@ pub(crate) mod tests {
                 socket: deps.socket.clone(),
                 tracker: TaskTracker::new(),
                 roles: Arc::clone(&deps.roles),
-                harnesses: Harnesses::new(Vec::new()),
+                harnesses: Arc::clone(&deps.harnesses),
                 hook_built: deps.hook_built,
                 tokens: deps.tokens.clone(),
                 prompts: deps.prompts.clone(),
@@ -1114,6 +1119,125 @@ pub(crate) mod tests {
 
         pub(crate) fn types(&self) -> Vec<String> {
             self.events().into_iter().map(|(kind, _)| kind).collect()
+        }
+
+        /// The agents the mail handed over since the last call is for, in the order handed.
+        pub(crate) fn handed(&self) -> Vec<AgentId> {
+            let mut handed = self.handed.lock().unwrap();
+            std::iter::from_fn(|| handed.try_recv().ok())
+                .map(|queued| queued.agent)
+                .collect()
+        }
+
+        /// Makes every later write that appends an event of `kind` fail at that append.
+        pub(crate) fn failing(&self, kind: &str) {
+            let sql = format!(
+                "CREATE TEMP TRIGGER failing BEFORE INSERT ON events WHEN NEW.type = '{kind}'
+                 BEGIN SELECT RAISE(ABORT, 'an append this test fails'); END;"
+            );
+            runtime()
+                .block_on(
+                    self.store
+                        .run(move |s| s.write(|w| w.connection().execute_batch(&sql))),
+                )
+                .unwrap()
+                .unwrap();
+        }
+
+        /// Makes `lead` the lead on a task the human owns, `worker` a worker granted under that
+        /// lead, and `lead` the owner of a subtask delegated from it: what `lead`'s close ends and
+        /// strands. Answers the subtask.
+        pub(crate) fn leading(&self, lead: &AgentId, worker: &AgentId) -> TaskId {
+            let (top, sub) = (
+                "task_0190a1b2c3d47abc8def0123456789b1",
+                "task_0190a1b2c3d47abc8def0123456789b2",
+            );
+            let (leads, works) = (
+                "asgn_0190a1b2c3d47abc8def0123456789c1",
+                "asgn_0190a1b2c3d47abc8def0123456789c2",
+            );
+            let sql = format!(
+                "INSERT INTO tasks (id, title, brief, state, created_event_id, updated_event_id)
+                   SELECT '{top}', 'Ship it', 'b', 'open', max(id), max(id) FROM events;
+                 INSERT INTO assignments (id, task_id, agent_session_id, role, state,
+                   created_event_id, updated_event_id)
+                   SELECT '{leads}', '{top}', '{lead}', 'lead', 'active', max(id), max(id)
+                   FROM events;
+                 INSERT INTO assignments (id, task_id, agent_session_id, role, state,
+                   parent_assignment_id, created_event_id, updated_event_id)
+                   SELECT '{works}', '{top}', '{worker}', 'worker', 'active', '{leads}', max(id),
+                   max(id) FROM events;
+                 INSERT INTO tasks (id, title, brief, state, owner_agent_id, parent_task_id,
+                   delegated_from, created_event_id, updated_event_id)
+                   SELECT '{sub}', 'Part of it', 'b', 'open', '{lead}', '{top}', '{leads}', max(id),
+                   max(id) FROM events;"
+            );
+            runtime()
+                .block_on(
+                    self.store
+                        .run(move |s| s.write(|w| w.connection().execute_batch(&sql))),
+                )
+                .unwrap()
+                .unwrap();
+            TaskId::parse(sub).unwrap()
+        }
+
+        /// What the close of a lead [`Fixture::leading`] made left: the subtask's owner, the open
+        /// items by agent and summary, and the mail queued for `worker`.
+        pub(crate) fn left(
+            &self,
+            sub: &TaskId,
+            worker: &AgentId,
+        ) -> (Option<AgentId>, Vec<(String, String)>, Vec<String>) {
+            let reader = self.store.reader().unwrap();
+            let owner = reader.reads().task(sub).unwrap().unwrap().owner_agent_id;
+            let items = runtime()
+                .block_on(self.store.run(|s| {
+                    s.write(|w| {
+                        w.connection()
+                            .prepare(
+                                "SELECT agent_session_id, summary FROM attention_items
+                                 WHERE state = 'open' ORDER BY created_event_id",
+                            )?
+                            .query_map((), |row| Ok((row.get(0)?, row.get(1)?)))?
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                }))
+                .unwrap()
+                .unwrap();
+            let mail = self
+                .events()
+                .into_iter()
+                .filter(|(kind, payload)| {
+                    kind == "mailbox.queued" && payload["agentId"] == worker.as_str()
+                })
+                .map(|(_, payload)| payload["body"].as_str().unwrap().to_owned())
+                .collect();
+            (owner, items, mail)
+        }
+
+        /// What a close of `lead`, the lead [`Fixture::leading`] made, is to leave: the subtask
+        /// fallen to the human, `lead` escalated, and the worker told its line has ended.
+        pub(crate) fn left_by_close(
+            &self,
+            sub: &TaskId,
+            lead: &AgentId,
+        ) -> (Option<AgentId>, Vec<(String, String)>, Vec<String>) {
+            let reader = self.store.reader().unwrap();
+            let sub = reader.reads().task(sub).unwrap().unwrap();
+            let top = reader.reads();
+            let top = top
+                .task(sub.parent_task_id.as_ref().unwrap())
+                .unwrap()
+                .unwrap();
+            (
+                None,
+                vec![(
+                    lead.as_str().to_owned(),
+                    crate::task_mail::fell_to_the_human(&sub, lead),
+                )],
+                vec![crate::task_mail::line_ended_mail(&top)],
+            )
         }
 
         /// The payload of the last event of `kind`.
