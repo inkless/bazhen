@@ -866,6 +866,7 @@ mod tests {
     mod guarded {
         use std::os::fd::AsFd as _;
         use std::os::unix::net::UnixStream;
+        use std::sync::Arc;
         use std::time::Duration;
 
         use axum::Router;
@@ -878,7 +879,7 @@ mod tests {
         use super::{HUMANS_ONLY, THREAD, TOKEN, agent};
         use crate::peer::{PeerSocket, Peers, READ};
         use crate::routes::{Shared, Stop, http_router, socket_router};
-        use crate::testing::{TempDir, runtime};
+        use crate::testing::{Gate, Opens, TempDir, runtime};
         use crate::writer::{self, Thread, Writer};
 
         const CLOSING_TOKEN: &str = "ccccccccccccccccccccccccccccccccccccccccccc";
@@ -938,12 +939,23 @@ mod tests {
             })
         }
 
-        /// A reader that never reads its peer in time.
-        fn late() -> Peers {
-            Peers::with(Duration::ZERO, |_, _| {
-                std::thread::sleep(Duration::from_millis(20));
+        /// Holds the blocking peer read until the route has answered, however long its task
+        /// waits for another turn after the deadline. Were the deadline not kept, the read gives
+        /// up after five seconds and reads as `Endless`, refused rather than late.
+        fn late(router: impl FnOnce(Peers) -> Router) -> Router {
+            let gate = Arc::new(Gate::default());
+            let waiting = Arc::clone(&gate);
+            let peers = Peers::with(Duration::ZERO, move |_, _| {
+                waiting.wait_for(Duration::from_secs(5));
                 Err(Refused::Endless)
-            })
+            });
+            let opens = Arc::new(Opens(gate));
+            router(peers).layer(axum::middleware::map_response(
+                move |response: axum::response::Response| {
+                    opens.0.open();
+                    std::future::ready(response)
+                },
+            ))
         }
 
         fn router(store: &Writer, peers: Option<Peers>) -> Router {
@@ -1398,7 +1410,7 @@ mod tests {
                         true
                     ),
                     ask(
-                        router(&store, Some(late())),
+                        late(|peers| router(&store, Some(peers))),
                         "GET",
                         "/v1/state",
                         &[],
@@ -1406,7 +1418,7 @@ mod tests {
                         true
                     ),
                     ask(
-                        router(&store, Some(late())),
+                        late(|peers| router(&store, Some(peers))),
                         "POST",
                         "/v1/daemon/stop",
                         &[],
@@ -1414,7 +1426,7 @@ mod tests {
                         true
                     ),
                     ask(
-                        router(&store, Some(late())),
+                        late(|peers| router(&store, Some(peers))),
                         "GET",
                         "/v1/events",
                         &[UPGRADE],
@@ -1571,7 +1583,14 @@ mod tests {
                         Some(over_tcp)
                     ),
                     ask_on(raced(), "/v1/caller", &[], unix()),
-                    ask_on(late(), "/v1/state", &[], unix()),
+                    ask(
+                        late(|peers| http(&store, peers, false)),
+                        "GET",
+                        "/v1/state",
+                        &[HOST],
+                        None,
+                        true
+                    ),
                 ],
                 [
                     refused("forbidden", unread),
@@ -1596,9 +1615,9 @@ mod tests {
         #[test]
         fn answers_over_http_what_the_host_origin_and_pairing_refuse_before_reading_the_caller() {
             let (_dir, store, thread) = daemon();
-            let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let counted = || {
-                let reads = std::sync::Arc::clone(&reads);
+                let reads = Arc::clone(&reads);
                 Peers::with(READ, move |_, _| {
                     reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     Ok(peer(5000, &[1], None))

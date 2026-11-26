@@ -789,7 +789,7 @@ mod tests {
     use rustix::process::Pid;
 
     use super::*;
-    use crate::testing::{paused, runtime};
+    use crate::testing::{Gate, Opens, paused, runtime};
 
     const AGENT: &str = "agent_0190a1b2c3d47abc8def0123456789ab";
     const OTHER: &str = "agent_0190a1b2c3d47abc8def0123456789ac";
@@ -1089,51 +1089,6 @@ mod tests {
             reading(PeerRead::Read(chain(100, 100, &[1])), || Err("store")),
             Err("store")
         );
-    }
-
-    /// A gate the readings below wait at until it opens.
-    #[derive(Default)]
-    struct Gate {
-        open: Mutex<bool>,
-        opened: Condvar,
-        started: AtomicUsize,
-    }
-
-    impl Gate {
-        fn wait(&self) {
-            self.started.fetch_add(1, Ordering::SeqCst);
-            let mut open = self.open.lock().unwrap();
-            while !*open {
-                open = self.opened.wait(open).unwrap();
-            }
-        }
-
-        fn open(&self) {
-            *self
-                .open
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
-            self.opened.notify_all();
-        }
-
-        /// Waits until `n` readings have started, letting the runtime's tasks run meanwhile.
-        async fn started_by(&self, n: usize) {
-            let by = std::time::Instant::now() + Duration::from_secs(10);
-            while self.started.load(Ordering::SeqCst) < n {
-                assert!(std::time::Instant::now() < by, "{n} readings never started");
-                tokio::task::yield_now().await;
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-    }
-
-    /// Opens its gate when dropped, so a test that fails with readings still waiting ends.
-    struct Opens(Arc<Gate>);
-
-    impl Drop for Opens {
-        fn drop(&mut self) {
-            self.0.open();
-        }
     }
 
     fn socket() -> (PeerSocket, UnixStream) {
