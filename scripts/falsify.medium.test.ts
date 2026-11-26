@@ -217,6 +217,8 @@ const STUB_NEXTEST = `#!/bin/sh
 echo "NEXTEST: $*" >> "$STUB_LOG"
 [ "\${STUB_NEXTEST_FAIL:-}" = 1 ] && exit 1
 [ -e nextest-fails ] && exit 1
+# A library rustc rejects: a line of it that says UNCOMPILABLE.
+grep -qs UNCOMPILABLE ${LIB} && exit 1
 if [ "$2" = run ]; then
   [ "\${NEXTEST_EXPERIMENTAL_LIBTEST_JSON:-}" = 1 ] || exit 101
   echo "RUN: $(tr '\\n' ' ' < ${LIB})" >> "$STUB_LOG"
@@ -283,8 +285,13 @@ suite() {
   done < "$2"
   printf '}}'
 }
+# The tests rust-tests.txt names, and each \`fn t_<name>\` line of the library declares.
+names="$(mktemp)"
+cat rust-tests.txt > "$names"
+sed -n 's/^fn \\(t_[a-z_]*\\).*/tests::\\1/p' ${LIB} >> "$names" 2> /dev/null
 printf '{"rust-suites":{'
-suite hook rust-tests.txt
+suite hook "$names"
+rm -f "$names"
 # The crate's binary, whose tests share the library's target.
 if [ -e bin-tests.txt ]; then printf ','; suite hook::bin/hook bin-tests.txt; fi
 printf '}}'
@@ -337,6 +344,17 @@ if [ "$1" = build ]; then
     fi
   done
   exit 0
+fi
+if [ "$1" = test ]; then
+  [ "\${STUB_GARBLED_BUILD:-}" = 1 ] && { echo "not json"; exit 101; }
+  # As rustc reports each line of the library that says UNCOMPILABLE.
+  grep -ns UNCOMPILABLE ${LIB} | while IFS=: read -r line _; do
+    printf '{"reason":"compiler-message","message":{"level":"error","message":"broken",'
+    printf '"spans":[{"file_name":"%s","line_start":%s,"line_end":%s,"is_primary":true}]}}\\n' \\
+      "${LIB}" "$line" "$line"
+  done
+  echo '{"reason":"build-finished","success":false}'
+  exit 101
 fi
 [ "$1" = metadata ] || exit 1
 [ "\${STUB_FAIL_METADATA:-}" = 1 ] && exit 101
@@ -1279,9 +1297,88 @@ describe("falsify on a branch of a tree that already has Rust", () => {
     git(fx.linked, "commit", "--quiet", "-m", "build: fix", "-m", CONTROL);
     expect(againstBase()).toEqual({
       status: 1,
-      output: expect.stringContaining("nextest list` failed at the base"),
+      output: expect.stringContaining(
+        "nextest list` failed at the base, " +
+          `${fx.base.slice(0, 12)}, and the branch can't repair it: its build names no compile error`,
+      ),
     });
     expect(leftovers()).toEqual([]);
+  });
+});
+
+describe("falsify on a branch that repairs a base whose Rust tests don't build", () => {
+  const BROKEN_LIB = "fn a() {}\nUNCOMPILABLE\nfn c() {}\n";
+
+  /** Main's library doesn't compile on its line 2; the branch changes it to `lib` and commits. */
+  function repairing(lib: string, extra: Record<string, string> = {}): void {
+    rustOnMain(["tests::kept"], { [LIB]: BROKEN_LIB, ...extra });
+    write(fx.linked, LIB, lib);
+    git(fx.linked, "add", LIB);
+    git(fx.linked, "commit", "--quiet", "-m", "fix: build", "-m", CONTROL);
+  }
+
+  it("lists the base with the branch's lines at rustc's errors, judging no test the base has", () => {
+    repairing("fn a() {}\nfn b() {}\nfn c() {}\n");
+    const result = againstBase();
+    expect({
+      status: result.status,
+      repaired: result.output.includes("at rustc's errors: crates/x/src/lib.rs:2."),
+      asksKept: result.output.includes("Control: tests::kept:"),
+      listings: stubLog()
+        .split("\n")
+        .filter((l) => l.startsWith("NEXTEST: nextest list ")).length,
+      leftovers: leftovers(),
+    }).toEqual({ status: 0, repaired: true, asksKept: false, listings: 3, leftovers: [] });
+  });
+
+  it("judges a test that a line the repair takes declares, as the branch's", () => {
+    repairing("fn a() {}\nfn t_added() {}\nfn c() {}\n");
+    const result = againstBase();
+    expect({
+      status: result.status,
+      asksAdded: result.output.includes("Control: tests::t_added:"),
+    }).toEqual({ status: 1, asksAdded: true });
+  });
+
+  it("fails when rustc's error at the base is on a line the branch doesn't change", () => {
+    repairing("fn a() -> u8 { 1 }\nUNCOMPILABLE\nfn c() {}\n");
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        "rustc's error at crates/x/src/lib.rs:2 is on no line the branch changes",
+      ),
+    });
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("fails when a line the repair takes could declare a test it doesn't name", () => {
+    repairing("fn a() {}\n#[test]\nfn c() {}\n");
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        "its line at crates/x/src/lib.rs:2 holds an attribute, which can declare a test",
+      ),
+    });
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("fails when the base still doesn't list with the branch's lines at its errors", () => {
+    repairing("fn a() {}\nfn b() {}\nfn c() {}\n", { "nextest-fails": "" });
+    git(fx.linked, "rm", "--quiet", "nextest-fails");
+    git(fx.linked, "commit", "--quiet", "-m", "build: list", "-m", CONTROL);
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining("still fails with the branch's lines at its errors"),
+    });
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("fails when cargo's account of the base's build can't be read", () => {
+    repairing("fn a() {}\nfn b() {}\nfn c() {}\n");
+    expect(againstBase({ STUB_GARBLED_BUILD: "1" })).toEqual({
+      status: 1,
+      output: expect.stringContaining("its build can't be read: not a cargo message stream"),
+    });
   });
 });
 

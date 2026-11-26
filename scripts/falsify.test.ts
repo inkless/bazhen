@@ -18,6 +18,13 @@ import {
   indentedTail,
   controlLine,
   addedRustTests,
+  errorSpans,
+  hunkAt,
+  repairOf,
+  repairedText,
+  unnamedByRepair,
+  zeroContextHunks,
+  type Hunk,
   appliedRenames,
   binaryInputs,
   cargoErrors,
@@ -210,6 +217,182 @@ describe("addedRustTests", () => {
     const base = ["hook tests::reads"];
     const head = ["hook tests::reads", "hook tests::reads"];
     expect(addedRustTests(base, head)).toEqual([{ file: "hook", title: "tests::reads" }]);
+  });
+});
+
+const cargoMessage = (level: string, spans: object[], text = "mismatched types") =>
+  JSON.stringify({ reason: "compiler-message", message: { level, message: text, spans } });
+const cargoSpan = (file_name: string, line_start: number, line_end: number, is_primary = true) => ({
+  file_name,
+  line_start,
+  line_end,
+  is_primary,
+});
+
+describe("errorSpans", () => {
+  const message = cargoMessage;
+  const span = cargoSpan;
+
+  it("is each error's primary span, past warnings, notes and other messages", () => {
+    const messages = [
+      JSON.stringify({ reason: "compiler-artifact" }),
+      message("warning", [span("crates/a/src/lib.rs", 1, 1)]),
+      message("error", [
+        span("crates/a/src/tests.rs", 5, 6),
+        span("crates/a/src/lib.rs", 2, 2, false),
+      ]),
+      message("failure-note", [], "For more information about this error"),
+      JSON.stringify({ reason: "build-finished", success: false }),
+      "",
+    ].join("\n");
+    expect(errorSpans(messages)).toEqual([{ file: "crates/a/src/tests.rs", first: 5, last: 6 }]);
+  });
+
+  it("refuses what isn't a cargo message stream, rather than read it as no errors", () => {
+    for (const messages of ["error: could not compile", "[]", JSON.stringify({ message: {} })]) {
+      expect(() => errorSpans(messages)).toThrow(/not a cargo message stream/);
+    }
+  });
+
+  it("refuses an error that names no line, which no hunk could repair", () => {
+    expect(() => errorSpans(message("error", [], "linking failed"))).toThrow(/names no line/);
+  });
+});
+
+describe("zeroContextHunks", () => {
+  it("is each hunk's file, the base's lines it replaces, and the lines it adds", () => {
+    const diff = [
+      "diff --git a/crates/a/src/tests.rs b/crates/a/src/tests.rs",
+      "index 1..2 100644",
+      "--- a/crates/a/src/tests.rs",
+      "+++ b/crates/a/src/tests.rs",
+      "@@ -106 +106 @@ fn agents_over(",
+      "-        harnesses,",
+      "+        harnesses: Arc::new(harnesses),",
+      "@@ -110,2 +109,0 @@",
+      "-a",
+      "-b",
+      "@@ -120,0 +121,2 @@",
+      "+c",
+      "+d",
+      "\\ No newline at end of file",
+      "diff --git a/new.rs b/new.rs",
+      "--- /dev/null",
+      "+++ b/new.rs",
+      "@@ -0,0 +1 @@",
+      "+fn n() {}",
+    ].join("\n");
+    expect(zeroContextHunks(diff)).toEqual([
+      {
+        file: "crates/a/src/tests.rs",
+        start: 106,
+        count: 1,
+        added: ["        harnesses: Arc::new(harnesses),"],
+      },
+      { file: "crates/a/src/tests.rs", start: 110, count: 2, added: [] },
+      { file: "crates/a/src/tests.rs", start: 120, count: 0, added: ["c", "d"] },
+      { file: "", start: 0, count: 0, added: ["fn n() {}"] },
+    ]);
+  });
+});
+
+describe("repairOf", () => {
+  const TESTS_RS = "crates/a/src/tests.rs";
+  const hunk = (start: number, count = 1, file = TESTS_RS): Hunk => ({
+    file,
+    start,
+    count,
+    added: [],
+  });
+  const at = (first: number, last = first, file = TESTS_RS) => ({ file, first, last });
+  const adding = (line: string): Hunk => ({ ...hunk(3), added: ["let x = 1;", line] });
+
+  it("takes the hunks that change or add beside a line rustc rejected, and no others", () => {
+    const hunks = [hunk(3), hunk(10, 0), hunk(20, 2), hunk(30), hunk(5, 1, "crates/a/src/lib.rs")];
+    expect(repairOf(hunks, [at(3), at(11), at(21, 25)])).toEqual([
+      hunk(3),
+      hunk(10, 0),
+      hunk(20, 2),
+    ]);
+  });
+
+  it("refuses when an error is on a line the branch doesn't change", () => {
+    expect(repairOf([hunk(3), hunk(5, 1, "crates/a/src/lib.rs")], [at(3), at(5)])).toBe(
+      `rustc's error at ${TESTS_RS}:5 is on no line the branch changes`,
+    );
+    expect(repairOf([hunk(10, 0)], [at(12)])).toBe(
+      `rustc's error at ${TESTS_RS}:12 is on no line the branch changes`,
+    );
+  });
+
+  it("refuses a line it would take that could declare a test without naming it", () => {
+    expect(
+      [
+        "#[test]",
+        "#![allow(dead_code)]",
+        "        fn $name() {}",
+        "cases! { one, two }",
+        'include!("more.rs");',
+        '    assert_eq!(x, 1); vec![1]; format!("{x}"); if !done && x != 2 {}',
+      ].map((line) => repairOf([adding(line)], [at(3)])),
+    ).toEqual([
+      `its line at ${TESTS_RS}:3 holds an attribute, which can declare a test it doesn't name`,
+      `its line at ${TESTS_RS}:3 holds an attribute, which can declare a test it doesn't name`,
+      `its line at ${TESTS_RS}:3 holds a \`$\`, as in a macro's body, which can declare a test it doesn't name`,
+      `its line at ${TESTS_RS}:3 holds the macro \`cases!\`, which can declare a test it doesn't name`,
+      `its line at ${TESTS_RS}:3 holds the macro \`include!\`, which can declare a test it doesn't name`,
+      [adding('    assert_eq!(x, 1); vec![1]; format!("{x}"); if !done && x != 2 {}')],
+    ]);
+  });
+
+  it("refuses a build that names no error, as nothing then says what to repair", () => {
+    expect(repairOf([hunk(3)], [])).toBe("its build names no compile error");
+  });
+});
+
+describe("repairedText", () => {
+  it("applies each hunk at the base's lines, however many lines the others add or take", () => {
+    const hunks: Hunk[] = [
+      { file: "f", start: 1, count: 1, added: ["A", "A2"] },
+      { file: "f", start: 3, count: 0, added: ["after c"] },
+      { file: "f", start: 4, count: 2, added: [] },
+    ];
+    expect(repairedText("a\nb\nc\nd\ne\nf\n", hunks)).toBe("A\nA2\nb\nc\nafter c\nf\n");
+  });
+});
+
+describe("hunkAt", () => {
+  it("names a hunk by its file and the base's lines it replaces", () => {
+    expect([1, 3, 0].map((count) => hunkAt({ file: "f.rs", start: 7, count, added: [] }))).toEqual([
+      "f.rs:7",
+      "f.rs:7-9",
+      "f.rs:7",
+    ]);
+  });
+});
+
+describe("unnamedByRepair", () => {
+  const repair: Hunk[] = [
+    {
+      file: "f",
+      start: 1,
+      count: 1,
+      added: ["#[test] fn reads_twice() {}", "mod frames { cases!(); }"],
+    },
+  ];
+
+  it("leaves out each test a path segment of which a repaired line names, so it is judged", () => {
+    const listed = [
+      "a tests::kept",
+      "a tests::reads_twice",
+      "a frames::round_trips",
+      "a tests::reads",
+    ];
+    expect(unnamedByRepair(listed, repair)).toEqual(["a tests::kept", "a tests::reads"]);
+    expect(addedRustTests(unnamedByRepair(listed, repair), listed)).toEqual([
+      { file: "a", title: "tests::reads_twice" },
+      { file: "a", title: "frames::round_trips" },
+    ]);
   });
 });
 
