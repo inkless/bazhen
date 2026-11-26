@@ -48,14 +48,11 @@
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
-// own). A base whose tests don't compile is listed with the branch's own hunks that touch the
-// lines rustc rejected applied. Those lines declare nothing at the base, so a test with a path
-// segment they name counts as new; falsify fails when an error is on a line the branch doesn't
-// change, when a line they add holds an attribute or a macro that could declare a test it doesn't
-// name, or when the base still doesn't list. Each new test is run instead against the mutants
-// cargo-mutants lists in the code the branch changed, one at a time in a throwaway worktree:
-// KILLED by the first mutant it fails under twice with a panic in test code, else INVALID,
-// needing a Control trailer naming it by its full path,
+// own). If only the base fails to list, a field-value repair in an ordinary function can still
+// be recognized by comparing both complete syntax trees. Each new test runs against the
+// mutants cargo-mutants lists in the code the branch
+// changed, one at a time in a throwaway worktree: KILLED by the first mutant it fails under twice
+// with a panic in test code, else INVALID, needing a Control trailer naming it by its full path,
 // `Control: tests::name: <what you broke> -> <how the test failed>`
 // (docs/standards/rust.md § Tests).
 //
@@ -709,166 +706,127 @@ export function addedRustTests(base: string[], head: string[]): { file: string; 
     });
 }
 
-/** Lines rustc rejected: a file as cargo names it, and its first and last line. */
-export type ErrorSpan = { file: string; first: number; last: number };
-
-const fieldOf = (value: unknown, name: string): unknown =>
-  typeof value === "object" && value !== null ? Reflect.get(value, name) : undefined;
+type SyntaxNode = { kind: string; text?: string; children?: SyntaxNode[] };
 
 /**
- * The primary span of each error in `cargo --message-format json` output. Throws on a line that
- * isn't a cargo message, and on an error with no primary span, so a build that failed where no
- * line is named is never read as one with nothing to repair.
+ * The complete source, with simple field initializers in top-level, unannotated functions
+ * represented by their field name. Keep boundaries as separate array entries: identical text
+ * inside a comment, attribute, macro input or literal must never compare as a field.
  */
-export function errorSpans(messages: string): ErrorSpan[] {
-  const spans: ErrorSpan[] = [];
-  for (const line of messages.split("\n").filter((l) => l.trim() !== "")) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      throw new Error("not a cargo message stream");
+function fieldRepairShape(source: string, dir: string): string {
+  const tree: SyntaxNode = JSON.parse(
+    execFileSync("rust-analyzer", ["parse", "--json"], {
+      cwd: dir,
+      input: source,
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  );
+  let original = "";
+  const parts = [""];
+  function visit(node: SyntaxNode, inBody: boolean): void {
+    const children = node.children ?? [];
+    if (node.kind === "ERROR") throw new Error("Rust syntax error");
+    if (node.text !== undefined) {
+      original += node.text;
+      parts[parts.length - 1] += node.text;
+      return;
     }
-    if (typeof fieldOf(parsed, "reason") !== "string")
-      throw new Error("not a cargo message stream");
-    const message = fieldOf(parsed, "message");
-    if (fieldOf(parsed, "reason") !== "compiler-message" || fieldOf(message, "level") !== "error") {
-      continue;
-    }
-    const listed = fieldOf(message, "spans");
-    const primary = (Array.isArray(listed) ? (listed as unknown[]) : []).filter(
-      (span) => fieldOf(span, "is_primary") === true,
-    );
-    if (primary.length === 0) {
-      throw new Error(`rustc's error "${String(fieldOf(message, "message"))}" names no line`);
-    }
-    for (const span of primary) {
-      const [file, first, last] = ["file_name", "line_start", "line_end"].map((n) =>
-        fieldOf(span, n),
+    const start = original.length;
+    const part = parts.length - 1;
+    const prefix = parts[part] ?? "";
+    for (const child of children) {
+      const body =
+        node.kind === "FN" &&
+        tree.children?.includes(node) === true &&
+        !children.some((c) => c.kind === "ATTR") &&
+        child.kind === "BLOCK_EXPR";
+      visit(
+        child,
+        body ||
+          (inBody &&
+            [
+              "BLOCK_EXPR",
+              "STMT_LIST",
+              "LET_STMT",
+              "EXPR_STMT",
+              "CALL_EXPR",
+              "ARG_LIST",
+              "RECORD_EXPR",
+              "RECORD_EXPR_FIELD_LIST",
+            ].includes(node.kind) &&
+            !children.some((c) => c.kind === "ATTR")),
       );
-      if (typeof file !== "string" || typeof first !== "number" || typeof last !== "number") {
-        throw new Error("a cargo error span without a file or lines");
+    }
+    if (!inBody || node.kind !== "RECORD_EXPR_FIELD" || part !== parts.length - 1) return;
+    const field =
+      /^([A-Za-z_][A-Za-z_0-9]*)(?::[ \t]*(?:[A-Za-z_][A-Za-z_0-9]*::)*[A-Za-z_][A-Za-z_0-9]*\(\1\))?$/.exec(
+        original.slice(start),
+      );
+    if (field) {
+      parts[part] = prefix;
+      parts.push(field[1] ?? "", "");
+    }
+  }
+  visit(tree, false);
+  if (tree.kind !== "SOURCE_FILE" || original !== source || source.includes("\uFFFD"))
+    throw new Error("incomplete Rust syntax tree");
+  return JSON.stringify(parts);
+}
+
+/** Build scripts, procedural macros and custom test harnesses can inspect another file as data. */
+function ordinaryRustWorkspace(dir: string, head: string): boolean {
+  const inputs = git(["ls-tree", "-rz", "--name-only", head], dir);
+  for (const path of inputs
+    .split("\0")
+    .filter((p) => /(?:^|\/)(?:build\.rs|Cargo\.toml)$/.test(p))) {
+    if (path.endsWith("build.rs")) {
+      console.error(`falsify: ${path} can generate tests`);
+      return false;
+    }
+    const manifest = parseToml(git(["cat-file", "blob", `${head}:${path}`], dir));
+    const lib = asTable(manifest["lib"]);
+    const targets = ["bin", "test", "example", "bench"].flatMap((key) => manifest[key] ?? []);
+    if (
+      asTable(manifest["package"])?.["build"] !== undefined ||
+      lib?.["proc-macro"] ||
+      lib?.["proc_macro"] ||
+      [lib?.["crate-type"], lib?.["crate_type"]].some(
+        (types) => Array.isArray(types) && types.includes("proc-macro"),
+      ) ||
+      [lib, ...targets].some((target) => asTable(target)?.["harness"] === false)
+    ) {
+      console.error(`falsify: ${path} configures code generation or a custom harness`);
+      return false;
+    }
+  }
+  return true;
+}
+
+function onlyFieldRepairs(dir: string, base: string, head: string, changes: Change[]): boolean {
+  for (const { status, path } of changes) {
+    if (status !== "M" || !/^crates\/[^/]+\/src\/.+\.rs$/.test(path)) {
+      console.error(`falsify: ${status} ${path} is outside a Rust field repair`);
+      return false;
+    }
+    try {
+      const read = (rev: string) => {
+        const treeEntry = git(["ls-tree", "-z", rev, "--", path], dir);
+        if (!treeEntry.startsWith("100644 blob "))
+          throw new Error("expected a regular source file");
+        return fieldRepairShape(git(["cat-file", "blob", `${rev}:${path}`], dir), dir);
+      };
+      if (read(base) !== read(head)) {
+        console.error(`falsify: ${path} changes more than a simple field initializer`);
+        return false;
       }
-      spans.push({ file, first, last });
+    } catch (error) {
+      console.error(`falsify: cannot compare field initializers in ${path}: ${String(error)}`);
+      return false;
     }
   }
-  return spans;
-}
-
-/** A hunk of a `git diff -U0`: its file, the base's lines it replaces, and the lines it adds. */
-export type Hunk = { file: string; start: number; count: number; added: string[] };
-
-const ZERO_HUNK_HEAD = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/;
-
-/** The hunks of a `git diff -U0 --no-renames` with the default `a/` and `b/` prefixes. */
-export function zeroContextHunks(diff: string): Hunk[] {
-  const hunks: Hunk[] = [];
-  let file = "";
-  let hunk: Hunk | undefined;
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("diff --git ")) hunk = undefined;
-    else if (hunk === undefined && line.startsWith("--- ")) {
-      file = line.startsWith("--- a/") ? line.slice(6) : "";
-    } else if (hunk === undefined && line.startsWith("+++ ")) continue;
-    else if (ZERO_HUNK_HEAD.test(line)) {
-      const [, start = "", count = "1"] = ZERO_HUNK_HEAD.exec(line) ?? [];
-      hunk = { file, start: Number(start), count: Number(count), added: [] };
-      hunks.push(hunk);
-    } else if (hunk !== undefined && line.startsWith("+")) hunk.added.push(line.slice(1));
-  }
-  return hunks;
-}
-
-/** A hunk as `file:first-last` in the base's lines. */
-export const hunkAt = ({ file, start, count }: Hunk) =>
-  count <= 1 ? `${file}:${start}` : `${file}:${start}-${start + count - 1}`;
-
-/** Whether a hunk replaces a line of `span`, or, adding lines only, adds them beside one. */
-const touches = (hunk: Hunk, span: ErrorSpan) =>
-  hunk.file === span.file &&
-  (hunk.count === 0
-    ? span.first <= hunk.start + 1 && hunk.start <= span.last
-    : span.first <= hunk.start + hunk.count - 1 && hunk.start <= span.last);
-
-// Macros that expand to an expression or a statement, never to an item, so never to a test.
-const EXPRESSION_MACROS = new Set([
-  "assert",
-  "assert_eq",
-  "assert_ne",
-  "debug_assert",
-  "debug_assert_eq",
-  "debug_assert_ne",
-  "dbg",
-  "eprint",
-  "eprintln",
-  "format",
-  "format_args",
-  "matches",
-  "panic",
-  "print",
-  "println",
-  "todo",
-  "unimplemented",
-  "unreachable",
-  "vec",
-  "write",
-  "writeln",
-]);
-
-/**
- * What on a line could make a test that the line doesn't name: an attribute (`#[test]` above an
- * item on another line), a macro that can expand to items, or a macro body's `$`.
- */
-function declaresUnnamed(line: string): string | undefined {
-  if (/#!?\[/.test(line)) return "an attribute";
-  if (line.includes("$")) return "a `$`, as in a macro's body";
-  for (const [, name = ""] of line.matchAll(/\b([A-Za-z_]\w*)\s*!\s*[([{]/g)) {
-    if (!EXPRESSION_MACROS.has(name)) return `the macro \`${name}!\``;
-  }
-  return undefined;
-}
-
-/**
- * The branch's hunks that touch a line rustc rejected at the base, or why the base can't be
- * repaired with them: an error on a line the branch doesn't change, or a line they add that could
- * declare a test without naming it.
- */
-export function repairOf(hunks: readonly Hunk[], spans: readonly ErrorSpan[]): Hunk[] | string {
-  if (spans.length === 0) return "its build names no compile error";
-  const untouched = spans.find((span) => !hunks.some((hunk) => touches(hunk, span)));
-  if (untouched !== undefined) {
-    return `rustc's error at ${untouched.file}:${untouched.first} is on no line the branch changes`;
-  }
-  const taken = hunks.filter((hunk) => spans.some((span) => touches(hunk, span)));
-  for (const hunk of taken) {
-    const what = hunk.added.map(declaresUnnamed).find((found) => found !== undefined);
-    if (what !== undefined) {
-      return `its line at ${hunkAt(hunk)} holds ${what}, which can declare a test it doesn't name`;
-    }
-  }
-  return taken;
-}
-
-/** `text` with `hunks`, all of its file and from one diff, applied. */
-export function repairedText(text: string, hunks: readonly Hunk[]): string {
-  const lines = text.split("\n");
-  for (const { start, count, added } of hunks.toSorted((a, b) => b.start - a.start)) {
-    lines.splice(count === 0 ? start : start - 1, count, ...added);
-  }
-  return lines.join("\n");
-}
-
-/**
- * The tests listed at a base repaired with `repair`, less every test a segment of whose path is a
- * whole word on a line the repair adds. Those lines don't compile at the base, so whatever they
- * name is counted as the branch's, and judged.
- */
-export function unnamedByRepair(listed: readonly string[], repair: readonly Hunk[]): string[] {
-  const words = new Set(repair.flatMap(({ added }) => added.join("\n").match(/\w+/g) ?? []));
-  return listed.filter((id) => {
-    const path = id.slice(id.indexOf(" ") + 1);
-    return !path.split("::").some((segment) => words.has(segment));
-  });
+  return changes.length > 0 && ordinaryRustWorkspace(dir, head);
 }
 
 const CONTROL_SUBJECT = /^Control: (.+) -> .+$/gm;
@@ -2423,63 +2381,6 @@ async function mutateRustTests(
   return { verdicts, unapplied, timedOut, memoryKilled, leaked, ran, total: mutants.length };
 }
 
-const listFailed = (where: string, why = "") =>
-  `falsify: \`cargo-nextest nextest list\` failed at ${where}${why}, so the Rust tests the ` +
-  `branch adds are unknown. Run \`moon run :test-rust\` there to see why; if cargo-nextest is missing, ` +
-  `install it: ${installCommand("cargo-nextest")}`;
-
-/**
- * The tests the base lists once the branch's own hunks that touch the lines rustc rejected there
- * are applied to it, in falsify's worktree `dir` at the base, less those the hunks name
- * (`unnamedByRepair`); or undefined, with why printed. The worktree is restored on every way out.
- */
-async function repairedBaseTests(dir: string, top: string, base: string, head: string) {
-  const refuse = (why: string) => {
-    console.error(listFailed(`the base, ${base.slice(0, 12)}`, `, and ${why}`));
-    return undefined;
-  };
-  const built = await capture(
-    "cargo",
-    ["test", "--no-run", "--no-fail-fast", ...TEST_BUILD, "--message-format", "json"],
-    dir,
-    "falsify-base-errors.json",
-    { env: rustEnv(top), timeoutMs: CARGO_TIMEOUT_MS },
-  );
-  let spans: ErrorSpan[];
-  try {
-    spans = errorSpans(built.out);
-  } catch (error) {
-    return refuse(
-      `its build can't be read: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const files = [...new Set(spans.map(({ file }) => file))].filter(
-    (file) => !isAbsolute(file) && !file.split("/").includes(".."),
-  );
-  const range = ["--no-renames", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "-U0"];
-  const diff = files.length === 0 ? "" : git(["diff", ...range, base, head, "--", ...files], dir);
-  const repair = repairOf(zeroContextHunks(diff), spans);
-  if (typeof repair === "string") return refuse(`the branch can't repair it: ${repair}`);
-  const repaired = [...new Set(repair.map(({ file }) => file))];
-  try {
-    for (const file of repaired) {
-      const path = join(dir, file);
-      const mine = repair.filter((hunk) => hunk.file === file);
-      writeFileSync(path, repairedText(readFileSync(path, "utf8"), mine));
-    }
-    console.error(
-      "falsify: the base's Rust tests don't build, so it is listed with the branch's own lines " +
-        `at rustc's errors: ${repair.map(hunkAt).join(", ")}. A test those lines name counts as ` +
-        "the branch's.",
-    );
-    const listed = await listRustTests(dir, top);
-    if (listed === undefined) return refuse("it still fails with the branch's lines at its errors");
-    return unnamedByRepair(rustTestIds(listed), repair);
-  } finally {
-    worktreeGit(dir, ["checkout", "--quiet", "--", ...repaired]);
-  }
-}
-
 /**
  * The Rust tests HEAD has and the base hasn't, listed by nextest in a temporary worktree, each
  * judged by mutating the code the branch changed; or undefined, with the reason printed, when
@@ -2487,7 +2388,13 @@ async function repairedBaseTests(dir: string, top: string, base: string, head: s
  * `#[test]`, proptest, or a macro of the crate's own. Mutants are applied only in that worktree,
  * which is removed on every way out, a signal included.
  */
-async function judgeRustTests(top: string, base: string, head: string, rustFiles: string[]) {
+async function judgeRustTests(
+  top: string,
+  base: string,
+  head: string,
+  rustFiles: string[],
+  changes: Change[],
+) {
   const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
   cleanup = () => {
     cleanup = undefined;
@@ -2497,15 +2404,23 @@ async function judgeRustTests(top: string, base: string, head: string, rustFiles
     if (refusesCargoConfig(dir, "runs the Rust tests")) return undefined;
     addWorktree(dir, base, top);
     const before = await listRustTests(dir, top);
-    const atBase =
-      before === undefined ? await repairedBaseTests(dir, top, base, head) : rustTestIds(before);
     git(["checkout", "--quiet", "--detach", head], dir);
-    const after = atBase === undefined ? undefined : await listRustTests(dir, top);
-    if (atBase === undefined || after === undefined) {
-      if (atBase !== undefined) console.error(listFailed("HEAD"));
+    const after = await listRustTests(dir, top);
+    const fieldRepair =
+      before === undefined && after !== undefined && onlyFieldRepairs(dir, base, head, changes);
+    if (fieldRepair)
+      console.log("falsify: base listing failed; only Rust field initializers changed");
+    if ((!fieldRepair && before === undefined) || after === undefined) {
+      const where = after === undefined ? "HEAD" : `the base, ${base.slice(0, 12)}`;
+      console.error(
+        `falsify: \`cargo-nextest nextest list\` failed at ${where}, so the Rust tests the ` +
+          "branch adds are unknown. Run `moon run :test-rust` there to see why; if cargo-nextest is " +
+          `missing, install it: ${installCommand("cargo-nextest")}`,
+      );
       return undefined;
     }
-    const added = addedRustTests(atBase, rustTestIds(after));
+    const atBase = before === undefined ? [] : rustTestIds(before);
+    const added = fieldRepair ? [] : addedRustTests(atBase, rustTestIds(after));
     if (added.length === 0)
       return {
         verdicts: [],
@@ -2927,7 +2842,7 @@ async function main(args: string[]): Promise<number> {
     process.on("SIGHUP", handleSignal);
     try {
       const rustFiles = changes.flatMap(pathsOf).filter((path) => path.endsWith(".rs"));
-      const judged = await judgeRustTests(top, base, head, rustFiles);
+      const judged = await judgeRustTests(top, base, head, rustFiles, changes);
       if (judged === undefined) return 1;
       rust = judged;
     } finally {
