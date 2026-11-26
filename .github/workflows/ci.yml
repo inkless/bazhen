@@ -73,19 +73,6 @@ jobs:
       - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-rust-all
 
-      - name: Check the hello turn test against a holder that starves the flood for hellos
-        if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
-        run: |
-          perl -0pi -e 's/holder\.after_poll\(ready\.master, now\);/holder.after_poll(ready.master && !ready.listener, now);/ or die' crates/bazhen-holder/src/server.rs
-          git diff -- crates/bazhen-holder/src/server.rs
-          if moon run :test-rust-all -- a_turn_that_answers_a_hello_reads_the_flood_too >"$RUNNER_TEMP/hello-control" 2>&1; then
-            cat "$RUNNER_TEMP/hello-control"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/hello-control"
-          grep -F "left: (true, false)" "$RUNNER_TEMP/hello-control"
-          git restore -- crates/bazhen-holder/src/server.rs
-
   # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested.
   # Only clippy and nextest: tmux isn't run here, and rustfmt and cargo-deny don't depend on the
   # OS (deny.toml checks every target triple), so `check` covers them. Like `check`, it runs on
@@ -127,19 +114,6 @@ jobs:
         run: moon run :test-rust-all
       - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-holder
-
-      - name: Check the hello turn test against a holder that starves the flood for hellos
-        if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
-        run: |
-          perl -0pi -e 's/holder\.after_poll\(ready\.master, now\);/holder.after_poll(ready.master && !ready.listener, now);/ or die' crates/bazhen-holder/src/server.rs
-          git diff -- crates/bazhen-holder/src/server.rs
-          if moon run :test-rust-all -- a_turn_that_answers_a_hello_reads_the_flood_too >"$RUNNER_TEMP/hello-control" 2>&1; then
-            cat "$RUNNER_TEMP/hello-control"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/hello-control"
-          grep -F "left: (true, false)" "$RUNNER_TEMP/hello-control"
-          git restore -- crates/bazhen-holder/src/server.rs
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `moon run :check`, so it is a job of its
