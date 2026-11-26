@@ -655,7 +655,7 @@ What differs:
     test runner, so the cap and libFuzzer's own limits are given by hand.
 - **Repairing a base whose Rust tests cannot be listed.** HEAD must still list successfully.
   Keep the repair in its own PR. Falsify accepts only changes to existing regular Rust files
-  under a crate's `src/` when their syntax matches after treating a shorthand field `x` and
+  in a workspace crate's `src` directory when their syntax matches after treating a shorthand field `x` and
   `x: path(x)` as equivalent. This applies inside an unannotated top-level function on simple
   expression paths such as a struct passed to a call. Macro inputs, inline modules, methods
   and annotated statements are outside that rule. Workspace build scripts, procedural macros
