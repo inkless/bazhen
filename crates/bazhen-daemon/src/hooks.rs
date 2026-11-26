@@ -9,6 +9,7 @@
 mod activity;
 pub(crate) mod approvals;
 mod binding;
+pub(crate) mod channel;
 pub(crate) mod limits;
 pub(crate) mod mailbox;
 mod observed;
@@ -25,7 +26,7 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use bazhen_harness::{
     Gate, HarnessActivity, HarnessId, Held, IngestContext, Key, Observed, Origin, Reply, Report,
-    SessionRef, ToolKey,
+    SessionRef, Settled, ToolKey,
 };
 use bazhen_peer::Peer;
 use bazhen_protocol::agent_events::{CompactedHook, ReadySign};
@@ -455,7 +456,7 @@ impl Hooks {
                     .apply(
                         shared,
                         agent,
-                        hook,
+                        Some(hook.pid),
                         &origin,
                         (passes, peer),
                         &ingested.observed,
@@ -504,13 +505,14 @@ impl Hooks {
         })
     }
 
-    /// Applies each fact for `agent` that its gate passes, in order. The facts not applied here
-    /// land with the mailbox, readiness, approvals and turns.
+    /// Applies each fact for `agent` that its gate passes, in order, from the hook whose process
+    /// is `hook_pid`, none for a report from the harness's server. The facts not applied here land
+    /// with the mailbox, readiness, approvals and turns.
     async fn apply(
         &self,
         shared: &Shared,
         agent: &AgentId,
-        hook: &HookRequest,
+        hook_pid: Option<i64>,
         origin: &Origin,
         (passes, peer): (Passes, Option<&Peer>),
         observed: &[bazhen_harness::Keyed],
@@ -585,13 +587,13 @@ impl Hooks {
                     continue;
                 }
                 Observed::Compacted { sign } => {
-                    let compacted = CompactedHook {
+                    let compacted = hook_pid.map(|pid| CompactedHook {
                         session_id: origin.session.as_ref().map(|s| s.id.clone()),
-                        pid: hook.pid,
-                    };
+                        pid,
+                    });
                     let (agent, sign) = (agent.clone(), *sign);
                     write(&shared.store, move |w| {
-                        w.record_compaction(&agent, sign, Some(compacted))
+                        w.record_compaction(&agent, sign, compacted)
                     })
                     .await?;
                     continue;
@@ -653,6 +655,16 @@ impl Hooks {
             Observed::ToolSettled { use_id } => {
                 let ids = self.approvals.tool_settled(agent, use_id);
                 self.approvals.settle(&shared.store, ids, answered).await?;
+            }
+            Observed::ApprovalSettled { key, how } => {
+                let reason = match how {
+                    Settled::AnsweredInTui => answered,
+                    Settled::Superseded => AttentionClosedReason::Superseded,
+                    Settled::AgentClosed => AttentionClosedReason::AgentClosed,
+                    Settled::Stale => AttentionClosedReason::Stale,
+                };
+                self.settle(shared, agent, |entry| &entry.key == key, reason)
+                    .await?;
             }
             Observed::ApprovalAsked {
                 key,

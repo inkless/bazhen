@@ -97,14 +97,24 @@ pub enum Ended {
 
 /// The most bytes of each of a kept run's stdout and stderr that are kept; the rest is read and
 /// dropped.
-pub(crate) const OUTPUT_MAX: usize = 64 * 1024;
+pub const OUTPUT_MAX: usize = 64 * 1024;
 
 /// A kept run: how it ended, and the first `OUTPUT_MAX` bytes of each of its stdout and stderr.
 #[derive(Debug)]
-pub(crate) struct Ran {
-    pub(crate) ended: Ended,
+pub struct Ran {
+    pub ended: Ended,
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr: Vec<u8>,
+}
+
+impl Ran {
+    /// What it kept of its stdout and stderr, as text: each run of bytes that isn't UTF-8, as a cap
+    /// that cut a character leaves one, read as U+FFFD.
+    #[must_use]
+    pub fn text(&self) -> (String, String) {
+        let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+        (text(&self.stdout), text(&self.stderr))
+    }
 }
 
 /// Runs `command` with no stdin, in a process group of its own, and kills that group if the run
@@ -124,7 +134,11 @@ pub async fn run_bounded(command: Command, limit: Duration) -> Result<Ended, Err
 }
 
 /// `run_bounded`, keeping the first `OUTPUT_MAX` bytes of the command's stdout and stderr.
-pub(crate) async fn run_kept(command: Command, limit: Duration) -> Result<Ran, Error> {
+///
+/// # Errors
+///
+/// `run_bounded`'s.
+pub async fn run_kept(command: Command, limit: Duration) -> Result<Ran, Error> {
     run(command, limit, true).await
 }
 
@@ -199,7 +213,7 @@ mod tests {
     use rustix::process::{Pid, Signal, WaitOptions};
     use tokio::process::Command;
 
-    use super::{Ended, OUTPUT_MAX, OwnGroup, run_bounded, run_kept};
+    use super::{Ended, OUTPUT_MAX, OwnGroup, Ran, run_bounded, run_kept};
     use crate::{Error, Target, Unsafe, children_kept, keep_exited_children};
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -291,6 +305,19 @@ mod tests {
         );
         assert_eq!(run.stdout, b"out\n");
         assert_eq!(run.stderr, b"err\n");
+    }
+
+    #[test]
+    fn reads_what_a_run_kept_as_text_each_stream_its_own_and_bytes_not_utf8_replaced() {
+        let ran = Ran {
+            ended: Ended::TimedOut,
+            stdout: b"out \xe2\x82".to_vec(),
+            stderr: "err \u{20ac}".into(),
+        };
+        assert_eq!(
+            ran.text(),
+            ("out \u{fffd}".to_owned(), "err \u{20ac}".to_owned())
+        );
     }
 
     /// Past the cap the output is still read, so the command isn't held up writing it.

@@ -24,7 +24,7 @@ use rustix::io::Errno;
 use rustix::process::{Pid, RawPid, Signal};
 
 pub use bazhen_pid::{children_kept, keep_exited_children};
-pub use group::{Ended, run_bounded};
+pub use group::{Ended, OUTPUT_MAX, Ran, run_bounded, run_kept};
 
 /// What a signal was meant for: the process group a leader leads, or one process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

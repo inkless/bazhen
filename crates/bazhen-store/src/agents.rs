@@ -105,6 +105,38 @@ impl Reads<'_> {
         })
     }
 
+    /// The agents of `harness` its server serves, by id: each starting or running on a session of
+    /// its, whose server picks the session up on every new connection.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn served_agents(self, harness: HarnessId) -> rusqlite::Result<Vec<String>> {
+        let mut rows = self.0.prepare(
+            "SELECT id FROM agent_sessions WHERE harness = ? AND state IN ('starting', 'running')
+               AND external_ref IS NOT NULL ORDER BY id",
+        )?;
+        rows.query_map([harness.as_str()], |row| row.get(0))?
+            .collect()
+    }
+
+    /// The one agent of `harness` its server serves on the session `session` names, by id, none
+    /// where two are, so nothing meant for one reaches the other.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn served_on(self, harness: HarnessId, session: &str) -> rusqlite::Result<Option<String>> {
+        let mut rows = self.0.prepare(
+            "SELECT id FROM agent_sessions WHERE harness = ? AND state IN ('starting', 'running')
+               AND json_extract(external_ref, '$.id') = ? LIMIT 2",
+        )?;
+        let ids = rows
+            .query_map((harness.as_str(), session), |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(<[String; 1]>::try_from(ids).ok().map(|[id]| id))
+    }
+
     /// The agents that hold the harness session `session` names, by id: each bound to it that
     /// isn't closed or failed, since an exited or lost agent is started again on the session it
     /// is bound to.
@@ -476,7 +508,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use crate::testing::TempDir;
-    use bazhen_protocol::agents::AgentState;
+    use bazhen_protocol::agents::{AgentState, HarnessId};
     use bazhen_protocol::ids::{AgentId, TerminalId};
     use bazhen_protocol::shells::TerminalState;
 
@@ -784,6 +816,77 @@ mod tests {
                 Some("agent_01".to_owned()),
                 Some("agent_02".to_owned()),
                 None,
+                None,
+                None,
+                None,
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn serves_a_harness_s_live_agents_on_a_session_and_finds_one_by_it_where_it_is_alone() {
+        let dir = TempDir::new("served");
+        let store = store(&dir);
+        let on = |id, harness, state, session: Option<&'static str>| Agent {
+            id,
+            harness,
+            state,
+            external_ref: session,
+            ..AGENT
+        };
+        for agent in [
+            on(
+                "agent_01",
+                "codex",
+                "running",
+                Some(r#"{"kind":"codex-thread","id":"t-1"}"#),
+            ),
+            on(
+                "agent_02",
+                "codex",
+                "starting",
+                Some(r#"{"kind":"codex-thread","id":"t-2"}"#),
+            ),
+            on(
+                "agent_03",
+                "codex",
+                "exited",
+                Some(r#"{"kind":"codex-thread","id":"t-3"}"#),
+            ),
+            on("agent_04", "codex", "running", None),
+            on(
+                "agent_05",
+                "claude-code",
+                "running",
+                Some(r#"{"kind":"claude-session","id":"t-5"}"#),
+            ),
+            on(
+                "agent_06",
+                "codex",
+                "running",
+                Some(r#"{"kind":"codex-thread","id":"t-6"}"#),
+            ),
+            on(
+                "agent_07",
+                "codex",
+                "starting",
+                Some(r#"{"kind":"codex-thread","id":"t-6"}"#),
+            ),
+        ] {
+            seed(&store, &agent);
+        }
+        let reads = store.reads();
+        assert_eq!(
+            reads.served_agents(HarnessId::Codex).unwrap(),
+            ["agent_01", "agent_02", "agent_06", "agent_07"]
+        );
+        assert_eq!(
+            ["t-1", "t-2", "t-3", "t-5", "t-6", "t-9"]
+                .map(|t| reads.served_on(HarnessId::Codex, t).unwrap()),
+            [
+                Some("agent_01".to_owned()),
+                Some("agent_02".to_owned()),
                 None,
                 None,
                 None,

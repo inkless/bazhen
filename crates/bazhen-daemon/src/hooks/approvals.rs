@@ -120,7 +120,8 @@ impl Approvals {
         }
     }
 
-    /// Whether the item `id` is open with a request held for its answer.
+    /// Whether the item `id` is open with a request held for its answer: a hook's, as a server's
+    /// request opens an item that holds none, which its harness's own TUI answers.
     pub(crate) fn held(&self, id: &AttentionId) -> bool {
         self.registry()
             .open
