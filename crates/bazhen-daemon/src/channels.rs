@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bazhen_harness::{Bound, IngestContext, LaunchRequest, Report, RunPort, SessionRef};
+use bazhen_harness::{
+    Bound, Held, IngestContext, LaunchRequest, Reply, Report, RunPort, SessionRef,
+};
 use bazhen_protocol::agents::HarnessId;
 use bazhen_protocol::ids::AgentId;
 use serde_json::Value;
@@ -15,8 +17,9 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::channel::reconnect::{Channel, Event, FIRST_RETRY, Options};
-use crate::channel::rpc::Inbound;
+use crate::channel::rpc::{Inbound, Rpc};
 use crate::commands::Commands;
+use crate::hooks::approvals::{Responder, ServerHold};
 use crate::hooks::channel::served_on;
 use crate::routes::Shared;
 use crate::writer::Writer;
@@ -143,12 +146,22 @@ async fn hear(shared: Shared, harness: HarnessId, mut told: mpsc::Receiver<Event
 
 async fn heard(shared: &Shared, harness: HarnessId, event: Event) -> Result<(), String> {
     match event {
-        Event::Inbound { message, .. } => inbound(shared, harness, message).await,
+        Event::Inbound { message, on } => inbound(shared, harness, message, on).await,
         Event::Version(Some(version)) => recorded(shared, harness, version).await,
         // A server that names none leaves the last one recorded.
         Event::Version(None) => Ok(()),
-        Event::Connected(observed) | Event::Disconnected(observed) => {
-            shared.hooks.channel(shared, harness, observed, None).await
+        // The server asked again each request it still holds before this is told, so what it
+        // hasn't is stale. Only a new connection does: a session picked up again on the same one
+        // asks again only its own, and stales nothing.
+        Event::Connected(observed) => {
+            let swept = shared.hooks.connected(shared, harness).await;
+            let applied = shared.hooks.channel(shared, harness, observed, None).await;
+            swept.and(applied.map(drop))
+        }
+        Event::Disconnected(observed) => {
+            shared.hooks.approvals.disconnected(harness);
+            let applied = shared.hooks.channel(shared, harness, observed, None).await;
+            applied.map(drop)
         }
     }
 }
@@ -171,18 +184,18 @@ async fn recorded(shared: &Shared, harness: HarnessId, mut version: String) -> R
 }
 
 /// Reads what the server sent through its harness, for the agent served on the session the
-/// harness routes it to, and applies what it says. A request is left to the harness's own TUI,
-/// which the server asks it of too.
-async fn inbound(shared: &Shared, id: HarnessId, message: Inbound) -> Result<(), String> {
+/// harness routes it to, and applies what it says. A request the inbox can answer is held, to be
+/// answered on the connection `on` it came on; the harness's own TUI, which the server asks it of
+/// too, may answer it first.
+async fn inbound(shared: &Shared, id: HarnessId, message: Inbound, on: Rpc) -> Result<(), String> {
     let Some(harness) = shared.agents.as_ref().and_then(|a| a.harnesses().get(id)) else {
         return Ok(());
     };
-    let (method, params, asked) = match message {
+    let (method, params, request) = match message {
         Inbound::Notification { method, params } => (method, params, None),
-        Inbound::Request { id, method, params } => {
-            (method, params, Some(Value::from(id).to_string()))
-        }
+        Inbound::Request { id, method, params } => (method, params, Some(id)),
     };
+    let asked = request.clone().map(|id| Value::from(id).to_string());
     let params = params.unwrap_or(Value::Null).to_string();
     let report = match &asked {
         None => Report::Notification {
@@ -211,10 +224,24 @@ async fn inbound(shared: &Shared, id: HarnessId, message: Inbound) -> Result<(),
     };
     let ingested = harness.ingest(report, &context);
     let routed = session.as_ref().map(|session| (session, agent.as_ref()));
-    shared
+    let holds = matches!(ingested.reply, Reply::Hold(Held::Approval { .. }));
+    let opened = shared
         .hooks
         .channel(shared, id, ingested.observed, routed)
-        .await
+        .await?;
+    if let (Some(opened), Some(request), true) = (opened, request, holds) {
+        let hold = ServerHold {
+            on,
+            id: request,
+            method,
+        };
+        // A request asked again replaces the one held, which came on a connection gone.
+        shared
+            .hooks
+            .approvals
+            .hold(&opened, Responder::Server(hold));
+    }
+    Ok(())
 }
 
 /// The session `agent` is bound to, as its stored external ref names it.

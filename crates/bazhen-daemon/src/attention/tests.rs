@@ -36,6 +36,11 @@ async fn by_human(state: State<Shared>, id: Path<String>, body: Bytes) -> Respon
     answer(state, id, None, body).await
 }
 
+/// `reply` from the human, as the socket's guard reads its caller.
+async fn reply_by_human(state: State<Shared>, id: Path<String>, body: Bytes) -> Response {
+    reply(state, id, None, body).await
+}
+
 /// The status and refusal of a call, its item named `A`.
 fn refused(answer: &(u16, Value), id: &str) -> (u16, String) {
     let message = answer.1["message"].as_str().unwrap_or_default();
@@ -106,7 +111,7 @@ fn replies_to_an_item_with_mail_to_its_agent_that_closes_it_once_per_key() {
     let reply = |key: &str, body: &str| {
         call(
             &f,
-            reply,
+            reply_by_human,
             &id,
             &json!({ "idempotencyKey": key, "body": body }),
         )
@@ -204,7 +209,7 @@ fn refuses_a_verb_its_item_doesnt_offer_now_and_any_on_an_item_not_open() {
     f.set_state(&f.to.clone(), "closed");
     let reply_closed = call(
         &f,
-        reply,
+        reply_by_human,
         &id,
         &json!({ "idempotencyKey": "p", "body": "hi" }),
     );
