@@ -47,6 +47,7 @@ fn long() -> Deadlines {
 /// runtime for the whole test, on which the mailbox's deadlines run.
 struct Fixture {
     shared: Shared,
+    handed: StdMutex<tokio::sync::mpsc::UnboundedReceiver<crate::mail::Queued>>,
     agent: AgentId,
     runtime: tokio::runtime::Runtime,
     _dir: TempDir,
@@ -76,6 +77,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
         Box::new(|_| {}),
     );
     let hooks = Arc::new(Hooks::with_deadlines(Duration::from_millis(50), deadlines));
+    let (handing, handed) = tokio::sync::mpsc::unbounded_channel();
     let agents = Arc::new(Agents::new(AgentsDeps {
         store: store.clone(),
         terminals: Arc::new(Fake::default()),
@@ -91,7 +93,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
         hooks: Arc::clone(&hooks),
-        handing: tokio::sync::mpsc::unbounded_channel().0,
+        handing,
     }));
     let runtime = runtime();
     let launched = runtime
@@ -110,6 +112,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
     shared.hooks = hooks;
     Fixture {
         shared,
+        handed: StdMutex::new(handed),
         agent: launched.agent_id,
         runtime,
         _dir: dir,
@@ -203,6 +206,9 @@ impl Fixture {
             Bytes::from(request),
         ));
         assert_eq!(response.status().as_u16(), 200);
+        let queued = self.handed.lock().unwrap().try_recv().unwrap();
+        self.runtime
+            .block_on(crate::mail::deliver(&self.shared, queued));
         let bytes = self
             .runtime
             .block_on(axum::body::to_bytes(response.into_body(), 1 << 20))

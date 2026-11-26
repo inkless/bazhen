@@ -658,7 +658,9 @@ async fn listen(
 /// Lets go of what the daemon before this one held, which went with its sockets, then times each
 /// start that waits on its harness, those it left waiting on from their own starts. Only then,
 /// with `commands` where agents are served, does it hear each harness's server, so nothing it
-/// asks again is closed as abandoned, nor a message it says was taken queued again.
+/// asks again is closed as abandoned, nor a message it says was taken queued again. Last, it
+/// pushes the mail the daemon before it left queued, that in flight it queued again among it, to
+/// each agent whose harness takes mail by push; an agent still starting keeps its mail queued.
 async fn let_go(
     shared: &Shared,
     tracker: &TaskTracker,
@@ -681,6 +683,7 @@ async fn let_go(
     if let Some(commands) = commands {
         crate::channels::start(shared, commands, tracker, shared.stop.token());
     }
+    crate::mail::resume_queued(shared).await;
 }
 
 /// Closes the terminals' streams, a parked one without waiting out its linger, then the runtime's
@@ -1078,6 +1081,58 @@ mod tests {
         });
         assert_eq!(closed, (false, true));
         writer.finish();
+    }
+
+    fn boot_mail(f: &crate::mail::tests::Fixture) {
+        let home = TempDir::new("push-at-boot");
+        let tracker = TaskTracker::new();
+        f.runtime
+            .block_on(let_go(&f.shared, &tracker, &startup(home.path()), None));
+        f.settle();
+        f.shared.stop.token().cancel();
+        tracker.close();
+        f.runtime.block_on(tracker.wait());
+    }
+
+    #[test]
+    fn pushes_queued_mail_in_order_at_boot_without_a_readiness_signal() {
+        use crate::mail::tests::{fixture, push};
+        let f = fixture(push(std::iter::repeat_n(
+            bazhen_harness::Pushed::Accepted { offline: false },
+            2,
+        )));
+        f.queue_only(&f.to, "one");
+        f.queue_only(&f.to, "two");
+        boot_mail(&f);
+        assert_eq!(f.pushed(), ["one", "two"]);
+    }
+
+    #[test]
+    fn keeps_mail_queued_at_boot_while_its_agent_is_starting() {
+        use crate::mail::tests::{fixture, push};
+        let f = fixture(push(std::iter::repeat_n(
+            bazhen_harness::Pushed::Accepted { offline: false },
+            2,
+        )));
+        f.set_state(&f.to, "starting");
+        f.queue_only(&f.to, "later");
+        f.queue_only(&f.peer, "now");
+        boot_mail(&f);
+        let peer = (
+            "mailbox.queued".to_owned(),
+            serde_json::json!({ "agentId": f.peer.as_str(), "body": "now" }),
+        );
+        let accepted = (
+            "mailbox.accepted".to_owned(),
+            serde_json::json!({ "offline": false }),
+        );
+        assert_eq!(
+            (f.pushed(), f.mail()),
+            (
+                vec!["now".to_owned()],
+                vec![f.queued("later"), peer, accepted]
+            )
+        );
     }
 
     #[test]

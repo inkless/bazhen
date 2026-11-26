@@ -159,16 +159,9 @@ pub(crate) struct Queued {
     pub(crate) delivery: Delivery,
 }
 
-/// Where a write that can't reach the daemon's routes hands what it queued, once it commits.
+/// Where a writer job hands what it queued, once it commits.
 /// Unbounded, so a write at start, before anything drains it, neither waits nor loses mail.
 pub(crate) type Handing = mpsc::UnboundedSender<Queued>;
-
-/// A send's answer, and the message it queued: none for a repeat of a send, which gets its first
-/// answer and hands nothing over again.
-struct Sent {
-    response: SendMessageResponse,
-    queued: Vec<Queued>,
-}
 
 /// `POST /v1/agents/:id/messages`: the human sends as Bazhen, an agent as itself to another. The
 /// path names the agent by its id or its live name, resolved before the key is replayed.
@@ -183,8 +176,7 @@ pub(crate) async fn send(
             edge::<SendMessageRequest>(&body).map_err(|refused| Sending::Invalid(refused.0))?;
         let agents = shared.agents.clone().ok_or(Sending::Unavailable)?;
         let caller = caller_of(caller);
-        let run = Arc::clone(&agents);
-        let sent = shared
+        shared
             .store
             .run(move |store| {
                 let agent = store
@@ -192,14 +184,10 @@ pub(crate) async fn send(
                     .resolve_agent(&reference)?
                     .and_then(|agent| AgentId::parse(&agent))
                     .ok_or_else(|| Sending::Unnamed(reference.clone()))?;
-                sent(store, &run, caller.as_ref(), &agent, &req)
+                sent(store, &agents, caller.as_ref(), &agent, &req)
             })
             .await
-            .map_err(|err| Sending::Internal(err.to_string()))??;
-        for queued in sent.queued {
-            deliver(&shared, queued).await;
-        }
-        Ok(sent.response)
+            .map_err(|err| Sending::Internal(err.to_string()))?
     };
     match sent.await {
         Ok(response) => axum::Json(response).into_response(),
@@ -256,7 +244,7 @@ fn sent(
     caller: Option<&AgentId>,
     agent: &AgentId,
     req: &SendMessageRequest,
-) -> Result<Sent, Sending> {
+) -> Result<SendMessageResponse, Sending> {
     let harnesses = agents.harnesses();
     let mut fresh = Vec::new();
     let response = match caller {
@@ -303,10 +291,10 @@ fn sent(
             })?
         }
     };
-    Ok(Sent {
-        response,
-        queued: fresh,
-    })
+    // Committed: handed over here, so a caller gone before the answer leaves none of its mail
+    // behind.
+    agents.hand(fresh);
+    Ok(response)
 }
 
 /// Bazhen's own mail to `agent`, sent in a verb's write under `key`, a key derived from the
@@ -483,6 +471,27 @@ impl Pusher {
                 return Ok(());
             }
         }
+    }
+}
+
+/// Resumes pushing the queued mail the last daemon left behind, to each agent whose harness takes
+/// mail by push; other mail stays queued for its harness to pull.
+pub(crate) async fn resume_queued(shared: &Shared) {
+    if shared.push.is_none() {
+        return;
+    }
+    let store = shared.store.clone();
+    let agents =
+        tokio::task::spawn_blocking(move || store.reader()?.reads().agents_with_queued_mail())
+            .await;
+    match agents {
+        Ok(Ok(agents)) => {
+            for agent in agents {
+                push_queued(shared, &agent);
+            }
+        }
+        Ok(Err(err)) => tracing::warn!("bazhen: couldn't read queued mail at start: {err}"),
+        Err(err) => tracing::warn!("bazhen: couldn't read queued mail at start: {err}"),
     }
 }
 
