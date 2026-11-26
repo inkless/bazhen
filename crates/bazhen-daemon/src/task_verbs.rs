@@ -385,7 +385,6 @@ pub(crate) async fn unassign(
         let assignment = AssignmentId::parse(&req.assignment_id)
             .ok_or_else(|| Sending::Invalid(format!("no assignment {}", req.assignment_id)))?;
         let caller = caller_of(caller);
-        // Committed: handed over here, as `assign` hands its mail over.
         let response = shared
             .store
             .run(move |store| {
@@ -403,6 +402,7 @@ pub(crate) async fn unassign(
                     };
                     taking.record(w, run.harnesses(), &mut queued)
                 })?;
+                // Committed: handed over here, as `assign` hands its mail over.
                 run.hand(queued);
                 Ok::<_, Granting>(response)
             })
