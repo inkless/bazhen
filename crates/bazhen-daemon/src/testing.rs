@@ -175,3 +175,62 @@ pub(crate) async fn heard(server: &mut Server) -> Value {
 pub(crate) async fn say(server: &mut Server, value: Value) {
     server.send(Message::text(value.to_string())).await.unwrap();
 }
+
+/// A gate blocking readings wait at until it opens.
+#[derive(Default)]
+pub(crate) struct Gate {
+    open: std::sync::Mutex<bool>,
+    opened: std::sync::Condvar,
+    pub(crate) started: std::sync::atomic::AtomicUsize,
+}
+
+impl Gate {
+    pub(crate) fn wait(&self) {
+        self.started
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut open = self.open.lock().unwrap();
+        while !*open {
+            open = self.opened.wait(open).unwrap();
+        }
+    }
+
+    /// Waits until the gate opens or `limit` passes, so a reading the test never lets through
+    /// still ends; whether it opened.
+    pub(crate) fn wait_for(&self, limit: Duration) -> bool {
+        self.started
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let open = self.open.lock().unwrap();
+        let (open, _) = self
+            .opened
+            .wait_timeout_while(open, limit, |open| !*open)
+            .unwrap();
+        *open
+    }
+
+    pub(crate) fn open(&self) {
+        *self
+            .open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        self.opened.notify_all();
+    }
+
+    /// Waits until `n` readings have started, letting the runtime's tasks run meanwhile.
+    pub(crate) async fn started_by(&self, n: usize) {
+        let by = std::time::Instant::now() + Duration::from_secs(10);
+        while self.started.load(std::sync::atomic::Ordering::SeqCst) < n {
+            assert!(std::time::Instant::now() < by, "{n} readings never started");
+            tokio::task::yield_now().await;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+/// Opens its gate when dropped, so a test that fails with readings still waiting ends.
+pub(crate) struct Opens(pub(crate) std::sync::Arc<Gate>);
+
+impl Drop for Opens {
+    fn drop(&mut self) {
+        self.0.open();
+    }
+}
