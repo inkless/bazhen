@@ -6,7 +6,6 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "n
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parse as parseToml } from "smol-toml";
 import { MIGRATIONS, NUMBERED_MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./rust-gate.ts";
@@ -352,10 +351,10 @@ function packageScripts(
   );
 }
 
-/** The root package.json's scripts, and the moon tasks a person may run, by `project:task`. */
+/** The root package.json's scripts, and the Makefile's targets a person may run. */
 const menu = () => ({
   scripts: new Set(Object.keys(packageScripts((p) => readFileSync(join(root, p), "utf8")))),
-  targets: publicTargets(moonTasks(repoFiles(), readRepoFile).tasks),
+  targets: menuTargets(makefileTargets(readRepoFile(MAKEFILE)).targets),
 });
 
 /** The text of every inline code span, and every whitespace-separated word in fenced blocks. */
@@ -387,22 +386,73 @@ export function pnpmScripts(span: string): string[] {
   return scripts;
 }
 
-/** The targets of the `moon run ...` commands in a code span, up to the args after `--`. */
-export function moonTargets(span: string): string[] {
+// make's options that take a value as the next word; every other option is a bare word.
+const MAKE_VALUE_FLAGS = new Set(["-C", "-f", "-I", "-o", "-W"]);
+
+/**
+ * The targets a span names when it is a `make` command, as a person would type it: past any
+ * variables set for it, its words up to a shell operator, less options and variables. A span whose
+ * words after `make` aren't all options, variables and target names is prose, and names none.
+ */
+export function makeTargets(span: string): string[] {
+  const command = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*make\b(.*)$/.exec(span);
+  if (command === null) return [];
+  const [line = ""] = (command[1] ?? "").split(/&&|\|\||[;|&)]/);
+  const words = line.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) ?? [];
   const targets: string[] = [];
-  for (const [, rest = ""] of span.matchAll(/\bmoon run((?: +\S+)*)/g)) {
-    for (const word of rest.trim().split(/ +/)) {
-      if (word === "--") break;
-      if (/^[\w-]*:[\w.-]+$/.test(word)) targets.push(word);
-    }
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i] ?? "";
+    if (MAKE_VALUE_FLAGS.has(word)) i++;
+    else if (TARGET_NAME.test(word)) targets.push(word);
+    else if (!/^-|^[A-Za-z_]\w*=/.test(word)) return [];
   }
   return targets;
 }
 
-/** Whether `target`, as `moon run` takes it (`:task` in any project), names one of `targets`. */
-export function isMoonTarget(target: string, targets: ReadonlySet<string>): boolean {
-  if (!target.startsWith(":")) return targets.has(target);
-  return [...targets].some((t) => t.endsWith(target));
+// Files whose `make` lines run another project's Makefile, each with why.
+const FOREIGN_MAKE: Record<string, string> = {
+  "tests/real/Dockerfile": "builds tmux with the Makefile of tmux's own release",
+};
+// Files that name targets that aren't, to check they are refused.
+const PLANTED_MAKE = new Set(["scripts/check-standards.ts", "scripts/check-standards.test.ts"]);
+const NAMES_COMMANDS = /\.(?:md|ts|tsx|rs|sh|ya?ml|toml)$|(?:^|\/)Dockerfile$/;
+const SHELL_TEXT = /\.(?:sh|ya?ml)$|(?:^|\/)Dockerfile$/;
+// Where a shell line starts another command, and the words that run the one after them.
+const SHELL_SEPARATOR = /&&|\|\||[;|&!({]|\$\(|\b(?:then|do|else)\b/;
+const SHELL_PREFIX = /^\s*(?:-\s+)?(?:run:\s*)?(?:(?:nohup|setsid|exec|if|time)\s+)*/;
+
+/**
+ * The text in a file that may be a command: a Markdown file's code spans and fenced lines; any
+ * other file's `quoted` spans and argvs' `"make", "<target>"` (or `["<target>"`); and, in a shell script, workflow or
+ * Dockerfile, each command of each line that isn't a comment.
+ */
+export function commandSpans(file: string, text: string): string[] {
+  if (file.endsWith(".md")) return codeSpans(text);
+  const spans: string[] = [];
+  for (const line of text.split("\n")) {
+    for (const [, span = ""] of line.matchAll(/`([^`]+)`/g)) spans.push(span);
+    for (const [, target = ""] of line.matchAll(/["']make["'], +\[?["']([a-z][a-z0-9-]*)["']/g)) {
+      spans.push(`make ${target}`);
+    }
+    if (SHELL_TEXT.test(file) && !/^\s*#/.test(line)) {
+      for (const part of line.split(SHELL_SEPARATOR)) spans.push(part.replace(SHELL_PREFIX, ""));
+    }
+  }
+  return spans;
+}
+
+/** Why a file names `make <x>` where x is no target on the menu. */
+export function makeNameFailures(
+  file: string,
+  text: string,
+  targets: ReadonlySet<string>,
+): string[] {
+  return [...new Set(commandSpans(file, text).flatMap(makeTargets))]
+    .filter((target) => !targets.has(target))
+    .map(
+      (target) =>
+        `${file}: names \`make ${target}\`, which is not a target on \`make help\`'s menu.`,
+    );
 }
 
 /** Paths named in the code spans and fenced blocks of a Markdown document. */
@@ -417,19 +467,12 @@ export function pathCandidates(text: string): string[] {
   return [...paths];
 }
 
-function checkContextFile(doc: string, { scripts, targets }: ReturnType<typeof menu>): void {
+function checkContextFile(doc: string, { scripts }: ReturnType<typeof menu>): void {
   const text = readFileSync(join(root, doc), "utf8");
   const named = new Set(codeSpans(text).flatMap(pnpmScripts));
   for (const script of named) {
     if (!PNPM_BUILTINS.has(script) && !scripts.has(script)) {
       failures.push(`${doc}: names \`pnpm ${script}\`, which is not a package.json script.`);
-    }
-  }
-  for (const target of new Set(codeSpans(text).flatMap(moonTargets))) {
-    if (!isMoonTarget(target, targets)) {
-      failures.push(
-        `${doc}: names \`moon run ${target}\`, which is not a moon task a person runs.`,
-      );
     }
   }
   for (const candidate of pathCandidates(text)) {
@@ -4519,261 +4562,307 @@ const RUST_FLAG_EXEMPT: Record<string, string> = {
 const LINT_FLAG =
   /(?:\b|_)rust(?:doc)?flags\b|rustc[-_](?:workspace[-_])?wrapper|\bcargo_alias_|cap-lints/i;
 
-// moon is the repository's menu: its tasks are every command the repository runs. Its configs are
-// read here as moon reads them and held to what made the scripts safe to run: every task runs
-// afresh, every step that starts tests runs under a cap, the gates run their pinned commands, and
-// `check` runs each gate. A config moon would read that this doesn't (a .moon/tasks file every
-// project inherits, a moon.yml) is refused, and so is a key of a task this doesn't know, so no
-// task can run something round these rules.
-const MOON_WORKSPACE = ".moon/workspace.toml";
-const PROTOTOOLS = ".prototools";
-const MOON_CONFIG = /^\.moon\/|(?:^|\/)moon\.(?:ya?ml|json5?|jsonc|pkl|hcl|toml)$/;
-const MOON_PACKAGE = /^@moonrepo\//;
-// The moon CI and the test image run: the lockfile's, which pnpm installs from hashed packages
-// without running an install script, at the version .prototools pins for every host's proto.
-const MOON_CLI = "@moonrepo/cli";
-const ROOT_PROJECT = "root";
-// The keys of a task, and of its options, this check reads; any other could change what it runs
-// or let it pass unrun (`extends`, `options.allowFailure`, `options.envFile`, …).
-const MOON_TASK_KEYS = new Set(["command", "args", "script", "deps", "options"]);
-const MOON_TASK_OPTIONS = new Set([
-  "cache",
-  "runDepsInParallel",
-  "persistent",
-  "interactive",
-  "runInCI",
-  "internal",
-  // Only where moon prints a task's output, and only as "stream", which hides none of it.
-  "outputStyle",
-]);
-// The only package.json scripts: pnpm's own install hook, which moon can't start.
+// The Makefile is the repository's menu: its targets are every command the repository runs. It is
+// read here as make reads it and held to what made the commands safe to run: every target runs
+// afresh, every step that starts tests runs under a cap, a target's deps run in order and get none
+// of its ARGS, the gates run their pinned commands, and `check` runs each gate. Anything make would
+// read that this doesn't (another makefile, an include, a variable, a pattern rule, a recipe line
+// whose failure make ignores) is refused, so no target can run something round these rules.
+const MAKEFILE = "Makefile";
+// GNUmakefile and makefile are read before Makefile, and a .mk file is one a recipe would include.
+const OTHER_MAKEFILE = /(?:^|\/)(?:GNUmakefile|[Mm]akefile)$|\.mk$/;
+// The Makefile's settings, exactly: ARGS reaches the named target's own command alone, as neither
+// a dep's make nor one a script starts inherits it, and sub-makes say nothing of directories.
+export const MAKEFILE_SETTINGS = [
+  "MAKEFLAGS += --no-print-directory",
+  "MAKEOVERRIDES :=",
+  "unexport ARGS",
+];
+/** What a recipe appends to its own command: the words a person put in ARGS, unexpanded by make. */
+export const OWN_ARGS = "$(value ARGS)";
+// `make help`, the menu: each target that has a `##`, with what follows it. The menu is what
+// documents a target, so the docs may name only those.
+export const HELP_COMMAND =
+  "@printf 'make <target> [ARGS=\"<its arguments>\"]\\n\\n' && awk -F ':.*## ' " +
+  "'/^[a-z][a-z0-9-]*:.*## / { printf \"  %-22s %s\\n\", $$1, $$2 }' Makefile";
+// The targets whose deps run at once, each with why. Anywhere else deps run one at a time, in
+// order: a dep may build what the next one runs.
+export const PARALLEL_TARGETS: Record<string, string> = {
+  dev: "its two servers never exit, so run in order the first would hold the second off forever",
+};
+const TARGET_NAME = /^[a-z][a-z0-9-]*$/;
+// The only package.json scripts: pnpm's own install hook, which make can't start.
 export const PACKAGE_SCRIPTS: Record<string, Record<string, string>> = {
   "package.json": { prepare: "husky" },
 };
 
-type Table = Record<string, unknown>;
-const isTable = (value: unknown): value is Table =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A task's command or args, a string or a list of words, as one line. */
-const taskWords = (value: unknown): string =>
-  Array.isArray(value) ? value.map(String).join(" ") : typeof value === "string" ? value : "";
-
-/** What moon runs for a task: its script, or its command and args as one line. */
-function taskCommand(task: Table): string {
-  if (typeof task["script"] === "string") return task["script"];
-  return [taskWords(task["command"]), taskWords(task["args"])].filter((w) => w !== "").join(" ");
+/** A target of the Makefile: its `##` text, its deps in the order they run, and its own command. */
+export interface MakeTarget {
+  readonly line: number;
+  readonly doc: string | undefined;
+  readonly deps: string[];
+  readonly parallel: boolean;
+  readonly command: string | undefined;
 }
 
-/** A moon task, with the config it is in. */
-export interface MoonTask {
-  file: string;
-  task: Table;
+/** Where in the Makefile a failure is. */
+const makefileAt = (line: number) => `${MAKEFILE}:${line}`;
+
+/** The Makefile's lines, each continued line joined to the one it continues, with where it began. */
+function logicalLines(text: string): { line: number; text: string }[] {
+  const out: { line: number; text: string }[] = [];
+  const raw = text.split("\n");
+  for (let i = 0; i < raw.length; i++) {
+    const start = i;
+    let line = raw[i] ?? "";
+    while (line.endsWith("\\") && i + 1 < raw.length) {
+      i++;
+      line = `${line.slice(0, -1).trimEnd()} ${(raw[i] ?? "").trim()}`;
+    }
+    out.push({ line: start + 1, text: line });
+  }
+  return out;
+}
+
+/** Why a recipe line's text names something of make's other than $(MAKE), ARGS and `$$`. */
+function makeReferences(text: string): string[] {
+  const rest = text.replaceAll("$$", "").replaceAll("$(MAKE)", "").replaceAll(OWN_ARGS, "");
+  return [...rest.matchAll(/\$(?:\([^)]*\)?|\{[^}]*\}?|.?)/g)].map(([found]) => found);
 }
 
 /**
- * moon's tasks by `project:task`, read from the projects .moon/workspace.toml lists, and why one
- * couldn't be read.
+ * The Makefile's targets by name, read as make reads it, and why it holds something this doesn't
+ * read or a target breaks the rules above.
  */
-export function moonTasks(
-  paths: readonly string[],
-  read: (path: string) => string,
-): { tasks: Map<string, MoonTask>; failures: string[] } {
-  const tasks = new Map<string, MoonTask>();
+export function makefileTargets(text: string): {
+  targets: Map<string, MakeTarget>;
+  failures: string[];
+} {
+  const targets = new Map<string, MakeTarget>();
   const problems: string[] = [];
-  const toml = (file: string): Table | undefined => {
-    try {
-      return parseToml(read(file));
-    } catch (error) {
-      problems.push(`${file}: moon can't read it: ${String(error).split("\n")[0]}`);
-      return undefined;
-    }
-  };
-  if (!paths.includes(MOON_WORKSPACE)) {
-    problems.push(`${MOON_WORKSPACE} is missing; moon's tasks are the repository's commands.`);
-    return { tasks, failures: problems };
-  }
-  const workspace = toml(MOON_WORKSPACE);
-  if (workspace === undefined) return { tasks, failures: problems };
-  if (workspace["telemetry"] !== false) {
-    problems.push(`${MOON_WORKSPACE}: set \`telemetry = false\`; moon reports usage otherwise.`);
-  }
-  const projects = workspace["projects"];
-  const folders = isTable(projects) ? Object.entries(projects) : [];
-  if (
-    !isTable(projects) ||
-    folders.some(([, folder]) => typeof folder !== "string") ||
-    projects[ROOT_PROJECT] !== "."
-  ) {
-    problems.push(
-      `${MOON_WORKSPACE}: list the projects as a table of id = "folder", with ` +
-        `${ROOT_PROJECT} = "." for the workspace-wide tasks; a glob would hide which configs moon reads.`,
-    );
-  }
-  const configs = new Map<string, string>();
-  for (const [id, folder] of folders) {
-    if (typeof folder === "string")
-      configs.set(folder === "." ? "moon.toml" : `${folder}/moon.toml`, id);
-  }
-  for (const file of paths.filter((p) => MOON_CONFIG.test(p))) {
-    if (file !== MOON_WORKSPACE && !configs.has(file)) {
+  const phony = new Set<string>();
+  const settings = new Set<string>();
+  let current: { name: string; line: number; doc: string | undefined } | undefined;
+  let deps: string[] = [];
+  let parallel = false;
+  let command: string | undefined;
+  let recipeLines = 0;
+  const close = () => {
+    if (current === undefined) return;
+    if (recipeLines === 0) {
       problems.push(
-        `${file}: moon reads it, and this check doesn't. A project's tasks go in its moon.toml, ` +
-          `the project listed in ${MOON_WORKSPACE}.`,
+        `${makefileAt(current.line)}: the "${current.name}" target has no recipe; it runs nothing.`,
       );
     }
-  }
-  for (const [file, id] of configs) {
-    if (!paths.includes(file)) continue;
-    const config = toml(file);
-    const table = config?.["tasks"] ?? {};
-    if (!isTable(table)) {
-      problems.push(`${file}: \`tasks\` must be a table of tasks.`);
+    targets.set(current.name, { line: current.line, doc: current.doc, deps, parallel, command });
+    current = undefined;
+  };
+  for (const { line, text: raw } of logicalLines(text)) {
+    if (raw.startsWith("\t")) {
+      if (current === undefined) {
+        problems.push(
+          `${makefileAt(line)}: a recipe line that follows no target's line or recipe directly.`,
+        );
+        continue;
+      }
+      recipeLines++;
+      const body = raw.slice(1).trim();
+      const name = current.name;
+      if (/^[-+]/.test(body)) {
+        problems.push(
+          `${makefileAt(line)}: the "${name}" target starts a line with \`${body[0]}\`: \`-\` would pass a ` +
+            "failing line and `+` would run one under `make -n`.",
+        );
+      }
+      for (const found of makeReferences(body)) {
+        problems.push(
+          `${makefileAt(line)}: the "${name}" target names \`${found}\`, which scripts/check-standards.ts ` +
+            "doesn't read: a recipe names make's $(MAKE) and $(value ARGS) alone, and writes the " +
+            "shell's `$` as `$$`.",
+        );
+      }
+      const words = body.split(/\s+/);
+      if (words[0] === "$(MAKE)" && !/[;&|<>`]|\$\(/.test(body.replaceAll("$(MAKE)", ""))) {
+        const jobs = /^-j(\d+)$/.exec(words[1] ?? "");
+        const named = words.slice(jobs === null ? 1 : 2);
+        if (command !== undefined) {
+          problems.push(
+            `${makefileAt(line)}: the "${name}" target runs a dep after its own command; deps come first.`,
+          );
+        }
+        if (jobs !== null) {
+          if (PARALLEL_TARGETS[name] === undefined || Number(jobs[1]) !== named.length) {
+            problems.push(
+              `${makefileAt(line)}: the "${name}" target runs its deps at once: only the targets ` +
+                "PARALLEL_TARGETS in scripts/check-standards.ts lists may, each with as many jobs " +
+                "as deps. Run each dep on a line of its own, so they run in order under `make -j` too.",
+            );
+          }
+          parallel = true;
+        } else if (named.length !== 1) {
+          problems.push(
+            `${makefileAt(line)}: the "${name}" target's \`$(MAKE)\` line must run one dep and nothing ` +
+              "else: two goals of one make run at once under `make -j`, and a variable or option " +
+              "runs another command than the dep's own.",
+          );
+        }
+        deps.push(...named.filter((dep) => TARGET_NAME.test(dep)));
+      } else if (body.includes("$(MAKE)")) {
+        problems.push(
+          `${makefileAt(line)}: the "${name}" target runs $(MAKE) inside a command; a dep is a ` +
+            "`$(MAKE) <dep>` line of its own.",
+        );
+      } else if (command !== undefined) {
+        problems.push(
+          `${makefileAt(line)}: the "${name}" target has a second command line; join its steps with \`&&\`.`,
+        );
+      } else {
+        command = body;
+      }
       continue;
     }
-    for (const [name, task] of Object.entries(table)) {
-      if (isTable(task)) tasks.set(`${id}:${name}`, { file, task });
-      else problems.push(`${file}: the "${name}" task must be a table.`);
+    // A recipe ends at a blank line or a comment, so no line far below a target joins its recipe.
+    close();
+    if (raw.trim() === "" || raw.trimStart().startsWith("#")) continue;
+    if (MAKEFILE_SETTINGS.includes(raw)) {
+      settings.add(raw);
+      continue;
+    }
+    const phonyNames = /^\.PHONY:((?: +[a-z][a-z0-9-]*)+)$/.exec(raw);
+    if (phonyNames !== null) {
+      for (const name of (phonyNames[1] ?? "").trim().split(/ +/)) phony.add(name);
+      continue;
+    }
+    const rule = /^([a-z][a-z0-9-]*):(?![:=])(.*)$/.exec(raw);
+    if (rule === null) {
+      problems.push(
+        `${makefileAt(line)}: make reads \`${raw.trim()}\`, and scripts/check-standards.ts doesn't: the ` +
+          "Makefile holds its settings, .PHONY lines and targets alone.",
+      );
+      continue;
+    }
+    const [, name = "", rest = ""] = rule;
+    const doc = /^\s*## (.+)$/.exec(rest)?.[1]?.trim();
+    if (doc === undefined && rest.trim() !== "") {
+      problems.push(
+        `${makefileAt(line)}: the "${name}" target names prerequisites; its deps go in its recipe, a ` +
+          "`$(MAKE) <dep>` line each, so they run in order under `make -j` and get none of its ARGS.",
+      );
+    }
+    if (targets.has(name))
+      problems.push(`${makefileAt(line)}: the "${name}" target is defined twice.`);
+    current = { name, line, doc };
+    deps = [];
+    parallel = false;
+    command = undefined;
+    recipeLines = 0;
+  }
+  close();
+  for (const setting of MAKEFILE_SETTINGS.filter((s) => !settings.has(s))) {
+    problems.push(
+      `${MAKEFILE}: needs \`${setting}\` (MAKEFILE_SETTINGS in scripts/check-standards.ts), so ` +
+        "ARGS reaches the named target's own command alone.",
+    );
+  }
+  for (const [name, target] of targets) {
+    if (!phony.has(name)) {
+      problems.push(
+        `${makefileAt(target.line)}: the "${name}" target must be .PHONY: make would take a file of its ` +
+          "name as up to date and run nothing.",
+      );
+    }
+    for (const dep of target.deps.filter((d) => !targets.has(d))) {
+      problems.push(
+        `${makefileAt(target.line)}: the "${name}" target runs \`${dep}\`, which is no target.`,
+      );
     }
   }
-  return { tasks, failures: problems };
-}
-
-/** The tasks a person or CI may run, as `project:task`: every task but the internal ones. */
-export function publicTargets(tasks: ReadonlyMap<string, MoonTask>): Set<string> {
-  return new Set(
-    [...tasks].flatMap(([target, { task }]) =>
-      isTable(task["options"]) && task["options"]["internal"] === true ? [] : [target],
-    ),
-  );
-}
-
-/** Why moon's config, .prototools or a package.json's scripts would let a command run unchecked. */
-export function moonFailures(paths: readonly string[], read: (path: string) => string): string[] {
-  const { tasks, failures: out } = moonTasks(paths, read);
-  for (const [target, { file, task }] of tasks) {
-    const name = target.split(":")[1] ?? "";
-    for (const key of Object.keys(task).filter((k) => !MOON_TASK_KEYS.has(k))) {
-      out.push(
-        `${file}: the "${name}" task sets \`${key}\`, which scripts/check-standards.ts doesn't read.`,
-      );
-    }
-    const options = isTable(task["options"]) ? task["options"] : {};
-    for (const key of Object.keys(options).filter((k) => !MOON_TASK_OPTIONS.has(k))) {
-      out.push(
-        `${file}: the "${name}" task sets \`options.${key}\`, which scripts/check-standards.ts ` +
-          "doesn't read; add it to MOON_TASK_OPTIONS there, with why it can't let a task pass unrun.",
-      );
-    }
-    if ("outputStyle" in options && options["outputStyle"] !== "stream") {
-      out.push(
-        `${file}: the "${name}" task sets \`options.outputStyle\` to anything but "stream": ` +
-          "`none` and `hash` print no log, and a failing task's log is what says why.",
-      );
-    }
-    if (options["cache"] !== false) {
-      out.push(
-        `${file}: the "${name}" task needs \`options = { cache = false }\`: moon would replay an ` +
-          "earlier run's result in place of running it.",
-      );
-    }
-    if ("runInCI" in options && options["persistent"] !== true && options["interactive"] !== true) {
-      out.push(
-        `${file}: the "${name}" task sets \`options.runInCI\`, which only a server or the CLI ` +
-          "(`persistent` or `interactive`) may: CI would skip it.",
-      );
-    }
-    const deps = task["deps"] ?? [];
-    if (!Array.isArray(deps) || deps.some((dep) => typeof dep !== "string")) {
-      out.push(
-        `${file}: the "${name}" task must name its deps as a list of targets; a dep given args or ` +
-          "env runs another command than that task's own.",
-      );
-    }
-    const countsKills = target === `${ROOT_PROJECT}:${name}` ? COUNTED_KILLS_TASKS : undefined;
-    out.push(...cappedScriptFailures(file, { [name]: taskCommand(task) }, "task", countsKills));
+  for (const name of [...phony].filter((n) => !targets.has(n))) {
+    problems.push(`${MAKEFILE}: .PHONY names \`${name}\`, which is no target.`);
   }
-  const rootTask = (name: string) => tasks.get(`${ROOT_PROJECT}:${name}`)?.task;
+  return { targets, failures: problems };
+}
+
+/** The targets a person or CI may run: those on `make help`'s menu, which have a `##`. */
+export function menuTargets(targets: ReadonlyMap<string, MakeTarget>): Set<string> {
+  return new Set([...targets].flatMap(([name, { doc }]) => (doc === undefined ? [] : [name])));
+}
+
+/** A target's own command as its shell reads it, less the ARGS a person adds. */
+const shellCommand = (command: string): string =>
+  command.replaceAll(` ${OWN_ARGS}`, "").replaceAll(OWN_ARGS, "").replaceAll("$$", "$");
+
+/** Why the Makefile or a package.json's scripts would let a command run unchecked. */
+export function makefileFailures(
+  paths: readonly string[],
+  read: (path: string) => string,
+): string[] {
+  const out: string[] = [];
+  for (const file of paths.filter((p) => OTHER_MAKEFILE.test(p) && p !== MAKEFILE)) {
+    out.push(
+      `${file}: make would read it, and scripts/check-standards.ts doesn't: the repository's ` +
+        `commands are the root ${MAKEFILE}'s targets.`,
+    );
+  }
+  const { targets, failures: unread } = paths.includes(MAKEFILE)
+    ? makefileTargets(read(MAKEFILE))
+    : {
+        targets: new Map<string, MakeTarget>(),
+        failures: [`${MAKEFILE} is missing; its targets are the repository's commands.`],
+      };
+  out.push(...unread);
+  for (const [name, { command }] of targets) {
+    if (command !== undefined) {
+      out.push(
+        ...cappedScriptFailures(
+          MAKEFILE,
+          { [name]: shellCommand(command) },
+          "target",
+          COUNTED_KILLS_TASKS,
+        ),
+      );
+    }
+  }
+  if (targets.get("help")?.command !== HELP_COMMAND || targets.get("help")?.doc === undefined) {
+    out.push(
+      `${MAKEFILE}: the "help" target, on its own menu, must run \`${HELP_COMMAND}\` (HELP_COMMAND ` +
+        "in scripts/check-standards.ts): it lists the targets the docs may name.",
+    );
+  }
   for (const [name, command] of Object.entries(RUST_GATE_TASKS)) {
-    const task = rootTask(name);
-    const extra = Object.keys(task ?? {}).filter((key) => key !== "command" && key !== "options");
-    if (task === undefined || task["command"] !== command || extra.length > 0) {
+    const target = targets.get(name);
+    if (
+      target === undefined ||
+      target.command !== `${command} ${OWN_ARGS}` ||
+      target.deps.length > 0
+    ) {
       out.push(
-        `moon.toml: the "${name}" task must run \`${command}\` and nothing else (RUST_GATE_TASKS ` +
-          "in scripts/check-standards.ts); a gate's command changes in crates/bazhen-xtask/src/gate.rs.",
+        `${MAKEFILE}: the "${name}" target must run \`${command} ${OWN_ARGS}\` and nothing else ` +
+          "(RUST_GATE_TASKS in scripts/check-standards.ts); a gate's command changes in " +
+          "crates/bazhen-xtask/src/gate.rs.",
       );
     }
   }
   for (const [name, steps] of Object.entries(GATE_STEPS)) {
-    const deps = rootTask(name)?.["deps"];
-    const named = Array.isArray(deps)
-      ? deps.map((dep) => String(dep).replace(/^(?:root|~):/, ""))
-      : [];
+    const named = targets.get(name)?.deps ?? [];
     for (const step of steps.filter((s) => !named.includes(s))) {
-      out.push(`moon.toml: the "${name}" task must run \`${step}\` among its deps.`);
+      out.push(`${MAKEFILE}: the "${name}" target must run \`${step}\` among its deps.`);
     }
   }
-  out.push(...prototoolsFailures(paths, read));
-  const pin = prototoolsMoon(paths, read);
   for (const file of paths.filter((p) => fileName(p) === "package.json")) {
-    const pkg: unknown = JSON.parse(read(file));
     const scripts = packageScripts(read, file);
     const allowed = PACKAGE_SCRIPTS[file] ?? {};
     const names = [...new Set([...Object.keys(scripts), ...Object.keys(allowed)])];
     for (const name of names.filter((n) => scripts[n] !== allowed[n])) {
       out.push(
         allowed[name] === undefined
-          ? `${file}: the "${name}" script belongs in a moon task: the repository's commands are ` +
-              "moon's (PACKAGE_SCRIPTS in scripts/check-standards.ts)."
+          ? `${file}: the "${name}" script belongs in a ${MAKEFILE} target: the repository's ` +
+              "commands are make's (PACKAGE_SCRIPTS in scripts/check-standards.ts)."
           : `${file}: the "${name}" script must be \`${allowed[name]}\`.`,
-      );
-    }
-    const pinned = `"${MOON_CLI}": "${pin ?? "<the moon version>"}"`;
-    for (const field of ["dependencies", "devDependencies", "optionalDependencies"]) {
-      const deps = isTable(pkg) && isTable(pkg[field]) ? pkg[field] : {};
-      for (const [dep, version] of Object.entries(deps).filter(([d]) => MOON_PACKAGE.test(d))) {
-        const rootCli = file === "package.json" && field === "devDependencies" && dep === MOON_CLI;
-        if (rootCli && (pin === undefined || version === pin)) continue;
-        out.push(
-          `${file}: depends on ${dep} ${String(version)}; the one moon package is ${pinned} in ` +
-            `package.json's devDependencies, at the version ${PROTOTOOLS} pins.`,
-        );
-      }
-    }
-    const dev = isTable(pkg) && isTable(pkg["devDependencies"]) ? pkg["devDependencies"] : {};
-    if (file === "package.json" && !(MOON_CLI in dev)) {
-      out.push(
-        `package.json: needs ${pinned} in devDependencies: CI and the test image run the moon ` +
-          `the lockfile pins, at the version ${PROTOTOOLS} pins.`,
       );
     }
   }
   return out;
-}
-
-/** The one exact moon version .prototools pins, alone; undefined if it pins anything else. */
-function prototoolsMoon(paths: readonly string[], read: (path: string) => string) {
-  if (!paths.includes(PROTOTOOLS)) return undefined;
-  try {
-    const pins = parseToml(read(PROTOTOOLS));
-    const moon = pins["moon"];
-    return Object.keys(pins).length === 1 &&
-      typeof moon === "string" &&
-      /^\d+\.\d+\.\d+$/.test(moon)
-      ? moon
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Why .prototools doesn't pin moon to one exact version, or pins something this doesn't read. */
-function prototoolsFailures(paths: readonly string[], read: (path: string) => string): string[] {
-  if (!paths.includes(PROTOTOOLS))
-    return [`${PROTOTOOLS} is missing; it pins the moon every host runs.`];
-  return prototoolsMoon(paths, read) === undefined
-    ? [`${PROTOTOOLS}: must pin moon to one exact version (\`moon = "x.y.z"\`) and nothing else.`]
-    : [];
 }
 
 const TOML_HEADER = /^\[\[?[^\]]*\]\]?$/;
@@ -6342,8 +6431,13 @@ function checkSignalChokepoints(): void {
   failures.push(...cargoManifestFailures(repoFiles(), readRepoFile));
 }
 
-function checkMoon(): void {
-  failures.push(...moonFailures(repoFiles(), readRepoFile));
+function checkMakefile(): void {
+  failures.push(...makefileFailures(repoFiles(), readRepoFile));
+  const { targets } = menu();
+  for (const file of repoFiles().filter((f) => NAMES_COMMANDS.test(f))) {
+    if (FOREIGN_MAKE[file] !== undefined || PLANTED_MAKE.has(file)) continue;
+    failures.push(...makeNameFailures(file, readRepoFile(file), targets));
+  }
 }
 
 // An api test runs on holders, the default runtime, unless it is about tmux: those cases live in a
@@ -6870,7 +6964,7 @@ export const STANDARDS_CHECKS: readonly (() => void)[] = [
   () => checkSkills(menu()),
   checkWebTokens,
   checkRust,
-  checkMoon,
+  checkMakefile,
   checkTmuxPins,
   checkSignalChokepoints,
   checkMigrations,
