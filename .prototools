@@ -1,4 +1,0 @@
-# The version of moon every host runs: proto reads this file (`proto install`), and CI, the
-# real-tmux image and the soak VM run the lockfile's @moonrepo/cli, which scripts/check-standards.ts
-# holds to this one exact pin.
-moon = "2.6.5"
