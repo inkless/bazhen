@@ -148,7 +148,7 @@ async fn heard(shared: &Shared, harness: HarnessId, event: Event) -> Result<(), 
         // A server that names none leaves the last one recorded.
         Event::Version(None) => Ok(()),
         Event::Connected(observed) | Event::Disconnected(observed) => {
-            shared.hooks.channel(shared, harness, observed).await
+            shared.hooks.channel(shared, harness, observed, None).await
         }
     }
 }
@@ -210,7 +210,11 @@ async fn inbound(shared: &Shared, id: HarnessId, message: Inbound) -> Result<(),
         session: bound_to.as_ref(),
     };
     let ingested = harness.ingest(report, &context);
-    shared.hooks.channel(shared, id, ingested.observed).await
+    let routed = session.as_ref().map(|session| (session, agent.as_ref()));
+    shared
+        .hooks
+        .channel(shared, id, ingested.observed, routed)
+        .await
 }
 
 /// The session `agent` is bound to, as its stored external ref names it.

@@ -11,9 +11,12 @@ use bazhen_harness::{
 use bazhen_protocol::agent_events::AgentExited;
 use bazhen_protocol::agents::{
     ActivityValue, ExitStatus, LaunchAgentRequest, LaunchAgentResponse, RelaunchAgentRequest,
-    RespawnAgentRequest,
+    RespawnAgentRequest, UsageLimit,
 };
-use bazhen_store::{AgentChange, AppendError, NewEvent};
+use bazhen_protocol::ids::MessageId;
+use bazhen_protocol::mail::MailboxState;
+use bazhen_protocol::mail_events::MailAccepted;
+use bazhen_store::{AgentChange, AppendError, MailChange, NewEvent};
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
 use tokio::sync::Semaphore;
@@ -50,7 +53,7 @@ struct Fixture {
     home: String,
     tracker: TaskTracker,
     stop: CancellationToken,
-    _dir: TempDir,
+    dir: TempDir,
     _codex: TempDir,
     thread: Option<Thread>,
 }
@@ -154,7 +157,7 @@ fn fixture() -> Fixture {
         home: home.to_string_lossy().into_owned(),
         tracker: TaskTracker::new(),
         stop: CancellationToken::new(),
-        _dir: dir,
+        dir,
         _codex: codex,
         thread: Some(thread),
     };
@@ -169,8 +172,13 @@ impl Fixture {
 
     /// Sets the agent's row as `assignment` says, as an older daemon may have left it.
     fn set(&self, assignment: &str) {
+        self.set_on(&self.agent, assignment);
+    }
+
+    /// Sets `agent`'s row as `assignment` says.
+    fn set_on(&self, agent: &AgentId, assignment: &str) {
         let (agent, sql) = (
-            self.agent.clone(),
+            agent.clone(),
             format!("UPDATE agent_sessions SET {assignment} WHERE id = ?"),
         );
         runtime()
@@ -182,6 +190,80 @@ impl Fixture {
             }))
             .unwrap()
             .unwrap();
+    }
+
+    /// Another agent, launched as the fixture's was, on the same session, and running.
+    fn launched(&self, key: &str, name: &str) -> AgentId {
+        let launcher = agents_over(
+            &self.shared.store,
+            &self.dir,
+            StubHarness::new(pull()).served_as(HarnessId::Codex),
+            &self.shared.hooks,
+            Arc::new(Fake::default()),
+        );
+        let agent = runtime()
+            .block_on(launcher.launch(&LaunchAgentRequest {
+                idempotency_key: key.to_owned(),
+                harness: HarnessId::Codex,
+                cwd: "~/repo".to_owned(),
+                project: None,
+                theme: None,
+                name: Some(bazhen_protocol::names::AgentName::parse(name).unwrap()),
+                role: None,
+                compact_window_tokens: None,
+            }))
+            .unwrap()
+            .agent_id;
+        self.set_on(&agent, "state = 'running'");
+        agent
+    }
+
+    /// A message queued for `agent`, which Codex holds already when `in_codex`.
+    fn queued(&self, agent: &AgentId, in_codex: bool) -> MessageId {
+        let agent = agent.clone();
+        runtime()
+            .block_on(self.shared.store.run(move |store| {
+                store.write(|w| {
+                    let (message, _) = w.queue_mail(&agent, "hello", None)?;
+                    if in_codex {
+                        let accepted = MailAccepted { offline: false };
+                        w.mail_step(&message, MailChange::Accepted(accepted))?;
+                    }
+                    Ok::<_, AppendError>(message)
+                })
+            }))
+            .unwrap()
+            .unwrap()
+    }
+
+    fn state_of(&self, message: &MessageId) -> MailboxState {
+        let reader = self.shared.store.reader().unwrap();
+        let message = reader.reads().message(message.as_str()).unwrap();
+        message.unwrap().state
+    }
+
+    /// The usage limits `agent`'s usage holds.
+    fn limits_of(&self, agent: &AgentId) -> Option<Vec<UsageLimit>> {
+        let reader = self.shared.store.reader().unwrap();
+        let usage = reader.reads().agent_usage(agent.as_str()).unwrap();
+        usage.and_then(|usage| usage.limits)
+    }
+
+    /// Applies `told` as one report of the Codex server's, routed as `routed` says.
+    fn told(&self, told: Vec<Keyed>, routed: Option<(&SessionKey, Option<&AgentId>)>) {
+        self.try_told(told, routed).unwrap();
+    }
+
+    fn try_told(
+        &self,
+        told: Vec<Keyed>,
+        routed: Option<(&SessionKey, Option<&AgentId>)>,
+    ) -> Result<(), String> {
+        runtime().block_on(
+            self.shared
+                .hooks
+                .channel(&self.shared, HarnessId::Codex, told, routed),
+        )
     }
 
     /// The agent's events of `kind`, by their payloads, oldest first.
@@ -474,7 +556,7 @@ fn closes_an_approval_its_server_settled_for_the_reason_it_gives() {
             let told = vec![on_session(asked), on_session(settled)];
             f.shared
                 .hooks
-                .channel(&f.shared, HarnessId::Codex, told)
+                .channel(&f.shared, HarnessId::Codex, told, None)
                 .await
                 .unwrap();
         }
@@ -725,4 +807,166 @@ fn relaunches_a_lost_codex_agent_on_its_thread_resumed_over_the_channel() {
         Some((asked["method"].clone(), asked["params"]["threadId"].clone()))
     });
     assert_eq!(resumed, Some((json!("thread/resume"), json!("t-new"))));
+}
+
+fn on_thread(thread: &str, fact: Observed) -> Keyed {
+    Keyed {
+        key: Key::Session(SessionKey(thread.to_owned())),
+        gate: Gate::None,
+        fact,
+    }
+}
+
+fn asked(call: &str) -> Observed {
+    Observed::ApprovalAsked {
+        key: ToolKey {
+            key: call.to_owned(),
+            caller: None,
+            prompt_id: None,
+        },
+        summary: "Run ls".to_owned(),
+        question: false,
+    }
+}
+
+fn taken(message: &MessageId) -> Observed {
+    Observed::MailTaken {
+        message_id: message.as_str().to_owned(),
+    }
+}
+
+/// A report's facts of the session it was routed to go to the agent it was routed to, read once:
+/// not to the agent the session is bound to when each is applied, nor to one bound since.
+#[test]
+fn applies_the_facts_of_the_session_a_report_was_routed_to_to_the_agent_it_was_routed_to() {
+    let f = fixture();
+    let session = SessionKey(STUB_SESSION.to_owned());
+    // Moved off the session since the report was routed to it.
+    f.set("external_ref = json_set(external_ref, '$.id', 't-moved')");
+    f.told(
+        vec![on_thread(STUB_SESSION, asked("call-1"))],
+        Some((&session, Some(&f.agent))),
+    );
+    let routed = f.open_items();
+    // Bound to it since the report was routed to no agent.
+    f.set("external_ref = json_set(external_ref, '$.id', 'stub-session-1')");
+    f.told(
+        vec![on_thread(STUB_SESSION, asked("call-2"))],
+        Some((&session, None)),
+    );
+    assert_eq!((routed, f.open_items()), (1, 1));
+}
+
+/// An update of the account's limits goes to every agent the server serves, a starting one and
+/// two on one session alike, and to none it doesn't, one bound to no session of its.
+#[test]
+fn gives_the_accounts_limits_to_every_agent_its_server_serves() {
+    let f = fixture();
+    let (bob, carol, dan) = (
+        f.launched("k-2", "bob"),
+        f.launched("k-3", "carol"),
+        f.launched("k-4", "dan"),
+    );
+    f.set_on(&carol, "state = 'starting'");
+    f.set_on(&dan, "external_ref = NULL");
+    let spent = UsageLimit {
+        window: "codex.primary".to_owned(),
+        used_percent: 12.0,
+        resets_at: Some("2025-11-13T03:13:20.000Z".to_owned()),
+    };
+    let update = Keyed {
+        key: Key::Account,
+        gate: Gate::None,
+        fact: Observed::AccountLimits(vec![spent.clone()]),
+    };
+    f.told(vec![update], None);
+    let got = [&f.agent, &bob, &carol, &dan].map(|agent| f.limits_of(agent));
+    let given = Some(vec![spent]);
+    assert_eq!(got, [given.clone(), given.clone(), given, None]);
+}
+
+/// A message a turn took is confirmed by the message: on the session its agent alone is on, or on
+/// one no agent is on once Codex held it. Not on one another agent is on, or two are, nor one
+/// queued for an agent gone or of another harness, and one confirmed already is left so.
+#[test]
+fn confirms_a_message_a_turn_took_where_its_agent_alone_could_have_taken_it() {
+    let f = fixture();
+    let bob = f.launched("k-2", "bob");
+    let carol = f.launched("k-3", "carol");
+    f.set_on(
+        &bob,
+        "external_ref = json_set(external_ref, '$.id', 't-bob')",
+    );
+    f.set_on(
+        &carol,
+        "external_ref = json_set(external_ref, '$.id', 't-carol')",
+    );
+    let own = f.queued(&f.agent, false);
+    let held_off = f.queued(&f.agent, true);
+    let queued_off = f.queued(&f.agent, false);
+    let bobs = f.queued(&bob, true);
+    let gone = f.queued(&carol, true);
+    f.set_on(&carol, "state = 'exited'");
+    let elsewhere = f.queued(&bob, true);
+    let shared = f.queued(&f.agent, true);
+    f.told(
+        vec![
+            on_thread(STUB_SESSION, taken(&own)),
+            on_thread("t-none", taken(&held_off)),
+            on_thread("t-none", taken(&queued_off)),
+            on_thread(STUB_SESSION, taken(&bobs)),
+            on_thread("t-none", taken(&gone)),
+        ],
+        None,
+    );
+    // Bob is of another harness now, with a message Codex held.
+    f.set_on(&bob, "harness = 'claude-code'");
+    f.told(vec![on_thread("t-none", taken(&elsewhere))], None);
+    // Bob back on Codex, on the agent's session: two are on it.
+    f.set_on(
+        &bob,
+        "harness = 'codex', external_ref = json_set(external_ref, '$.id', 'stub-session-1')",
+    );
+    f.told(vec![on_thread(STUB_SESSION, taken(&shared))], None);
+    let states = [
+        &own,
+        &held_off,
+        &queued_off,
+        &bobs,
+        &gone,
+        &elsewhere,
+        &shared,
+    ]
+    .map(|message| f.state_of(message));
+    assert_eq!(
+        states,
+        [
+            MailboxState::Delivered,
+            MailboxState::Delivered,
+            MailboxState::Queued,
+            MailboxState::QueuedInCodex,
+            MailboxState::QueuedInCodex,
+            MailboxState::QueuedInCodex,
+            MailboxState::QueuedInCodex
+        ]
+    );
+}
+
+/// A message taken again, confirmed already, is no error: the report's facts after it are applied.
+#[test]
+fn applies_the_facts_after_a_message_taken_again() {
+    let f = fixture();
+    let own = f.queued(&f.agent, false);
+    f.told(vec![on_thread(STUB_SESSION, taken(&own))], None);
+    let again = f.try_told(
+        vec![
+            on_thread(STUB_SESSION, taken(&own)),
+            on_thread(STUB_SESSION, asked("call-1")),
+        ],
+        None,
+    );
+    assert_eq!(
+        (again, f.state_of(&own), f.open_items()),
+        (Ok(()), MailboxState::Delivered, 1)
+    );
 }
