@@ -50,8 +50,8 @@
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
 // own). If only the base fails to list, compare field initializers in unannotated top-level
 // functions, outside macro inputs. Each new test runs against the mutants cargo-mutants lists
-// in the changed code, one at a time in a throwaway worktree: KILLED by the first mutant it fails under twice
-// with a panic in test code, else INVALID, needing a Control trailer naming it by its full path,
+// in the changed code, one at a time in a throwaway worktree: KILLED by the first mutant it fails
+// under twice with a panic in test code, else INVALID, needing a Control trailer naming its full path,
 // `Control: tests::name: <what you broke> -> <how the test failed>`
 // (docs/standards/rust.md § Tests).
 //
@@ -779,8 +779,10 @@ function fieldRepairShape(source: string, dir: string): ShapeToken[] {
   return parts;
 }
 
-/** Workspace generators can inspect any source as data. The pinned dependency macros and
- * build scripts are assumed not to read workspace sources to generate tests. */
+/**
+ * Workspace generators can inspect any source as data. The pinned dependency macros and
+ * build scripts are assumed not to read workspace sources to generate tests.
+ */
 function ordinaryRustWorkspace(dir: string, head: string): boolean {
   const inputs = git(["ls-tree", "-rz", "--name-only", head], dir);
   for (const path of inputs
@@ -2422,7 +2424,9 @@ async function judgeRustTests(
     const fieldRepair =
       before === undefined && after !== undefined && onlyFieldRepairs(dir, base, head, changes);
     if (fieldRepair)
-      console.log("falsify: base listing failed; only Rust field initializers changed");
+      console.log(
+        `falsify: base listing failed; only Rust field initializers changed (files checked: ${changes.length})`,
+      );
     if (!fieldRepair && before === undefined && after !== undefined) {
       console.error(
         `falsify: \`cargo-nextest nextest list\` failed at the base, ${base.slice(0, 12)}; the branch did not qualify for the field-repair fallback`,

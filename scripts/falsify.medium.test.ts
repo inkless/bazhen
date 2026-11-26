@@ -1372,6 +1372,15 @@ describe("falsify on a branch of a tree that already has Rust", () => {
       output: expect.stringContaining("outside a Rust field repair"),
     });
   });
+  it("broken base refuses deleting a trailing macro", () => {
+    const prefix = "fn kept() {}\n";
+    expect(
+      runRepair({
+        files: { "crates/x/src/z.rs": prefix + "macro_rules! collect { () => {} }\n" },
+        edits: { "crates/x/src/z.rs": prefix },
+      }),
+    ).toEqual({ status: 1, output: expect.stringContaining("crates/x/src/z.rs:2") });
+  });
   it("broken base checks the second changed source", () => {
     expect(
       runRepair({
@@ -1395,6 +1404,20 @@ describe("falsify on a branch of a tree that already has Rust", () => {
   });
   it("broken base refuses procedural macro crates", () => {
     expect(runRepair({ files: { "crates/x/Cargo.toml": "[lib]\nproc-macro = true" } })).toEqual({
+      status: 1,
+      output: expect.stringContaining("custom harness"),
+    });
+  });
+  it("broken base refuses the legacy proc_macro spelling", () => {
+    expect(runRepair({ files: { "crates/x/Cargo.toml": "[lib]\nproc_macro = true" } })).toEqual({
+      status: 1,
+      output: expect.stringContaining("custom harness"),
+    });
+  });
+  it("broken base refuses a procedural library crate type", () => {
+    expect(
+      runRepair({ files: { "crates/x/Cargo.toml": '[lib]\ncrate-type = ["proc-macro"]' } }),
+    ).toEqual({
       status: 1,
       output: expect.stringContaining("custom harness"),
     });
