@@ -313,6 +313,49 @@ async fn binding_of(store: &Writer, agent: &AgentId) -> Result<Option<AgentBindi
 }
 
 /// Runs `write` in one transaction on the store's writer.
+/// An item a harness asks for.
+struct Asking<'a> {
+    key: &'a ToolKey,
+    summary: &'a str,
+    kind: AttentionKind,
+    session: Option<&'a str>,
+    /// The server that asks it, none for a hook.
+    served: Option<HarnessId>,
+}
+
+/// Where a report came from: the hook whose process is `pid`, or the harness's own server.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Source {
+    Hook { pid: i64 },
+    Server(HarnessId),
+}
+
+impl Source {
+    fn hook_pid(self) -> Option<i64> {
+        match self {
+            Self::Hook { pid } => Some(pid),
+            Self::Server(_) => None,
+        }
+    }
+
+    fn server(self) -> Option<HarnessId> {
+        match self {
+            Self::Hook { .. } => None,
+            Self::Server(harness) => Some(harness),
+        }
+    }
+}
+
+/// The reason an item closes for, as its harness says it was settled.
+pub(crate) fn settled_for(how: Settled) -> AttentionClosedReason {
+    match how {
+        Settled::AnsweredInTui => AttentionClosedReason::AnsweredInTui,
+        Settled::Superseded => AttentionClosedReason::Superseded,
+        Settled::AgentClosed => AttentionClosedReason::AgentClosed,
+        Settled::Stale => AttentionClosedReason::Stale,
+    }
+}
+
 async fn write<T: Send + 'static>(
     store: &Writer,
     write: impl FnOnce(&bazhen_store::Writer<'_>) -> Result<T, bazhen_store::AppendError>
@@ -456,7 +499,7 @@ impl Hooks {
                     .apply(
                         shared,
                         agent,
-                        Some(hook.pid),
+                        Source::Hook { pid: hook.pid },
                         &origin,
                         (passes, peer),
                         &ingested.observed,
@@ -505,14 +548,13 @@ impl Hooks {
         })
     }
 
-    /// Applies each fact for `agent` that its gate passes, in order, from the hook whose process
-    /// is `hook_pid`, none for a report from the harness's server. The facts not applied here land
-    /// with the mailbox, readiness, approvals and turns.
+    /// Applies each fact for `agent` that its gate passes, in order, from `source`. The facts not
+    /// applied here land with the mailbox, readiness, approvals and turns.
     async fn apply(
         &self,
         shared: &Shared,
         agent: &AgentId,
-        hook_pid: Option<i64>,
+        source: Source,
         origin: &Origin,
         (passes, peer): (Passes, Option<&Peer>),
         observed: &[bazhen_harness::Keyed],
@@ -525,7 +567,8 @@ impl Hooks {
             if !ours || !passes.passes(keyed.gate) {
                 continue;
             }
-            if let Some(opened) = self.requests(shared, agent, &keyed.fact, session).await? {
+            let request = (&keyed.fact, session, source.server());
+            if let Some(opened) = self.requests(shared, agent, request).await? {
                 asked = opened.or(asked);
                 continue;
             }
@@ -587,7 +630,7 @@ impl Hooks {
                     continue;
                 }
                 Observed::Compacted { sign } => {
-                    let compacted = hook_pid.map(|pid| CompactedHook {
+                    let compacted = source.hook_pid().map(|pid| CompactedHook {
                         session_id: origin.session.as_ref().map(|s| s.id.clone()),
                         pid,
                     });
@@ -635,13 +678,13 @@ impl Hooks {
     /// Applies a fact about the requests `agent`'s harness asks, from `session`: a call started or
     /// settled, a request asked, and what ends the requests asked before it. None for a fact about
     /// something else, which a new prompt and a new session also are, once their requests are
-    /// settled; else the approval it opened, which its hook holds.
+    /// settled; else the approval it opened, which its hook holds. An item a server asks (one
+    /// `served` names) holds a question too, which the server takes the human's text for.
     async fn requests(
         &self,
         shared: &Shared,
         agent: &AgentId,
-        fact: &Observed,
-        session: Option<&str>,
+        (fact, session, served): (&Observed, Option<&str>, Option<HarnessId>),
     ) -> Result<Option<Option<AttentionId>>, String> {
         let answered = AttentionClosedReason::AnsweredInTui;
         match fact {
@@ -657,12 +700,7 @@ impl Hooks {
                 self.approvals.settle(&shared.store, ids, answered).await?;
             }
             Observed::ApprovalSettled { key, how } => {
-                let reason = match how {
-                    Settled::AnsweredInTui => answered,
-                    Settled::Superseded => AttentionClosedReason::Superseded,
-                    Settled::AgentClosed => AttentionClosedReason::AgentClosed,
-                    Settled::Stale => AttentionClosedReason::Stale,
-                };
+                let reason = settled_for(*how);
                 self.settle(shared, agent, |entry| &entry.key == key, reason)
                     .await?;
             }
@@ -676,13 +714,25 @@ impl Hooks {
                 } else {
                     AttentionKind::Approval
                 };
-                let opened = self.ask(shared, agent, key, summary, kind, session).await?;
-                return Ok(Some(opened.filter(|_| !*question)));
+                let asking = Asking {
+                    key,
+                    summary,
+                    kind,
+                    session,
+                    served,
+                };
+                let opened = self.ask(shared, agent, asking).await?;
+                return Ok(Some(opened.filter(|_| !*question || served.is_some())));
             }
             Observed::QuestionAsked { key, summary } => {
-                let question = AttentionKind::Question;
-                self.ask(shared, agent, key, summary, question, session)
-                    .await?;
+                let asking = Asking {
+                    key,
+                    summary,
+                    kind: AttentionKind::Question,
+                    session,
+                    served,
+                };
+                self.ask(shared, agent, asking).await?;
             }
             Observed::TurnOver => {
                 let main =
@@ -713,34 +763,49 @@ impl Hooks {
     }
 
     /// Opens the item `agent`'s harness asks under `key`, about the earliest call started under
-    /// it that no request has taken; none for an agent gone or going.
+    /// it that no request has taken; none for an agent gone or going. One its server asks again
+    /// opens nothing: the item it opened before is marked asked again and answered.
     async fn ask(
         &self,
         shared: &Shared,
         agent: &AgentId,
-        key: &ToolKey,
-        summary: &str,
-        kind: AttentionKind,
-        session: Option<&str>,
+        asking: Asking<'_>,
     ) -> Result<Option<AttentionId>, String> {
-        let use_id = self.approvals.take_use_id(agent, key);
-        let (asker, summary, call) = (agent.clone(), summary.to_owned(), use_id.clone());
-        let main_agent = key.main_agent();
-        let opened = write(&shared.store, move |w| {
-            w.ask_attention(&asker, kind, &summary, call, main_agent)
-        })
-        .await?;
-        if let Some(id) = &opened {
-            let entry = Entry {
-                agent: agent.clone(),
-                key: key.clone(),
-                session: session.map(str::to_owned),
-                use_id,
-                responder: None,
-            };
-            self.approvals.opened(id.clone(), entry);
-        }
-        Ok(opened)
+        let use_id = self.approvals.take_use_id(agent, asking.key);
+        let entry = Entry {
+            agent: agent.clone(),
+            key: asking.key.clone(),
+            session: asking.session.map(str::to_owned),
+            use_id: use_id.clone(),
+            responder: None,
+            served: asking.served.map(|harness| approvals::Served {
+                harness,
+                asked_since: true,
+            }),
+        };
+        let (asker, kind, summary) = (agent.clone(), asking.kind, asking.summary.to_owned());
+        let (approvals, served) = (Arc::clone(&self.approvals), asking.served);
+        let main_agent = entry.key.main_agent();
+        // In one job on the writer, so that no claim comes between finding an item asked before
+        // and marking it, nor between opening one and registering it.
+        shared
+            .store
+            .run(move |store: &mut Store| {
+                if let Some(again) =
+                    served.and_then(|harness| approvals.asked_again(harness, &entry.key))
+                {
+                    return Ok(Some(again));
+                }
+                let opened =
+                    store.write(|w| w.ask_attention(&asker, kind, &summary, use_id, main_agent))?;
+                if let Some(id) = &opened {
+                    approvals.opened(id.clone(), entry);
+                }
+                Ok(opened)
+            })
+            .await
+            .map_err(|err| err.to_string())?
+            .map_err(|err: bazhen_store::AppendError| err.to_string())
     }
 
     /// Closes `agent`'s open items that `settles` picks, for `reason`.

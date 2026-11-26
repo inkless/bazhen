@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 use bazhen_harness::{HarnessId, Key, Keyed, Observed, Origin, SessionKey};
 use bazhen_protocol::agents::UsageLimit;
-use bazhen_protocol::ids::{AgentId, MessageId};
+use bazhen_protocol::ids::{AgentId, AttentionId, MessageId};
 use bazhen_protocol::mail::MailboxState;
+use bazhen_protocol::mail_events::AttentionClosedReason;
 use bazhen_store::MailChange;
 
-use super::{Hooks, Passes, write};
+use super::{Hooks, Passes, Source, settled_for, write};
 use crate::routes::Shared;
 
 /// What a server's report passes: none of a hook's gates, which tell an agent's own session from
@@ -46,8 +47,9 @@ impl Hooks {
     /// the agent served on it, and none to no agent's; the account's limits to every agent it
     /// serves; and a message a turn took, by the message. `routed` is the session the report was
     /// routed to and the agent found served on it, which its facts of that session go to, so that
-    /// one report is never split between two agents by a binding moved meanwhile. An approval a
-    /// fact asks opens an item that holds nothing, as the harness's own TUI answers it.
+    /// one report is never split between two agents by a binding moved meanwhile. A request the
+    /// server settled closes the item it asked, by the request, whichever agent the item is of.
+    /// Answers the item a request in the report opened, or asked again, for its request to be held.
     ///
     /// # Errors
     ///
@@ -58,7 +60,8 @@ impl Hooks {
         harness: HarnessId,
         observed: Vec<Keyed>,
         routed: Option<(&SessionKey, Option<&AgentId>)>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<AttentionId>, String> {
+        let mut asked = None;
         let origin = Origin {
             session: None,
             transcript: None,
@@ -73,6 +76,13 @@ impl Hooks {
                 (Key::Account, _) => continue,
                 (Key::Session(session), Observed::MailTaken { message_id }) => {
                     taken(shared, harness, session, message_id).await?;
+                    continue;
+                }
+                // By the request: its thread may have no agent on it now, or another.
+                (Key::Session(_), Observed::ApprovalSettled { key, how }) => {
+                    let ids = self.approvals.served_matching(harness, key);
+                    let reason = settled_for(*how);
+                    self.approvals.settle(&shared.store, ids, reason).await?;
                     continue;
                 }
                 (Key::Session(session), _) => match routed {
@@ -91,13 +101,31 @@ impl Hooks {
             let turn = self.turn_of(&agent);
             let applied = {
                 let _held = turn.lock().await;
-                self.apply(shared, &agent, None, &origin, (SERVED, None), &[one])
+                let source = Source::Server(harness);
+                self.apply(shared, &agent, source, &origin, (SERVED, None), &[one])
                     .await
             };
             self.release(&agent, turn);
-            applied?;
+            asked = applied?.or(asked);
         }
-        Ok(())
+        Ok(asked)
+    }
+
+    /// `harness`'s server is connected again, and has asked again each request it still holds:
+    /// each item it asked before and hasn't asked again is stale, as the server that held its
+    /// request is gone.
+    ///
+    /// # Errors
+    ///
+    /// The store's.
+    pub(crate) async fn connected(
+        &self,
+        shared: &Shared,
+        harness: HarnessId,
+    ) -> Result<(), String> {
+        let ids = self.approvals.not_asked_again(harness);
+        let stale = AttentionClosedReason::Stale;
+        self.approvals.settle(&shared.store, ids, stale).await
     }
 
     /// Records an update of the account's limits for every agent `harness`'s server serves, as

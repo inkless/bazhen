@@ -8,13 +8,18 @@
 //! others find nothing to claim. Dropping a claimed hook's sender answers its hook quiet, so the
 //! harness goes on as it would alone.
 //!
+//! An item a harness's server asked holds that request, answered on the connection it came on
+//! while that connection is open. The server asks its pending requests again on each new
+//! connection, so each such item is marked when it's asked, and one not asked again on the next
+//! connection is stale: its request went with the server that held it.
+//!
 //! The registry's lock is never held across an `.await`.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use bazhen_harness::ToolKey;
+use bazhen_harness::{HarnessId, ToolKey};
 use bazhen_protocol::ids::{AgentId, AttentionId};
 use bazhen_protocol::mail::HookReply;
 use bazhen_protocol::mail_events::AttentionClosedReason;
@@ -23,6 +28,7 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use super::quiet;
+use crate::channel::rpc::{RequestId, Rpc};
 use crate::writer::Writer;
 
 /// The most tool calls an agent's started list keeps, the oldest going first: a call is only
@@ -34,6 +40,34 @@ const TOOLS_KEPT: usize = 64;
 pub(crate) enum Responder {
     /// The hook that asked, held until it is answered; the reply is built before the claim.
     Hook(oneshot::Sender<HookReply>),
+    /// A request of the harness's server, answered on the connection it came on.
+    Server(ServerHold),
+}
+
+impl Responder {
+    /// Whether an answer can reach it now: a server's request only while its connection is open.
+    fn reachable(&self) -> bool {
+        match self {
+            Self::Hook(_) => true,
+            Self::Server(hold) => hold.on.open(),
+        }
+    }
+}
+
+/// A server's request, by the connection it came on and its id there.
+#[derive(Debug)]
+pub(crate) struct ServerHold {
+    pub(crate) on: Rpc,
+    pub(crate) id: RequestId,
+    pub(crate) method: String,
+}
+
+/// What an item a harness's server asked keeps of that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Served {
+    pub(crate) harness: HarnessId,
+    /// Asked since the server's last connection ended, so held by the one it's on now.
+    pub(crate) asked_since: bool,
 }
 
 /// An open item, by what it is about.
@@ -44,8 +78,10 @@ pub(crate) struct Entry {
     /// The session whose hook asked it, whose turn or next prompt settles it.
     pub(crate) session: Option<String>,
     pub(crate) use_id: Option<String>,
-    /// The held request it answers; none for a question, which only the TUI takes.
+    /// The held request it answers; none for a question only the TUI takes.
     pub(crate) responder: Option<Responder>,
+    /// The server that asked it, none for a hook's.
+    pub(crate) served: Option<Served>,
 }
 
 #[derive(Debug, Default)]
@@ -120,13 +156,75 @@ impl Approvals {
         }
     }
 
-    /// Whether the item `id` is open with a request held for its answer: a hook's, as a server's
-    /// request opens an item that holds none, which its harness's own TUI answers.
+    /// Whether the item `id` is open with a request held for its answer that an answer can reach:
+    /// a hook's, or a server's on a connection still open.
     pub(crate) fn held(&self, id: &AttentionId) -> bool {
         self.registry()
             .open
             .get(id)
-            .is_some_and(|entry| entry.responder.is_some())
+            .and_then(|entry| entry.responder.as_ref())
+            .is_some_and(Responder::reachable)
+    }
+
+    /// Whether the item `id` is open holding a server's request, on a connection open or not.
+    pub(crate) fn held_by_server(&self, id: &AttentionId) -> bool {
+        let registry = self.registry();
+        let entry = registry.open.get(id);
+        matches!(
+            entry.and_then(|e| e.responder.as_ref()),
+            Some(Responder::Server(_))
+        )
+    }
+
+    /// The open item `harness`'s server asked under `key`, marked asked again; none when there is
+    /// none, and the request is new. It holds nothing until the request asked again is held: the
+    /// one it held may be one the server no longer waits on.
+    pub(crate) fn asked_again(&self, harness: HarnessId, key: &ToolKey) -> Option<AttentionId> {
+        let mut registry = self.registry();
+        let (id, entry) = registry
+            .open
+            .iter_mut()
+            .find(|(_, entry)| served_by(entry, harness) && &entry.key == key)?;
+        entry.served = Some(Served {
+            harness,
+            asked_since: true,
+        });
+        entry.responder = None;
+        Some(id.clone())
+    }
+
+    /// The open items `harness`'s server asked under `key`, whichever agent each is of.
+    pub(crate) fn served_matching(&self, harness: HarnessId, key: &ToolKey) -> Vec<AttentionId> {
+        self.registry()
+            .open
+            .iter()
+            .filter(|(_, entry)| served_by(entry, harness) && &entry.key == key)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Marks each open item `harness`'s server asked as not asked since its connection ended.
+    pub(crate) fn disconnected(&self, harness: HarnessId) {
+        for entry in self.registry().open.values_mut() {
+            if let Some(served) = entry.served.as_mut().filter(|s| s.harness == harness) {
+                served.asked_since = false;
+            }
+        }
+    }
+
+    /// The open items `harness`'s server asked and hasn't asked again since its last connection
+    /// ended: the server that held their requests is gone.
+    pub(crate) fn not_asked_again(&self, harness: HarnessId) -> Vec<AttentionId> {
+        let stale = Served {
+            harness,
+            asked_since: false,
+        };
+        self.registry()
+            .open
+            .iter()
+            .filter(|(_, entry)| entry.served == Some(stale))
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     /// The agent the open item `id` belongs to.
@@ -245,6 +343,10 @@ impl Approvals {
             },
         })
     }
+}
+
+fn served_by(entry: &Entry, harness: HarnessId) -> bool {
+    entry.served.is_some_and(|served| served.harness == harness)
 }
 
 /// An approval's hook, held for the human's answer.

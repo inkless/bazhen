@@ -26,6 +26,7 @@ use super::*;
 use crate::agents::{AgentError, Agents, AgentsDeps, NO_CHANNEL, prompts};
 use crate::budget::Budget;
 use crate::budget::tests::{Machine, roomy};
+use crate::channel::rpc::RequestId;
 use crate::hooks::Hooks;
 use crate::roles::Roles;
 use crate::routes::Stop;
@@ -259,11 +260,13 @@ impl Fixture {
         told: Vec<Keyed>,
         routed: Option<(&SessionKey, Option<&AgentId>)>,
     ) -> Result<(), String> {
-        runtime().block_on(
-            self.shared
-                .hooks
-                .channel(&self.shared, HarnessId::Codex, told, routed),
-        )
+        runtime()
+            .block_on(
+                self.shared
+                    .hooks
+                    .channel(&self.shared, HarnessId::Codex, told, routed),
+            )
+            .map(drop)
     }
 
     /// The agent's events of `kind`, by their payloads, oldest first.
@@ -348,6 +351,32 @@ impl Fixture {
             .spawn(async move { agents.launch(&request).await })
     }
 
+    /// The agent's session moved to `session`, as a reconcile or a restart records it.
+    async fn moved_to(&self, session: &str) {
+        let (agent, session) = (self.agent.clone(), session.to_owned());
+        let store = &self.shared.store;
+        store
+            .run(move |store| {
+                store.write(|w| {
+                    let external_ref = bazhen_protocol::agents::ExternalRef {
+                        environment_id: w.local_environment()?,
+                        kind: bazhen_protocol::agents::ExternalRefKind::CodexThread,
+                        id: session,
+                    };
+                    w.append(&NewEvent::Agent {
+                        agent,
+                        actor: "system".to_owned(),
+                        change: AgentChange::ExternalRefUpdated(
+                            bazhen_protocol::agent_events::AgentExternalRefUpdated { external_ref },
+                        ),
+                    })
+                })
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     fn open_items(&self) -> usize {
         let reader = self.shared.store.reader().unwrap();
         reader
@@ -361,6 +390,31 @@ impl Fixture {
         let reader = self.shared.store.reader().unwrap();
         let activity = reader.reads().latest_activity(self.agent.as_str()).unwrap();
         activity.map(|activity| activity.value)
+    }
+
+    /// The open items of the agent, oldest first.
+    fn items(&self) -> Vec<String> {
+        let reader = self.shared.store.reader().unwrap();
+        let open = reader.reads().open_attention(self.agent.as_str()).unwrap();
+        open.into_iter()
+            .map(|item| item.id.as_str().to_owned())
+            .collect()
+    }
+
+    /// The reasons the items closed for, oldest first.
+    fn closed(&self) -> Vec<Value> {
+        let closed = self.of("attention.closed");
+        closed
+            .iter()
+            .map(|closed| closed["reason"].clone())
+            .collect()
+    }
+
+    /// Applies `event` as the channel tells it.
+    fn heard(&self, event: Event) {
+        runtime()
+            .block_on(super::heard(&self.shared, HarnessId::Codex, event))
+            .unwrap();
     }
 
     /// Listens where the Codex home's server would, and starts the channels to it.
@@ -403,9 +457,19 @@ impl Fixture {
     /// agent's session are answered: the pickup's params.
     async fn picked_up(&self) -> (Server, Value) {
         let listener = self.started();
-        let mut server = self.handshaken(&listener).await;
+        self.pickup(&listener, &[]).await
+    }
+
+    /// The server's side of the next connection to `listener`, once its handshake and the pickup
+    /// of the agent's session are answered, the server sending `first` before it answers the
+    /// pickup: the pickup's params.
+    async fn pickup(&self, listener: &UnixListener, first: &[Value]) -> (Server, Value) {
+        let mut server = self.handshaken(listener).await;
         let resume = heard(&mut server).await;
         assert_eq!(resume["method"], "thread/resume", "{resume}");
+        for message in first {
+            say(&mut server, message.clone()).await;
+        }
         let thread = json!({ "id": STUB_SESSION, "status": { "type": "idle" } });
         say(
             &mut server,
@@ -427,6 +491,92 @@ async fn started_thread(server: &mut Server, thread: &str) -> Value {
     assert_eq!(injected["method"], "thread/inject_items", "{injected}");
     say(server, json!({ "id": injected["id"], "result": {} })).await;
     start["params"].clone()
+}
+
+/// How long a server hears nothing before it is taken that nothing was sent.
+const QUIET: Duration = Duration::from_millis(200);
+
+/// A connection of the daemon's to a server of the test's, as a channel's would be, and the
+/// server's side of it.
+async fn connection(f: &Fixture) -> (Rpc, crate::channel::rpc::Inbox, Server, TempDir) {
+    let dir = TempDir::short("on");
+    let socket = dir.path().join("server.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let (connected, server) = tokio::join!(
+        crate::channel::rpc::connect(&socket, &f.tracker, f.stop.clone()),
+        accepted(&listener)
+    );
+    let (on, inbox) = connected.unwrap();
+    (on, inbox, server, dir)
+}
+
+/// Waits until the open items offer `offered`, as each is held once its item is opened, failing
+/// the test if they never do.
+async fn offering(f: &Fixture, offered: &[Value]) {
+    let deadline = tokio::time::Instant::now() + LIMIT;
+    let mut now = actions(f).await;
+    while now != offered && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        now = actions(f).await;
+    }
+    assert_eq!(now, offered);
+}
+
+/// The next message the daemon sends the server.
+async fn frame(server: &mut Server) -> Value {
+    within(LIMIT, heard(server)).await
+}
+
+/// The server's request `id` to approve the command the call `call` runs on the agent's session.
+fn approval(id: u64, call: &str) -> Value {
+    let params = json!({ "threadId": STUB_SESSION, "itemId": call, "command": "ls" });
+    json!({ "id": id, "method": "item/commandExecution/requestApproval", "params": params })
+}
+
+/// What the daemon answers the approval `id` with for `decision`.
+fn decided(id: u64, decision: &str) -> Value {
+    json!({ "id": id, "result": { "decision": decision } })
+}
+
+/// The status of the human's `decision` on the item `id`, under `key`.
+async fn decide(f: &Fixture, id: &str, key: &str, decision: &str) -> u16 {
+    let body = json!({ "idempotencyKey": key, "decision": decision }).to_string();
+    let response = crate::attention::answer(
+        State(f.shared.clone()),
+        Path(id.to_owned()),
+        None,
+        Bytes::from(body),
+    )
+    .await;
+    response.status().as_u16()
+}
+
+/// The status and body of the reply `text` to the item `id`, from `caller`, or the human.
+async fn reply(f: &Fixture, id: &str, caller: Option<&AgentId>, text: &str) -> (u16, Value) {
+    let caller = caller.map(|agent| axum::Extension(crate::callers::Caller(Some(agent.clone()))));
+    let body = json!({ "idempotencyKey": "reply-1", "body": text }).to_string();
+    let response = crate::attention::reply(
+        State(f.shared.clone()),
+        Path(id.to_owned()),
+        caller,
+        Bytes::from(body),
+    )
+    .await;
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+/// The server's request `id` asking the human one question in their own words.
+fn user_input(id: u64) -> Value {
+    let question = json!({ "id": "q-1", "question": "Which branch?" });
+    let params = json!({ "threadId": STUB_SESSION, "itemId": "ask-1", "questions": [question] });
+    json!({ "id": id, "method": "item/tool/requestUserInput", "params": params })
 }
 
 /// Waits until `done`, failing the test if it never is.
@@ -479,50 +629,332 @@ fn picks_up_the_served_agents_session_with_its_launch_and_applies_what_its_serve
     assert_eq!(worked, Some(ActivityValue::Working));
 }
 
+/// The human's answer goes to the request on the connection it came on, and the TUI hearing it
+/// too settles nothing more.
 #[test]
-fn opens_an_approval_its_server_asks_offering_nothing_and_closes_it_once_the_tui_answers() {
+fn answers_an_approval_its_server_asks_on_the_connection_it_came_on() {
     let f = fixture();
-    let (offered, answered, closed) = runtime().block_on(async {
+    let (offered, answered, sent) = runtime().block_on(async {
         let (mut server, _) = f.picked_up().await;
-        let asked = json!({ "threadId": STUB_SESSION, "itemId": "call-1", "command": "ls" });
-        let request = json!({
-            "id": 7, "method": "item/commandExecution/requestApproval", "params": asked,
-        });
-        say(&mut server, request).await;
-        until("the approval was opened", || f.open_items() == 1).await;
+        say(&mut server, approval(7, "call-1")).await;
+        offering(&f, &[json!(["allow", "deny"])]).await;
         let offered = actions(&f).await;
-        let reader = f.shared.store.reader().unwrap();
-        let id = reader.reads().open_attention(f.agent.as_str()).unwrap()[0]
-            .id
-            .clone();
-        let body = json!({ "idempotencyKey": "k", "decision": "allow" }).to_string();
-        let response = crate::attention::answer(
-            State(f.shared.clone()),
-            Path(id.as_str().to_owned()),
-            None,
-            Bytes::from(body),
-        )
-        .await;
+        let answered = decide(&f, &f.items()[0], "answer-1", "allow").await;
+        let sent = frame(&mut server).await;
         let resolved = json!({ "threadId": STUB_SESSION, "requestId": 7 });
         say(
             &mut server,
             notification("serverRequest/resolved", &resolved),
         )
         .await;
-        until("the approval was closed", || f.open_items() == 0).await;
+        // Told in order, so the resolution is done with once the turn is recorded.
+        let turn =
+            json!({ "threadId": STUB_SESSION, "turn": { "id": "u-1", "status": "inProgress" } });
+        say(&mut server, notification("turn/started", &turn)).await;
+        until("the turn was recorded", || {
+            f.activity() == Some(ActivityValue::Working)
+        })
+        .await;
+        (offered, answered, sent)
+    });
+    assert_eq!(
+        (offered, answered, sent),
+        (vec![json!(["allow", "deny"])], 200, decided(7, "accept"))
+    );
+    assert_eq!(
+        (f.open_items(), f.of("attention.answered"), f.closed()),
+        (0, vec![json!({ "decision": "allow" })], vec![])
+    );
+}
+
+/// A request its server asks again holds nothing of the one it held until it is held itself: an
+/// answer in between is refused, never sent for a request the server may no longer wait on.
+#[test]
+fn answers_nothing_between_a_request_asked_again_and_its_hold() {
+    let f = fixture();
+    let (answered, sent) = runtime().block_on(async {
+        let (mut first, _) = f.picked_up().await;
+        say(&mut first, approval(7, "call-1")).await;
+        offering(&f, &[json!(["allow", "deny"])]).await;
+        let (on, _inbox, mut second, _dir) = connection(&f).await;
+        let asked_again = approval(8, "call-1");
+        let message = Inbound::Request {
+            id: RequestId::Number(8.into()),
+            method: asked_again["method"].as_str().unwrap().to_owned(),
+            params: Some(asked_again["params"].clone()),
+        };
+        let (opened, hold) = super::asked(&f.shared, HarnessId::Codex, message, on)
+            .await
+            .unwrap()
+            .unwrap();
+        let between = (
+            actions(&f).await,
+            decide(&f, opened.as_str(), "answer-1", "allow").await,
+        );
+        assert_eq!(between, (vec![json!([])], 409));
+        f.shared
+            .hooks
+            .approvals
+            .hold(&opened, Responder::Server(hold));
+        let answered = decide(&f, opened.as_str(), "answer-2", "allow").await;
+        (answered, frame(&mut second).await)
+    });
+    assert_eq!((answered, sent), (200, decided(8, "accept")));
+}
+
+/// Each request is answered once: by the first key that answers its item, again by that key
+/// without a second answer, and never by another.
+#[test]
+fn answers_each_request_its_server_asks_once() {
+    let f = fixture();
+    let (answered, sent) = runtime().block_on(async {
+        let (mut server, _) = f.picked_up().await;
+        say(&mut server, approval(7, "call-1")).await;
+        say(&mut server, approval(8, "call-2")).await;
+        let held = json!(["allow", "deny"]);
+        offering(&f, &[held.clone(), held]).await;
+        let items = f.items();
+        let answered = [
+            decide(&f, &items[0], "answer-1", "allow").await,
+            decide(&f, &items[0], "answer-2", "deny").await,
+            decide(&f, &items[0], "answer-1", "allow").await,
+            decide(&f, &items[1], "answer-3", "deny").await,
+        ];
         (
-            offered,
-            response.status().as_u16(),
-            f.of("attention.closed"),
+            answered,
+            [frame(&mut server).await, frame(&mut server).await],
         )
     });
-    assert_eq!((offered, answered), (vec![json!([])], 409));
+    assert_eq!(answered, [200, 409, 200, 200]);
+    assert_eq!(sent, [decided(7, "accept"), decided(8, "decline")]);
+}
+
+/// A request the TUI answered first is answered by nothing the human sends after, its item
+/// settled by the request, though no agent is on its thread now.
+#[test]
+fn answers_nothing_the_tui_answered_first() {
+    let f = fixture();
+    let (answered, sent) = runtime().block_on(async {
+        let (mut server, _) = f.picked_up().await;
+        say(&mut server, approval(7, "call-1")).await;
+        say(&mut server, approval(8, "call-2")).await;
+        let held = json!(["allow", "deny"]);
+        offering(&f, &[held.clone(), held]).await;
+        let items = f.items();
+        f.moved_to("elsewhere").await;
+        let resolved = json!({ "threadId": STUB_SESSION, "requestId": 7 });
+        say(
+            &mut server,
+            notification("serverRequest/resolved", &resolved),
+        )
+        .await;
+        offering(&f, &[json!(["allow", "deny"])]).await;
+        let answered = [
+            decide(&f, &items[0], "answer-1", "allow").await,
+            decide(&f, &items[1], "answer-2", "allow").await,
+        ];
+        (answered, frame(&mut server).await)
+    });
     assert_eq!(
-        closed
+        (answered, sent, f.closed()),
+        (
+            [409, 200],
+            decided(8, "accept"),
+            vec![json!("answered_in_tui")]
+        )
+    );
+}
+
+/// A request is answered only on the connection it came on: once that ends, its item offers
+/// nothing until the server asks it again on the next, whose request the answer goes to; one it
+/// doesn't ask again is stale.
+#[test]
+fn answers_a_request_on_the_connection_its_server_asked_it_on_last() {
+    let f = fixture();
+    let (gone, again, answered, sent) = runtime().block_on(async {
+        let listener = f.started();
+        let (mut server, _) = f.pickup(&listener, &[]).await;
+        say(&mut server, approval(7, "call-1")).await;
+        say(&mut server, approval(8, "call-2")).await;
+        let held = json!(["allow", "deny"]);
+        offering(&f, &[held.clone(), held]).await;
+        let items = f.items();
+        drop(server);
+        offering(&f, &[json!([]), json!([])]).await;
+        let gone = decide(&f, &items[0], "answer-1", "allow").await;
+        let (mut server, _) = f.pickup(&listener, &[approval(12, "call-1")]).await;
+        offering(&f, &[json!(["allow", "deny"])]).await;
+        let again = (f.items() == items[..1], actions(&f).await);
+        let answered = decide(&f, &items[0], "answer-2", "allow").await;
+        (gone, again, answered, frame(&mut server).await)
+    });
+    assert_eq!(gone, 409);
+    assert_eq!(again, (true, vec![json!(["allow", "deny"])]));
+    assert_eq!((answered, sent), (200, decided(12, "accept")));
+    assert_eq!(
+        (f.of("attention.opened").len(), f.closed()),
+        (2, vec![json!("stale")])
+    );
+}
+
+/// The server asks again each request it still holds once a new connection is up, so the
+/// pickup of a session on the same connection stales nothing.
+#[test]
+fn stales_nothing_its_server_asked_on_the_connection_still_up() {
+    let f = fixture();
+    let session = SessionKey(STUB_SESSION.to_owned());
+    f.told(
+        vec![on_thread(STUB_SESSION, asked("call-1"))],
+        Some((&session, Some(&f.agent))),
+    );
+    f.heard(Event::Connected(vec![]));
+    let kept = f.open_items();
+    f.heard(Event::Disconnected(vec![]));
+    f.heard(Event::Connected(vec![]));
+    assert_eq!(
+        (kept, f.open_items(), f.closed()),
+        (1, 0, vec![json!("stale")])
+    );
+}
+
+fn question(call: &str) -> Observed {
+    Observed::QuestionAsked {
+        key: ToolKey {
+            key: call.to_owned(),
+            caller: None,
+            prompt_id: None,
+        },
+        summary: "Pick one".to_owned(),
+    }
+}
+
+/// A question only the TUI can answer is one item however often its server asks it, and stale
+/// once a new connection is up without it.
+#[test]
+fn opens_a_question_its_server_asks_again_once_and_stales_one_it_does_not() {
+    let f = fixture();
+    let session = SessionKey(STUB_SESSION.to_owned());
+    let routed = Some((&session, Some(&f.agent)));
+    let asks = |calls: &[&str]| {
+        let told = calls
             .iter()
-            .map(|closed| closed["reason"].clone())
-            .collect::<Vec<_>>(),
-        [json!("answered_in_tui")]
+            .map(|call| on_thread(STUB_SESSION, question(call)));
+        f.told(told.collect(), routed);
+    };
+    asks(&["ask-1", "ask-2"]);
+    f.heard(Event::Disconnected(vec![]));
+    asks(&["ask-1"]);
+    f.heard(Event::Connected(vec![]));
+    assert_eq!(
+        (f.of("attention.opened").len(), f.open_items(), f.closed()),
+        (2, 1, vec![json!("stale")])
+    );
+}
+
+/// A request its server asks again where it can't be routed, as on a session two agents are on,
+/// leaves the item it opened to go stale.
+#[test]
+fn stales_an_approval_its_server_asks_again_on_a_session_two_agents_are_on() {
+    let f = fixture();
+    let session = SessionKey(STUB_SESSION.to_owned());
+    f.told(
+        vec![on_thread(STUB_SESSION, asked("call-1"))],
+        Some((&session, Some(&f.agent))),
+    );
+    f.launched("k-2", "two");
+    f.heard(Event::Disconnected(vec![]));
+    f.told(
+        vec![on_thread(STUB_SESSION, asked("call-1"))],
+        Some((&session, None)),
+    );
+    f.heard(Event::Connected(vec![]));
+    assert_eq!(
+        (f.of("attention.opened").len(), f.open_items(), f.closed()),
+        (1, 0, vec![json!("stale")])
+    );
+}
+
+/// A reply to a question its server asks is that request's answer, the human's text, and no
+/// mail.
+#[test]
+fn answers_a_question_its_server_asks_with_the_humans_text() {
+    let f = fixture();
+    let (offered, replied, sent) = runtime().block_on(async {
+        let (mut server, _) = f.picked_up().await;
+        say(&mut server, user_input(11)).await;
+        offering(&f, &[json!(["reply"])]).await;
+        let offered = actions(&f).await;
+        let replied = reply(&f, &f.items()[0], None, "main").await;
+        (offered, replied, frame(&mut server).await)
+    });
+    let answers = json!({ "q-1": { "answers": ["main"] } });
+    assert_eq!(
+        (offered, replied.0, &replied.1["messageId"], sent),
+        (
+            vec![json!(["reply"])],
+            200,
+            &Value::Null,
+            json!({ "id": 11, "result": { "answers": answers } })
+        )
+    );
+    assert_eq!(
+        (f.closed(), f.of("mailbox.queued")),
+        (vec![json!("replied")], vec![])
+    );
+}
+
+/// A reply its harness can no longer answer is refused and undone: the item stays open, nothing
+/// is sent, and nothing is recorded closed.
+#[test]
+fn keeps_a_question_open_and_sends_nothing_when_its_harness_cant_answer_it() {
+    let f = fixture();
+    let (replied, sent) = runtime().block_on(async {
+        let (mut server, _) = f.picked_up().await;
+        say(&mut server, user_input(11)).await;
+        offering(&f, &[json!(["reply"])]).await;
+        // Told of a thread no agent is on, the harness lets go of what it held there.
+        f.moved_to("elsewhere").await;
+        let (on, _inbox, _other, _dir) = connection(&f).await;
+        let turn = Inbound::Notification {
+            method: "turn/started".to_owned(),
+            params: Some(json!({ "threadId": STUB_SESSION, "turn": { "id": "u-1" } })),
+        };
+        super::asked(&f.shared, HarnessId::Codex, turn, on)
+            .await
+            .unwrap();
+        f.moved_to(STUB_SESSION).await;
+        let replied = reply(&f, &f.items()[0], None, "main").await.0;
+        let sent = tokio::time::timeout(QUIET, heard(&mut server)).await.ok();
+        (replied, sent)
+    });
+    assert_eq!((replied, sent), (409, None));
+    assert_eq!(
+        (f.open_items(), f.closed(), f.of("mailbox.queued")),
+        (1, vec![], vec![])
+    );
+}
+
+/// An agent can't answer a question its server asks, as it can't an approval: only the human.
+#[test]
+fn refuses_an_agents_reply_to_a_question_its_server_asks() {
+    let f = fixture();
+    let (refused, replied, sent) = runtime().block_on(async {
+        let (mut server, _) = f.picked_up().await;
+        say(&mut server, user_input(11)).await;
+        offering(&f, &[json!(["reply"])]).await;
+        let id = f.items()[0].clone();
+        let refused = reply(&f, &id, Some(&f.agent), "yes").await.0;
+        let replied = reply(&f, &id, None, "main").await.0;
+        (refused, replied, frame(&mut server).await)
+    });
+    let answers = json!({ "q-1": { "answers": ["main"] } });
+    assert_eq!(
+        (refused, replied, sent),
+        (
+            403,
+            200,
+            json!({ "id": 11, "result": { "answers": answers } })
+        )
     );
 }
 

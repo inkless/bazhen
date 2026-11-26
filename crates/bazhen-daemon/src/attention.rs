@@ -3,9 +3,11 @@
 //! again; a dismissal closes the item. Each closes its item in the transaction that queues the mail,
 //! so no crash leaves a reply sent and its item open, or the item closed with nothing sent.
 //!
-//! An answer to an approval goes to the hook its harness holds, once the item is claimed and the
-//! answer committed, in the one job on the store's writer that claims it: that job runs to its end
-//! whether or not the route's caller stays, so an answer recorded is an answer sent.
+//! An answer to an approval goes to the hook its harness holds, or to the request of its harness's
+//! server, once the item is claimed and the answer committed, in the one job on the store's writer
+//! that claims it: that job runs to its end whether or not the route's caller stays, so an answer
+//! recorded is an answer sent. A reply to a question a server asked is that request's answer, not
+//! mail. A server's request is answered on the connection it came on, so only while that is open.
 
 use std::sync::Arc;
 
@@ -29,8 +31,9 @@ use bazhen_store::{
     AppendError, AttentionItem, AttentionView, OnceError, OpenAttention, Writer as StoreWriter,
 };
 
+use crate::agents::Agents;
 use crate::callers::{Caller, caller_of};
-use crate::hooks::approvals::{Approvals, Responder};
+use crate::hooks::approvals::{Approvals, Entry, Responder, ServerHold};
 use crate::mail::{Queued, Sending, deliver, queue, refusal};
 use crate::routes::{Shared, fail, internal};
 
@@ -49,12 +52,13 @@ impl AttentionView for Inbox {
 
 /// What the human can do about an open item of `kind`, whose agent is in `state` (`Inbox.actions`).
 /// An approval or a question is settled only through the harness request it stands behind, or in
-/// the agent's terminal: an approval whose request is `held` takes allow or deny, and a question
-/// only the TUI.
+/// the agent's terminal: an approval whose request is `held` takes allow or deny, a question whose
+/// request is held takes the human's text, and one not held only the TUI.
 fn actions(kind: &AttentionKind, state: Option<&str>, held: bool) -> Vec<AttentionAction> {
     use AttentionAction::{Allow, Deny, Dismiss, Reply, Resend};
     match kind {
         AttentionKind::Approval if held => vec![Allow, Deny],
+        AttentionKind::Question if held => vec![Reply],
         AttentionKind::Approval | AttentionKind::Question => Vec::new(),
         // Only its terminal answers it; mail would wait behind the very dialog it is about.
         AttentionKind::StuckStarting | AttentionKind::Unknown(_) => vec![Dismiss],
@@ -143,7 +147,7 @@ fn may_answer(caller: Option<&AgentId>) -> Result<&'static str, Refusal> {
     match caller {
         None => Ok("user"),
         Some(agent) => Err(Refusal::Forbidden(format!(
-            "agent {agent} can't answer an approval"
+            "agent {agent} can't answer an attention item"
         ))),
     }
 }
@@ -178,6 +182,7 @@ async fn answered(
         ApprovalDecision::Deny => AttentionAction::Deny,
     };
     let approvals = Arc::clone(&shared.hooks.approvals);
+    let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
     let reply = built(shared, &approvals, &attention, req.decision).await?;
     let kept = kept(
         &id,
@@ -188,32 +193,36 @@ async fn answered(
     shared
         .store
         .run(move |store| {
-            let mut claimed = None;
+            let (mut claimed, mut result) = (None, None);
             let outcome = store.once(&req.idempotency_key, &kept, |w| {
                 offering(w, &approvals, &id, action)?;
                 let refused = || Refusal::Refused {
                     id: id.clone(),
                     action,
                 };
-                // Only a request whose reply was built before the claim is answered.
-                reply.as_ref().ok_or_else(refused)?;
                 let entry = approvals.claim(&attention).ok_or_else(refused)?;
                 let entry = claimed.insert(entry);
-                if entry.responder.is_none() {
-                    return Err(refused());
-                }
-                let event = w.answer_attention(&attention, decision, actor)?;
+                let event = match &entry.responder {
+                    // Only a hook whose reply was built before the claim is answered.
+                    Some(Responder::Hook(_)) if reply.is_some() => {
+                        w.answer_attention(&attention, decision, actor)?
+                    }
+                    Some(Responder::Server(hold)) if hold.on.open() => {
+                        let event = w.answer_attention(&attention, decision, actor)?;
+                        // Last, as the harness forgets the request once it answers it.
+                        let with = Resolution::Decision(decision);
+                        let answered = server_result(&agents, entry, hold, with);
+                        result = Some(answered.ok_or_else(refused)?);
+                        event
+                    }
+                    _ => return Err(refused()),
+                };
                 Ok::<_, Refusal>(AnswerAttentionResponse {
                     event_ids: vec![event],
                 })
             });
             match (claimed, &outcome) {
-                (Some(entry), Ok(_)) => {
-                    if let (Some(Responder::Hook(hook)), Some(reply)) = (entry.responder, reply) {
-                        // Its client may have gone already, as the human answered in the TUI.
-                        let _ = hook.send(reply);
-                    }
-                }
+                (Some(entry), Ok(_)) => answer_held(entry, reply, result),
                 (Some(entry), Err(_)) => approvals.put_back(attention, entry),
                 (None, _) => {}
             }
@@ -223,15 +232,51 @@ async fn answered(
         .map_err(|err| Refusal::Internal(err.to_string()))?
 }
 
+/// Sends what answers the claimed `entry`, its answer committed: the hook's `reply`, or the
+/// server's request's `result`.
+fn answer_held(
+    entry: Entry,
+    reply: Option<bazhen_protocol::mail::HookReply>,
+    result: Option<serde_json::Value>,
+) {
+    match (entry.responder, reply, result) {
+        // Its client may have gone already, as the human answered in the TUI.
+        (Some(Responder::Hook(hook)), Some(reply), _) => drop(hook.send(reply)),
+        (Some(Responder::Server(hold)), _, Some(result)) => hold.on.respond(hold.id, result),
+        _ => {}
+    }
+}
+
+/// The result the harness of the server that asked `entry` answers its request `hold` with,
+/// none when it can't, as for a request it no longer holds.
+fn server_result(
+    agents: &Agents,
+    entry: &Entry,
+    hold: &ServerHold,
+    with: Resolution<'_>,
+) -> Option<serde_json::Value> {
+    let harness = agents.harnesses().get(entry.served?.harness)?;
+    let to = Pending::ServerRequest {
+        method: &hold.method,
+        key: &entry.key,
+    };
+    match harness.answer(&to, with) {
+        Answer::Rpc(result) => serde_json::from_str(&result).ok(),
+        Answer::Hook(_) | Answer::Unavailable => None,
+    }
+}
+
 /// The reply the hook held for the item `id` gives for `decision`, from its agent's harness; none
-/// when no hook holds it, as for an item answered, settled, or never held.
+/// when no hook holds it, as for an item answered, settled, never held, or held by a server, whose
+/// result is built once the item is claimed.
 async fn built(
     shared: &Shared,
     approvals: &Approvals,
     id: &AttentionId,
     decision: ApprovalDecision,
 ) -> Result<Option<bazhen_protocol::mail::HookReply>, Refusal> {
-    let Some(agent) = approvals.agent_of(id).filter(|_| approvals.held(id)) else {
+    let held = approvals.held(id) && !approvals.held_by_server(id);
+    let Some(agent) = approvals.agent_of(id).filter(|_| held) else {
         return Ok(None);
     };
     let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
@@ -260,15 +305,19 @@ async fn built(
     }
 }
 
-/// `POST /v1/attention/:id/reply`: mail to the item's agent, which closes it.
+/// `POST /v1/attention/:id/reply`: mail to the item's agent, which closes it; for a question its
+/// harness's server holds, that request's answer, the human's text, and no mail.
 pub(crate) async fn reply(
     State(shared): State<Shared>,
     Path(id): Path<String>,
+    caller: Option<Extension<Caller>>,
     body: Bytes,
 ) -> Response {
+    let caller = caller_of(caller);
     let replied = async {
         let req =
             edge::<ReplyAttentionRequest>(&body).map_err(|refused| Refusal::Invalid(refused.0))?;
+        let actor = may_answer(caller.as_ref())?;
         let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
         let run = Arc::clone(&agents);
         let approvals = Arc::clone(&shared.hooks.approvals);
@@ -277,8 +326,33 @@ pub(crate) async fn reply(
             .run(move |store| {
                 let mut queued = Vec::new();
                 let kept = kept(&id, "reply", &req.body.clone().into());
+                let (mut claimed, mut result) = (None, None);
                 let response = store.once(&req.idempotency_key, &kept, |w| {
                     let item = offering(w, &approvals, &id, AttentionAction::Reply)?;
+                    if item.kind == AttentionKind::Question {
+                        let refused = || Refusal::Refused {
+                            id: id.clone(),
+                            action: AttentionAction::Reply,
+                        };
+                        let entry = approvals.claim(&item.id).ok_or_else(refused)?;
+                        let entry = claimed.insert((item.id.clone(), entry));
+                        let Some(Responder::Server(hold)) = &entry.1.responder else {
+                            return Err(refused());
+                        };
+                        if !hold.on.open() {
+                            return Err(refused());
+                        }
+                        let replied = AttentionClosedReason::Replied;
+                        let event = w.close_attention(&item.id, replied, actor)?;
+                        // Last, as the harness forgets the question once it answers it.
+                        let with = Resolution::Text(&req.body);
+                        result =
+                            Some(server_result(&run, &entry.1, hold, with).ok_or_else(refused)?);
+                        return Ok(ReplyAttentionResponse {
+                            message_id: None,
+                            event_ids: vec![event],
+                        });
+                    }
                     let (message_id, event_ids) = mail(
                         w,
                         run.harnesses(),
@@ -291,8 +365,13 @@ pub(crate) async fn reply(
                         message_id: Some(message_id),
                         event_ids,
                     })
-                })?;
-                Ok::<_, Refusal>((response, queued))
+                });
+                match (claimed, &response) {
+                    (Some((_, entry)), Ok(_)) => answer_held(entry, None, result),
+                    (Some((item, entry)), Err(_)) => approvals.put_back(item, entry),
+                    (None, _) => {}
+                }
+                Ok::<_, Refusal>((response?, queued))
             })
             .await
             .map_err(|err| Refusal::Internal(err.to_string()))??;
