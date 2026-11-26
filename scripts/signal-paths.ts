@@ -1464,7 +1464,7 @@ export function isSignallingSource(file: string, text: string): boolean {
 }
 
 /** The reason a Rust test that signals processes it didn't start is ignored outside a sandbox. */
-export const SIGNALS_IGNORE = "signals processes; runs in moon run :test-real -- rust";
+export const SIGNALS_IGNORE = "signals processes; runs in make test-real ARGS=rust";
 
 /**
  * Whether a file holds tests that may signal processes they didn't start: Rust tests ignored as

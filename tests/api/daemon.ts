@@ -176,7 +176,7 @@ req.end();
   return reply;
 }
 
-/** This checkout's CLI, which `moon run :test-api` builds. */
+/** This checkout's CLI, which `make test-api` builds. */
 const CLI = join(repo, "target/release/bazhen");
 
 /** How a process exited: its code, or the signal that ended it. */
@@ -1481,7 +1481,7 @@ export class Daemon {
 
   /**
    * PTY handles the daemon process holds, from /proc: these suites run only on Linux, in CI or
-   * the `moon run :test-real` container.
+   * the `make test-real` container.
    */
   ptyHandles(): number {
     const pid = this.process?.pid;

@@ -51,19 +51,19 @@ A guard's break and its `Guard:` line go in a commit of their own.
 
 ## Already checked by tooling
 
-- **pre-commit** runs oxfmt and oxlint (with the `moon run :lint` flags) on the staged files,
+- **pre-commit** runs oxfmt and oxlint (with the `make lint` flags) on the staged files,
   through lint-staged.
-- **CI** runs `moon run :check`, the full gate: the standards check (sibling tests, agent context,
+- **CI** runs `make check`, the full gate: the standards check (sibling tests, agent context,
   skills, signal chokepoints), the protocol schema drift check, lint (including the import matrix,
   the test rules and `any`), the format check, types for sources, tests and scripts, and the small
   and medium tests. CI then runs, on its disposable runners, the suites no workstation runs: the
-  holder suite and the Rust tests ignored as signalling processes (`moon run :test-holder`,
-  `moon run :test-rust-all`), and the integration, api and e2e suites; `moon run :test-real` runs
+  holder suite and the Rust tests ignored as signalling processes (`make test-holder`,
+  `make test-rust-all`), and the integration, api and e2e suites; `make test-real` runs
   each in a container. CI reports every failing Rust test, not the first. It runs on Linux, on Node 24 and 26; on macOS it runs the Rust gates
-  (`moon run :lint-rust`, `moon run :test-rust-all`). A change to the holder or its tests is checked
-  with `moon run :test-real -- holder` and `moon run :test-real -- rust`. On a pull request it also
-  runs `moon run :test-falsify` against the target branch; run it yourself before pushing.
-- **`moon run :check`'s Rust gates** run rustfmt's check, clippy with pedantic and the restriction
+  (`make lint-rust`, `make test-rust-all`). A change to the holder or its tests is checked
+  with `make test-real ARGS=holder` and `make test-real ARGS=rust`. On a pull request it also
+  runs `make test-falsify` against the target branch; run it yourself before pushing.
+- **`make check`'s Rust gates** run rustfmt's check, clippy with pedantic and the restriction
   lints, cargo-deny and nextest on the whole workspace, and the standards check rejects lint
   suppressions in `crates/`, a lint configuration other than the standard's, and a dependency
   not pinned in the workspace. Falsify runs each new Rust test against mutants of the code the
@@ -71,5 +71,5 @@ A guard's break and its `Guard:` line go in a commit of their own.
   each test none killed; item 7 checks the control is real.
 
 The pre-commit hook is installed by `pnpm install` (husky); never skip it with `--no-verify`.
-Run `moon run :check` yourself before opening a pull request. Don't
+Run `make check` yourself before opening a pull request. Don't
 spend review time on any of these. If one of them is wrong, fix the check.

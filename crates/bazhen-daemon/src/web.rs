@@ -17,7 +17,7 @@ use bazhen_fs_trust::{Refused, Untrusted, Writers, ancestry_refusal, untrusted};
 use bazhen_protocol::nullable::Nullable;
 
 /// What the page answers when there is no bundle to serve.
-pub(crate) const NOT_BUILT: &str = "The web app isn't built. Run `moon run :build`, then reload.";
+pub(crate) const NOT_BUILT: &str = "The web app isn't built. Run `make build`, then reload.";
 
 /// Vite names these by their content, so a new build never reuses a name.
 const ASSETS: &str = "/assets/";
@@ -29,7 +29,7 @@ const HEADERS: [(&str, &str); 3] = [
     ("content-security-policy", "frame-ancestors 'none'"),
 ];
 
-/// Where `moon run :build` leaves the web client: `apps/web/dist` in the checkout whose
+/// Where `make build` leaves the web client: `apps/web/dist` in the checkout whose
 /// `target/<profile>` this binary runs from, served only while no one but `uid` can change it.
 ///
 /// Whoever else could write what the page serves would run their script on the daemon's own
@@ -123,7 +123,7 @@ impl Bundle {
                 path,
                 why: Untrusted::Writable,
             } if path.starts_with(&self.dist) => format!(
-                "`chmod -R g-w,o-w {}` fixes it, as `moon run :build` leaves it",
+                "`chmod -R g-w,o-w {}` fixes it, as `make build` leaves it",
                 self.dist.display()
             ),
             _ => "the daemon serves only a build in a checkout of this user's that no other user \
@@ -349,7 +349,7 @@ mod tests {
         build(&dir.path().join("dist"))
     }
 
-    /// The same, at `root`, left as `moon run :build` leaves it: no one but its owner may write
+    /// The same, at `root`, left as `make build` leaves it: no one but its owner may write
     /// anything in it, whatever the umask.
     fn build(root: &Path) -> PathBuf {
         let dir = root.parent().unwrap();
@@ -783,7 +783,7 @@ mod tests {
         );
     }
 
-    /// A checkout as `moon run :build` leaves one under a umask of 002: the directories up to the
+    /// A checkout as `make build` leaves one under a umask of 002: the directories up to the
     /// build writable by the user's group, and the build by no one but the user.
     fn checkout(dir: &TempDir) -> Bundle {
         let bundle = found(dir.path());
@@ -875,7 +875,7 @@ mod tests {
         chmod(&by_file.dist().join("index.html"), 0o664);
         let fix = |bundle: &Bundle, entry: &str| {
             refused(&format!(
-                "{}: other users may write it; `chmod -R g-w,o-w {}` fixes it, as `moon run :build` leaves it",
+                "{}: other users may write it; `chmod -R g-w,o-w {}` fixes it, as `make build` leaves it",
                 bundle.dist().join(entry).display(),
                 bundle.dist().display()
             ))

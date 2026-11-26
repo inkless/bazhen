@@ -114,7 +114,7 @@ if (isMain(import.meta)) {
     if (check) {
       if (stale.length > 0) {
         console.error(
-          `packages/protocol/${relative} is stale (${stale.join(", ")}): run \`moon run :schema\` and commit the result.`,
+          `packages/protocol/${relative} is stale (${stale.join(", ")}): run \`make schema\` and commit the result.`,
         );
         failed = true;
       }

@@ -337,7 +337,7 @@ mod tests {
     /// with the mode unknown is not ready while the program reads whole lines, and unavailable
     /// once it reads keys.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn an_unknown_mode_is_answered_only_once_the_program_is_ready() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut holder = holder("read _; stty -icanon -echo; exec head -c 1 >/dev/null");

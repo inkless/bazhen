@@ -1809,13 +1809,13 @@ mod tests {
         let (mut store, terminals) = running(&dir, 1);
         let shell = &terminals[0];
         let counted = [
-            note(&mut store, shell, 2, Some("moon run :dev")),
+            note(&mut store, shell, 2, Some("make dev")),
             note(&mut store, shell, 1, Some("ls")),
             note(&mut store, shell, 2, Some("ls")),
         ];
         assert_eq!(
             (counted, kept(&store, shell).as_deref()),
-            ([true, false, false], Some("moon run :dev"))
+            ([true, false, false], Some("make dev"))
         );
     }
 
@@ -1824,10 +1824,10 @@ mod tests {
         let dir = TempDir::new("shell-line-clears");
         let (mut store, terminals) = running(&dir, 1);
         let shell = &terminals[0];
-        note(&mut store, shell, 1, Some("moon run :dev"));
+        note(&mut store, shell, 1, Some("make dev"));
         note(&mut store, shell, 2, Some("make\nrm -rf ~"));
         let after_newline = kept(&store, shell);
-        note(&mut store, shell, 3, Some("moon run :dev"));
+        note(&mut store, shell, 3, Some("make dev"));
         note(&mut store, shell, 4, None);
         assert_eq!((after_newline, kept(&store, shell)), (None, None));
     }

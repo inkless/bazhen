@@ -529,7 +529,7 @@ mod tests {
     /// Linux: the master reads `EIO` once no one holds the terminal open, whoever still runs.
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn input_is_refused_once_nothing_holds_the_terminal_though_the_child_runs_on() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut holder = holder(&["sh", "-c", "exec </dev/null >/dev/null 2>&1; sleep 1"]);
@@ -545,7 +545,7 @@ mod tests {
     /// Linux, as the drain test above: macOS revokes the terminal when its leader exits.
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_query_written_after_the_exit_is_published_is_not_answered() {
         bazhen_test_signal::require_sandbox().unwrap();
         let process = spec(&["sh", "-c", "read _; exit 0"]);
@@ -579,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_retired_child_has_its_session_ended_at_the_next_turn() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut holder = holder(&["sh", "-c", "read _"]);
@@ -619,7 +619,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_step_lists_the_processes_once_for_every_session_it_ends() {
         bazhen_test_signal::require_sandbox().unwrap();
         // A hangup that lands before the trap is set ends the shell, and the ending of a session
@@ -694,7 +694,7 @@ mod tests {
     /// slow engine or a starved CPU makes a turn longer by a chunk, not by the byte budget. Each
     /// turn is given when it began: one long begun reads a chunk, one not yet begun the budget.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_turn_reads_a_flood_only_until_its_time_is_up() {
         bazhen_test_signal::require_sandbox().unwrap();
         let long_ago = Instant::now();

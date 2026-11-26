@@ -53,7 +53,7 @@ export function runInHome(
 /** The pid of a process that has exited and been reaped, as a closed holder's is. */
 export const exitedPid = (): number => runInHome(["true"]).pid;
 
-/** The binaries `moon run :test-holder` builds first (`build-holder`). */
+/** The binaries `make test-holder` builds first (`build-holder`). */
 export const HOLDER_BINARY = fileURLToPath(
   new URL("../../target/debug/bazhen-holder", import.meta.url),
 );

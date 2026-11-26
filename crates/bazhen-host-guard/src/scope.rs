@@ -1423,7 +1423,7 @@ mod tests {
     /// What a step says, where the command said nothing of it, and with nothing of this process's
     /// environment but what it was given.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn runs_a_step_with_the_environment_it_was_given_alone() {
         bazhen_test_signal::require_sandbox().unwrap();
         let host = super::Host;

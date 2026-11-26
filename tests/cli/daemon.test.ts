@@ -284,7 +284,7 @@ describe("bazhen doctor", () => {
     ]);
     expect(none.slice(3, 5)).toEqual([
       "peer reader: none",
-      "  warning: the daemon can't read which process calls on its socket, so a call from inside an agent that presents nothing passes as yours; moon run :build builds bazhen-peer, so this install is incomplete",
+      "  warning: the daemon can't read which process calls on its socket, so a call from inside an agent that presents nothing passes as yours; make build builds bazhen-peer, so this install is incomplete",
     ]);
   });
 
@@ -357,7 +357,7 @@ describe("bazhen doctor", () => {
         }),
       ).toEqual([
         "external origins: none (loopback only)",
-        "web app: not built; `moon run :build` builds it, and the daemon serves only the API until then",
+        "web app: not built; `make build` builds it, and the daemon serves only the API until then",
         'pairing: not required on loopback (web.pairing = "auto", no external origins); a request a proxy forwards from another machine must still pair',
         `  warning: any local process or other user of this machine who can reach the daemon's port on 127.0.0.1 controls the agents; set web.pairing = "always" on a shared machine`,
       ]);

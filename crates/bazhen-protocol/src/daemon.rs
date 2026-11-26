@@ -207,7 +207,7 @@ pub struct Web {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "Pairing"))]
     pub pairing: Option<Pairing>,
-    /// The built web client, null before `moon run :build`; absent from an older daemon.
+    /// The built web client, null before `make build`; absent from an older daemon.
     #[serde(
         default,
         skip_serializing_if = "Nullable::is_absent",

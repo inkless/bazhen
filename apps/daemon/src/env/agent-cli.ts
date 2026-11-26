@@ -2,7 +2,7 @@ import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Where `moon run :build` leaves the CLI, beside the daemon that runs from this checkout. */
+/** Where `make build` leaves the CLI, beside the daemon that runs from this checkout. */
 const BUILT = fileURLToPath(new URL("../../../../target/release/bazhen", import.meta.url));
 
 export interface AgentCli {

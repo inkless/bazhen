@@ -1,4 +1,4 @@
-// Runs scripts/capped.ts as cargo runs it. These run inside `moon run :test-medium`'s own capped
+// Runs scripts/capped.ts as cargo runs it. These run inside `make test-medium`'s own capped
 // run, which is the capped run a test binary finds around it.
 
 import { spawnSync } from "node:child_process";
@@ -119,7 +119,7 @@ const asRun = (time: string, script: string) =>
     encoding: "utf8",
   });
 /**
- * A run started outside this one's scope, so that it caps a scope of its own as a moon task's
+ * A run started outside this one's scope, so that it caps a scope of its own as a make target's
  * does, where the kernel kills only the biggest process and the command can pass regardless.
  */
 const asTask = (flags: string[], script: string) =>

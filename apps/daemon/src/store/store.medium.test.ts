@@ -1588,13 +1588,13 @@ describe("Store relaunch", () => {
       const store = Store.open(dbPath());
       const terminalId = runningShell(store);
       const counted = [
-        store.noteShellCommand(terminalId, 2, "moon run :dev"),
+        store.noteShellCommand(terminalId, 2, "make dev"),
         store.noteShellCommand(terminalId, 1, "ls"),
         store.noteShellCommand(terminalId, 2, "ls"),
       ];
       expect([counted, store.lastShellCommand(terminalId)]).toEqual([
         [true, false, false],
-        "moon run :dev",
+        "make dev",
       ]);
       store.close();
     });
@@ -1602,10 +1602,10 @@ describe("Store relaunch", () => {
     it("clears the kept line when a newer one can't be typed back, rather than keep the older", () => {
       const store = Store.open(dbPath());
       const terminalId = runningShell(store);
-      store.noteShellCommand(terminalId, 1, "moon run :dev");
+      store.noteShellCommand(terminalId, 1, "make dev");
       store.noteShellCommand(terminalId, 2, "make\nrm -rf ~");
       const afterNewline = store.lastShellCommand(terminalId);
-      store.noteShellCommand(terminalId, 3, "moon run :dev");
+      store.noteShellCommand(terminalId, 3, "make dev");
       store.noteShellCommand(terminalId, 4, null);
       expect([afterNewline, store.lastShellCommand(terminalId)]).toEqual([null, null]);
       store.close();

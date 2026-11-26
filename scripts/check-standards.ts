@@ -1,5 +1,5 @@
 // Repository standards that no linter covers (docs/standards/code.md, testing.md). Runs first in
-// `moon run :check`; every failure names the file and the fix.
+// `make check`; every failure names the file and the fix.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
@@ -4386,7 +4386,7 @@ export const DENY_CONFIG = [
   'unknown-git = "deny"',
 ];
 
-// The moon tasks that run the Rust gates, exactly, and the steps of `check` and `format-check` that
+// The make targets that run the Rust gates, exactly, and the steps of `check` and `format-check` that
 // run each of them. The commands themselves are fixed in crates/bazhen-xtask/src/gate.rs; the
 // tests run under a cap like any. `check` also runs `rust-schema-check`, the Rust schema's
 // generator and its leak checks, which nothing else after a merge runs.
@@ -4493,7 +4493,7 @@ export const COUNTED_KILLS_TASKS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Why a package.json's scripts, or moon's tasks as `noun` says, would start tests without a cap,
+ * Why a package.json's scripts, or the Makefile's targets as `noun` says, would start tests without a cap,
  * or with one too big to bite, or would let a memory kill pass where `countsKills` doesn't name
  * the script.
  */
@@ -6957,7 +6957,7 @@ function checkSuppressions(): void {
   }
 }
 
-/** Every check `moon run :check` runs, in order. */
+/** Every check `make check` runs, in order. */
 export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkSiblingTests,
   checkAgentContext,

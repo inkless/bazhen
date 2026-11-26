@@ -354,11 +354,11 @@ pub(crate) mod tests {
             let token = h.token_of(&id).unwrap();
             let outcome = h
                 .shells
-                .report(&id, line(Some(&token), 1, Some("moon run :dev")))
+                .report(&id, line(Some(&token), 1, Some("make dev")))
                 .await;
             assert_eq!(
                 (outcome, h.last_command(&id)),
-                (Ok(ReportOutcome::Kept), Some("moon run :dev".to_owned()))
+                (Ok(ReportOutcome::Kept), Some("make dev".to_owned()))
             );
             assert_eq!(
                 (
@@ -446,7 +446,7 @@ pub(crate) mod tests {
             let token = h.token_of(&id).unwrap();
             let newer = h
                 .shells
-                .report(&id, line(Some(&token), 20, Some("moon run :dev")))
+                .report(&id, line(Some(&token), 20, Some("make dev")))
                 .await;
             let older = h
                 .shells
@@ -457,7 +457,7 @@ pub(crate) mod tests {
                 (
                     Ok(ReportOutcome::Kept),
                     Ok(ReportOutcome::Stale),
-                    Some("moon run :dev".to_owned())
+                    Some("make dev".to_owned())
                 )
             );
         });
@@ -473,14 +473,14 @@ pub(crate) mod tests {
             let far = line(Some(&token), (1 << 53) - 1, Some("far"));
             let far = h.shells.report_at(&id, far, now).await;
             let later = now + 61_000_000;
-            let next = line(Some(&token), later, Some("moon run :dev"));
+            let next = line(Some(&token), later, Some("make dev"));
             let next = h.shells.report_at(&id, next, later).await;
             assert_eq!(
                 (far, next, h.last_command(&id)),
                 (
                     Ok(ReportOutcome::Kept),
                     Ok(ReportOutcome::Kept),
-                    Some("moon run :dev".to_owned())
+                    Some("make dev".to_owned())
                 )
             );
         });
@@ -493,7 +493,7 @@ pub(crate) mod tests {
             let id = h.open("o").await.unwrap();
             let token = h.token_of(&id).unwrap();
             h.shells
-                .report(&id, line(Some(&token), 1, Some("moon run :dev")))
+                .report(&id, line(Some(&token), 1, Some("make dev")))
                 .await
                 .unwrap();
             h.store

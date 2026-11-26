@@ -38,7 +38,7 @@ use crate::terminals::{
 const COLS: u64 = 120;
 const ROWS: u64 = 40;
 
-/// Where `moon run :build` puts the holder beside this daemon: `target/release-holder`, beside
+/// Where `make build` puts the holder beside this daemon: `target/release-holder`, beside
 /// `target/release`, which this binary runs from.
 pub(crate) fn holder_source(exe: &Path) -> PathBuf {
     exe.parent()
@@ -1274,7 +1274,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn forgets_the_process_told_running_in_a_terminal_once_it_is_closed() {
         bazhen_test_signal::require_sandbox().unwrap();
         let dir = crate::testing::TempDir::new("holder-forget");
@@ -1444,7 +1444,7 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+        #[ignore = "signals processes; runs in make test-real ARGS=rust"]
         fn opens_a_login_shell_on_a_holder_of_its_own_and_ends_that_holder_as_it_closes() {
             bazhen_test_signal::require_sandbox().unwrap();
             let dir = TempDir::new("real-shell");
@@ -1492,7 +1492,7 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+        #[ignore = "signals processes; runs in make test-real ARGS=rust"]
         fn lists_agents_holders_a_daemon_before_it_left_by_terminal_with_how_each_ended_and_names_one_it_cant_read()
          {
             bazhen_test_signal::require_sandbox().unwrap();
@@ -1584,7 +1584,7 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+        #[ignore = "signals processes; runs in make test-real ARGS=rust"]
         fn closes_a_shell_on_a_holder_once_its_shell_exits() {
             bazhen_test_signal::require_sandbox().unwrap();
             let dir = TempDir::new("real-exit");
@@ -2114,7 +2114,7 @@ mod tests {
             }
 
             #[test]
-            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            #[ignore = "signals processes; runs in make test-real ARGS=rust"]
             fn keeps_the_line_as_typed_and_puts_neither_it_nor_the_shell_s_token_where_a_client_or_log_sees()
              {
                 bazhen_test_signal::require_sandbox().unwrap();
@@ -2136,7 +2136,7 @@ mod tests {
             }
 
             #[test]
-            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            #[ignore = "signals processes; runs in make test-real ARGS=rust"]
             fn leaves_the_prompt_the_status_of_the_line_that_ran() {
                 bazhen_test_signal::require_sandbox().unwrap();
                 each_kind("integrated-status", rc, &async |daemon, _, _| {
@@ -2155,7 +2155,7 @@ mod tests {
             }
 
             #[test]
-            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            #[ignore = "signals processes; runs in make test-real ARGS=rust"]
             fn forgets_the_shell_s_line_once_it_exits() {
                 bazhen_test_signal::require_sandbox().unwrap();
                 each_kind("integrated-exits", rc, &async |daemon, kind, _| {
@@ -2173,7 +2173,7 @@ mod tests {
             }
 
             #[test]
-            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            #[ignore = "signals processes; runs in make test-real ARGS=rust"]
             fn leaves_the_user_s_last_background_job_as_the_shell_s_own() {
                 bazhen_test_signal::require_sandbox().unwrap();
                 each_kind("integrated-job", rc, &async |daemon, kind, _| {
@@ -2207,7 +2207,7 @@ mod tests {
             }
 
             #[test]
-            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            #[ignore = "signals processes; runs in make test-real ARGS=rust"]
             fn types_the_line_back_at_a_restarted_shell_s_prompt_exactly_and_without_running_it_or_says_why_not()
              {
                 bazhen_test_signal::require_sandbox().unwrap();
@@ -2283,7 +2283,7 @@ mod tests {
             }
 
             #[test]
-            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            #[ignore = "signals processes; runs in make test-real ARGS=rust"]
             fn types_a_printable_ascii_line_back_as_keys_and_no_line_beyond_it_where_the_editor_takes_no_paste()
              {
                 bazhen_test_signal::require_sandbox().unwrap();

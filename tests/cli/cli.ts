@@ -1,6 +1,6 @@
 // The `bazhen` CLI as a process, against a fake daemon on the socket it looks for. The suite
 // holds the CLI's verbs, what it sends, what it prints and how it exits: it runs
-// `target/release/bazhen`, which `moon run :test-medium` builds, unless `BAZHEN_CLI` names another
+// `target/release/bazhen`, which `make test-medium` builds, unless `BAZHEN_CLI` names another
 // binary, as falsify names the base's build. The api suites, which run the CLI against the real
 // daemon, remain the end-to-end gate.
 

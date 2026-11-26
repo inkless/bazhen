@@ -95,7 +95,7 @@ fn counts_a_child_its_owner_already_reaped_as_ended() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn ends_with_how_a_child_that_ended_within_the_bound_exited() {
     bazhen_test_signal::require_sandbox().unwrap();
     let mut child = exiting_with(3).unwrap();
@@ -104,7 +104,7 @@ fn ends_with_how_a_child_that_ended_within_the_bound_exited() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn kills_and_reaps_a_child_still_running_at_the_bound() {
     bazhen_test_signal::require_sandbox().unwrap();
     let mut child = sleeping().unwrap();
@@ -140,7 +140,7 @@ fn refuses_to_watch_a_child_while_sigchld_is_ignored() {
 /// Refused before the child is waited for or sent anything, as a KILL at the bound could reach
 /// another process.
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn refuses_to_end_a_child_while_sigchld_is_ignored() {
     bazhen_test_signal::require_sandbox().unwrap();
     if !in_sigchld_ignored_run() {

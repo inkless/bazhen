@@ -44,8 +44,8 @@ own domain or Caddy's local authority.
 3. Build the web app and start Bazhen:
 
    ```sh
-   moon run :build
-   moon run :bazhen -- start
+   make build
+   make bazhen ARGS=start
    ```
 
    The first start under `listen = "lan"` makes the certificate, in `tls/` under Bazhen's state

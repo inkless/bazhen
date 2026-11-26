@@ -1391,7 +1391,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_each_verb_answered_ok_as_its_own_request_and_resolves_on_ok() {
         bazhen_test_signal::require_sandbox().unwrap();
         block_on(async {
@@ -2367,7 +2367,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn says_hello_over_a_holder_s_socket_and_closes_the_terminal_which_removes_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         block_on(async {

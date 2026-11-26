@@ -1,5 +1,5 @@
 //! The daemon's API messages, as the Rust daemon and CLI send and read them: serde types, held to
-//! the fixtures `moon run :schema` writes from the TypeScript protocol (packages/protocol), from
+//! the fixtures `make schema` writes from the TypeScript protocol (packages/protocol), from
 //! which `cargo xtask schema` publishes the protocol's JSON Schema and id; and the checks a client
 //! makes before it asks the daemon. No I/O.
 

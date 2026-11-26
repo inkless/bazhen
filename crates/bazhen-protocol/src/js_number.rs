@@ -195,7 +195,7 @@ mod tests {
         tie: bool,
     }
 
-    /// What Node's `JSON.stringify` writes for each number `moon run :schema` records.
+    /// What Node's `JSON.stringify` writes for each number `make schema` records.
     fn cases() -> Vec<Case> {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../packages/protocol/fixtures/numbers/cases.json");

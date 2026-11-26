@@ -2082,7 +2082,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_while_a_program_runs_in_it_naming_it_and_closes_once_that_is_confirmed() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2115,7 +2115,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_without_asking_a_shell_whose_process_died_before_its_exit_was_seen() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2132,7 +2132,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_without_asking_a_running_shell_whose_holder_died_with_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2149,7 +2149,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_for_the_program_the_user_confirmed_and_refuses_one_started_since() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2175,7 +2175,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_shell_at_its_prompt_without_asking_and_lists_it_no_more() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2192,7 +2192,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn answers_a_repeated_close_the_same_and_one_of_a_closed_shell_with_no_events() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2208,7 +2208,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_a_close_naming_an_earlier_generation_and_a_shell_it_doesnt_know() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2229,7 +2229,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_a_shell_closing_when_its_terminal_cant_be_reached_and_closes_it_by_force() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2314,7 +2314,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn adopts_a_process_started_in_a_shells_terminal_outside_the_daemon_as_it_is_told() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2745,7 +2745,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_lost_shell_reaching_no_terminal_since_none_is_left() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);
@@ -2808,7 +2808,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn gives_a_shells_slot_back_once_it_is_closed() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(1);

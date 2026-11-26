@@ -998,7 +998,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_a_respawn_with_no_answer_requested_still_settling_until_it_settles_on_what_runs() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -1048,7 +1048,7 @@ mod tests {
     /// The watch rejects a respawn with no clear answer whose process hasn't started, as
     /// unconfirmed; the process its holder starts after all is adopted when told, and starts.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn adopts_the_process_of_a_respawn_the_watch_rejected_when_its_late_start_is_told() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -1098,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_a_relaunch_whose_create_had_no_answer_requested_then_rejects_it_where_nothing_runs() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -1171,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_launch_whose_create_had_no_answer_through_the_holder_found_for_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let f = setup_with(crate::agents::tests::Setup::default());
@@ -1185,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_launch_whose_create_had_no_answer_once_no_holder_could_have_started_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let f = setup_with(crate::agents::tests::Setup::default());
@@ -1203,7 +1203,7 @@ mod tests {
     /// One not yet proved unstarted is left closing, which force records closed; a close after
     /// the proof records it so too, as the reconcile does.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_a_close_of_a_start_not_proved_unstarted_closing_for_force_or_its_proof() {
         bazhen_test_signal::require_sandbox().unwrap();
         let ends = [true, false].map(|force| {
@@ -1242,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_respawn_whose_answer_was_lost_through_the_holder_it_was_asked_of() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -1366,7 +1366,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn records_a_respawn_a_dead_daemon_left_respawned_where_its_next_generation_runs() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -1386,7 +1386,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn records_a_respawn_a_dead_daemon_left_on_the_session_it_resumed_not_its_terminals_first() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -1413,7 +1413,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn rejects_a_respawn_a_dead_daemon_left_then_loses_the_agent_where_nothing_runs() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -1620,7 +1620,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn answers_the_waiter_of_an_agent_however_its_close_is_recorded() {
         bazhen_test_signal::require_sandbox().unwrap();
         let f = setup_with(crate::agents::tests::Setup::default());

@@ -7,7 +7,7 @@ import type { Presence } from "./presence.ts";
 /** Shows one notification on the host's desktop. */
 export type Notify = (title: string, body: string) => void;
 
-/** Bazhen.app where `moon run :build-notify` builds it by default. */
+/** Bazhen.app where `make build-notify` builds it by default. */
 export const MAC_APP = fileURLToPath(
   new URL("../../../notify-mac/dist/Bazhen.app", import.meta.url),
 );

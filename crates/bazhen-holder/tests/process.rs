@@ -324,7 +324,7 @@ fn the_child_leads_a_session_whose_controlling_terminal_is_the_pty() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn the_child_gets_no_fd_the_holder_opened() {
     bazhen_test_signal::require_sandbox().unwrap();
     let before = own_fds().unwrap();
@@ -440,7 +440,7 @@ fn an_exit_status_is_exact() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_hangs_up_the_foreground_group_as_well_as_the_childs() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("foreground").unwrap();
@@ -460,7 +460,7 @@ fn a_close_hangs_up_the_foreground_group_as_well_as_the_childs() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_continues_a_stopped_child_so_it_acts_on_the_hangup() {
     bazhen_test_signal::require_sandbox().unwrap();
     let mut running = start(&["sh", "-c", "kill -s STOP $$; exit 5"]).unwrap();
@@ -477,7 +477,7 @@ fn a_close_continues_a_stopped_child_so_it_acts_on_the_hangup() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_kills_a_child_that_ignores_the_hangup_once_the_grace_is_over() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("ignores-hup").unwrap();
@@ -549,7 +549,7 @@ fn fifty_spawns_leave_no_fd_behind() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_kills_the_childs_whole_group_once_the_grace_is_over() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("group").unwrap();
@@ -661,7 +661,7 @@ fn pids_in(path: &Path) -> Result<Vec<Pid>> {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_ends_background_jobs_in_groups_of_their_own_a_nohup_one_included() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("jobs").unwrap();
@@ -683,7 +683,7 @@ fn a_close_ends_background_jobs_in_groups_of_their_own_a_nohup_one_included() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_background_job_that_traps_the_hangup_is_sent_it() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("trapping-job").unwrap();
@@ -698,7 +698,7 @@ fn a_background_job_that_traps_the_hangup_is_sent_it() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_after_the_child_exited_ends_what_it_left_running() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("straggler").unwrap();
@@ -713,7 +713,7 @@ fn a_close_after_the_child_exited_ends_what_it_left_running() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn closing_an_exited_child_with_nothing_left_ends_without_waiting_out_the_grace() {
     bazhen_test_signal::require_sandbox().unwrap();
     let mut running = start(&["true"]).unwrap();
@@ -730,7 +730,7 @@ fn closing_an_exited_child_with_nothing_left_ends_without_waiting_out_the_grace(
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn an_exited_child_is_left_unreaped_until_its_session_has_ended() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("pinned").unwrap();
@@ -806,7 +806,7 @@ fn hold(pid: Pid) -> Result<OwnedFd> {
 
 #[test]
 #[cfg(target_os = "linux")]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_hangs_up_a_child_whose_first_thread_has_exited_while_another_runs() {
     bazhen_test_signal::require_sandbox().unwrap();
     let mut running = start(&["perl", "-e", FIRST_THREAD_EXITS, "/dev/null"]).unwrap();
@@ -824,7 +824,7 @@ fn a_close_hangs_up_a_child_whose_first_thread_has_exited_while_another_runs() {
 
 #[test]
 #[cfg(target_os = "linux")]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_close_ends_a_job_whose_first_thread_has_exited_while_another_runs() {
     bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("first-thread-job").unwrap();

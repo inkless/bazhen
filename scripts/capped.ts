@@ -91,7 +91,7 @@ const USAGE =
 export function parseArgs(argv: readonly string[]): Invocation {
   const split = argv.indexOf("--");
   const options = split < 0 ? [] : argv.slice(0, split);
-  // `moon run :capped -- cargo test` hands on its own `--` as well.
+  // `make capped ARGS='cargo test'` hands on its own `--` as well.
   const rest = argv.slice(split + 1);
   const [command, ...args] = rest[0] === "--" ? rest.slice(1) : rest;
   if (split < 0 || command === undefined) throw new Error(USAGE);

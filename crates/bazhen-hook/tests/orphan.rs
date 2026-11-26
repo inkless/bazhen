@@ -171,7 +171,7 @@ fn read_then_unread(
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_held_waiter_ends_quietly_once_nothing_reads_it_and_waits_on_while_read() -> Result<()> {
     bazhen_test_signal::require_sandbox()?;
     assert_eq!(read_then_unread(Daemon::Holds, "held", 1)?, (None, Some(0)));
@@ -179,7 +179,7 @@ fn a_held_waiter_ends_quietly_once_nothing_reads_it_and_waits_on_while_read() ->
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_waiter_asking_again_ends_quietly_once_nothing_reads_it_and_asks_on_while_read() -> Result<()> {
     bazhen_test_signal::require_sandbox()?;
     assert_eq!(
@@ -259,7 +259,7 @@ impl Drop for Orphan {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn the_scripts_waiter_stops_asking_once_its_parent_has_gone_and_asks_on_under_its_parent()
 -> Result<()> {
     bazhen_test_signal::require_sandbox()?;

@@ -1,5 +1,5 @@
 // What crates/bazhen-daemon's failure detail is held to: each text as the TypeScript daemon's
-// `failureDetail` answers with it, secrets taken out and cut. `moon run :schema` writes them to
+// `failureDetail` answers with it, secrets taken out and cut. `make schema` writes them to
 // packages/protocol/fixtures/details/.
 //
 // Beside the cases the daemon's own tests read, each place a JavaScript pattern means something a

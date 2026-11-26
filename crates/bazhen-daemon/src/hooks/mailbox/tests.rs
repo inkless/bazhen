@@ -628,7 +628,7 @@ fn leaves_a_forgotten_agents_mail_alone_for_a_step_that_comes_after() {
 /// mailbox held of it, an offer awaiting its ack, goes, and the agent is marked so that no step
 /// touches its mail again.
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn forgets_a_closed_agents_mail_and_the_offers_it_held() {
     bazhen_test_signal::require_sandbox().unwrap();
     let f = fixture(long());

@@ -1888,7 +1888,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn attaches_on_the_holders_snapshot_and_delivers_what_follows_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -1910,7 +1910,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn attaches_with_the_history_depth_its_holder_says_it_keeps() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -1921,7 +1921,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn tells_a_respawn_before_the_next_processs_bytes_and_nothing_of_a_switch_of_screen() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -1949,7 +1949,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_stream_that_fell_behind_and_one_whose_holder_hung_up_saying_which() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -1979,7 +1979,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn waits_for_the_reader_to_report_the_applied_size_after_the_writer_accepts_a_resize() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2017,7 +2017,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn reports_the_confirmed_reader_geometry_if_an_accepted_resize_produced_no_change() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2034,7 +2034,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_every_streams_input_and_resize_on_one_writer_connection_apart_from_its_reader() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2060,7 +2060,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn opens_a_new_writer_connection_only_once_the_old_one_has_hung_up() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2101,7 +2101,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn asks_again_for_a_writer_slot_another_connection_holds_then_says_so_to_streams_later_too() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2128,7 +2128,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn asks_again_for_the_writer_slot_after_each_wait_in_turn_then_gives_up() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2157,7 +2157,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn takes_a_respawn_sent_before_the_attachs_snapshot_as_what_it_shows() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2179,7 +2179,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn tells_a_stream_its_processs_exit_in_order_with_the_output_once_and_never_a_replaced_ones() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2209,7 +2209,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_input_past_what_a_terminal_holds_unsent_and_sends_none_of_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2231,7 +2231,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_a_streams_input_to_no_other_holder_that_takes_the_terminals_socket() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2254,7 +2254,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn holds_a_streams_snapshot_until_the_stream_has_delivered_every_byte_before_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2279,7 +2279,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn settles_a_held_snapshot_once_a_respawn_carries_the_stream_past_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2303,7 +2303,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn rejects_a_pending_snapshot_once_the_stream_has_closed_after_its_closed_event() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2328,7 +2328,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn tells_the_size_a_resize_before_the_attachs_snapshot_set_and_not_as_a_resize() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2349,7 +2349,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn tells_a_failure_once_until_input_works_again() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2379,7 +2379,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn ends_the_control_connection_of_a_holder_that_stops_taking_input_once_it_has_drained_no_more()
     {
         bazhen_test_signal::require_sandbox().unwrap();
@@ -2411,7 +2411,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn hangs_up_the_control_connection_of_a_terminal_it_closes() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2434,7 +2434,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn writes_through_a_terminals_control_connection_with_no_stream_open() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2475,7 +2475,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_what_a_guard_wrote_before_it_dropped() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2497,7 +2497,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn gives_up_the_input_a_dropped_guard_left_once_its_drain_has_passed() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2528,7 +2528,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn ends_a_stream_whose_consumer_stalls_behind_once_it_reads_again() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2571,7 +2571,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn reconnects_the_users_left_of_a_closed_terminal_only_once_its_old_connection_hung_up() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {
@@ -2605,7 +2605,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn hangs_up_the_control_connection_of_a_terminal_whose_close_was_dropped_part_way() {
         bazhen_test_signal::require_sandbox().unwrap();
         run(async {

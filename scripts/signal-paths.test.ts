@@ -1338,7 +1338,7 @@ describe("signalling sources", () => {
 describe("signalling tests", () => {
   it("counts a Rust test ignored as signalling, and the holder and soak suites", () => {
     const ignored =
-      '#[test]\n#[ignore = "signals processes; runs in moon run :test-real -- rust"]\nfn t() {}';
+      '#[test]\n#[ignore = "signals processes; runs in make test-real ARGS=rust"]\nfn t() {}';
     expect(isSignallingTest("crates/x/tests/a.rs", ignored)).toBe(true);
     expect(isSignallingTest("tests/holder/holder.test.ts", "")).toBe(true);
     expect(isSignallingTest("tests/soak/soak.test.ts", "")).toBe(true);
@@ -1355,7 +1355,7 @@ describe("signalling tests", () => {
 
   it("matches the reason among other strings, by its position", () => {
     const source =
-      'const A: &str = "a";\n#[ignore = "signals processes; runs in moon run :test-real -- rust"]\nfn t() {}';
+      'const A: &str = "a";\n#[ignore = "signals processes; runs in make test-real ARGS=rust"]\nfn t() {}';
     expect(isSignallingTest("a.rs", source)).toBe(true);
   });
 });

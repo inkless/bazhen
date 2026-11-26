@@ -37,7 +37,7 @@ impl Drop for Home {
     }
 }
 
-/// The daemon, copied under `home` as `moon run :build` lays it out, with the holder the
+/// The daemon, copied under `home` as `make build` lays it out, with the holder the
 /// workspace's tests build beside it: a daemon whose default runtime is the holder refuses to
 /// start with no holder build, as `main.ts` does, and cargo builds none at `release-holder`.
 /// The holder is the one cargo built beside this daemon, in the same profile's directory.
@@ -240,7 +240,7 @@ fn stopped_by(name: &str, signal: Signal) -> Res<(Option<i32>, bool, bool)> {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn sigterm_stops_it_with_0_saying_so_and_leaves_no_socket() {
     bazhen_test_signal::require_sandbox().unwrap();
     assert_eq!(
@@ -250,7 +250,7 @@ fn sigterm_stops_it_with_0_saying_so_and_leaves_no_socket() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn sigint_stops_it_with_0_saying_so_and_leaves_no_socket() {
     bazhen_test_signal::require_sandbox().unwrap();
     assert_eq!(
@@ -260,7 +260,7 @@ fn sigint_stops_it_with_0_saying_so_and_leaves_no_socket() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn a_second_signal_ends_the_drain_at_once() {
     bazhen_test_signal::require_sandbox().unwrap();
     let home = Home::new("second").unwrap();
@@ -359,7 +359,7 @@ fn a_shell_that_ignores_sigchld_leaves_what_it_execs_ignoring_it() {
 /// any child, so the kernel keeps each one for it to wait for.
 #[test]
 #[cfg(target_os = "linux")]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn started_with_sigchld_ignored_it_gives_sigchld_its_default() {
     bazhen_test_signal::require_sandbox().unwrap();
     let home = Home::new("sigchld").unwrap();
@@ -378,7 +378,7 @@ fn started_with_sigchld_ignored_it_gives_sigchld_its_default() {
 /// It runs only on a disposable host all the same: a daemon past its refusal would go on to its
 /// start-up steps, and nothing here can show those come after it.
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn refuses_to_start_with_no_holder_build_to_run_new_terminals_on() {
     bazhen_test_signal::require_sandbox().unwrap();
     let home = Home::new("no-holder").unwrap();
@@ -419,7 +419,7 @@ fn refuses_to_start_with_no_holder_build_to_run_new_terminals_on() {
     assert_eq!(code, Some(1), "{said}");
     assert!(
         said.contains("bazhen: no holder can be started for new terminals: ")
-            && said.contains("release-holder/bazhen-holder isn't built; run `moon run :build`")
+            && said.contains("release-holder/bazhen-holder isn't built; run `make build`")
             && said.contains("set runtime.default = \"tmux\" in "),
         "{said}"
     );

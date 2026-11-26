@@ -542,11 +542,11 @@ describe("attributeFailures", () => {
   it("lets a test that signals processes it didn't start be ignored, by that reason alone", () => {
     const source = [
       "#[test]",
-      '#[ignore = "signals processes; runs in moon run :test-real -- rust"]',
+      '#[ignore = "signals processes; runs in make test-real ARGS=rust"]',
       "fn a() { bazhen_test_signal::require_sandbox().unwrap(); }",
       '#[ignore = "signals processes"]',
-      '#![ignore = "signals processes; runs in moon run :test-real -- rust"]',
-      '#[cfg_attr(test, ignore = "signals processes; runs in moon run :test-real -- rust")]',
+      '#![ignore = "signals processes; runs in make test-real ARGS=rust"]',
+      '#[cfg_attr(test, ignore = "signals processes; runs in make test-real ARGS=rust")]',
     ].join("\n");
     expect(scan(source).map((f) => f.split(": ")[0])).toEqual([
       "crates/x/src/a.rs:4",
@@ -555,8 +555,7 @@ describe("attributeFailures", () => {
     ]);
   });
   it("requires such a test to refuse to run off a sandbox, before anything else", () => {
-    const ignored =
-      '#[test]\n#[ignore = "signals processes; runs in moon run :test-real -- rust"]\n';
+    const ignored = '#[test]\n#[ignore = "signals processes; runs in make test-real ARGS=rust"]\n';
     const source = [
       `${ignored}fn a() {\n    bazhen_test_signal::require_sandbox().unwrap();\n    sweep();\n}`,
       `${ignored}fn b() -> Result<()> { bazhen_test_signal::require_sandbox()?; Ok(()) }`,
@@ -1396,13 +1395,13 @@ describe("cappedScriptFailures", () => {
     const flagged = [expect.stringContaining("passes capped `--memory-kills-counted`")];
     expect([
       cappedScriptFailures(
-        "moon.toml",
+        "Makefile",
         { "test-falsify": `${counted} node scripts/falsify.ts` },
-        "task",
+        "recipe",
         may,
       ),
-      cappedScriptFailures("moon.toml", { "test-medium": `${counted} vitest run` }, "task", may),
-      cappedScriptFailures("moon.toml", { capped: `${counted} sh -c true` }, "task", may),
+      cappedScriptFailures("Makefile", { "test-medium": `${counted} vitest run` }, "recipe", may),
+      cappedScriptFailures("Makefile", { capped: `${counted} sh -c true` }, "recipe", may),
       cappedScriptFailures("package.json", {
         "test-falsify": `${counted} node scripts/falsify.ts`,
       }),
@@ -4905,7 +4904,7 @@ const testIn = (crate: string, call: string) => ({
 });
 
 describe("tests that signal processes they didn't start", () => {
-  const MARK = '#[ignore = "signals processes; runs in moon run :test-real -- rust"]';
+  const MARK = '#[ignore = "signals processes; runs in make test-real ARGS=rust"]';
   const marked = `#[test]\n${MARK}\nfn m() {\n    bazhen_test_signal::require_sandbox().unwrap();\n}`;
 
   it("must be marked in a binary that runs the holder, in any of its files", () => {

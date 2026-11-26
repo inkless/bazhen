@@ -784,7 +784,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn waits_for_a_users_close_of_a_kept_shell_rather_than_close_it_under_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let h = setup(100);

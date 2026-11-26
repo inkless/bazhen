@@ -511,7 +511,7 @@ fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, &State)>) {
             tracing::info!("bazhen: serving the web app from {}", bundle.display());
         }
         Some((bundle, State::Unbuilt)) => tracing::info!(
-            "bazhen: the web app isn't built ({}); `moon run :build` builds it, serving only the API until then",
+            "bazhen: the web app isn't built ({}); `make build` builds it, serving only the API until then",
             bundle.display()
         ),
         Some((bundle, State::Refused(why))) => tracing::warn!(
@@ -1969,7 +1969,7 @@ mod tests {
     // Sandbox-only by name alone: end_terminals also shuts the shells' terminals down, which the
     // signal scan follows to a holder's close; with no shells and a stub hub it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_every_stream_even_when_it_is_told_to_hurry() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {

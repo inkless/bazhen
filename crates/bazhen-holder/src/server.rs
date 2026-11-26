@@ -1519,7 +1519,7 @@ mod tests {
     /// connection answers it, rather than the next, which in a flood would first read the master
     /// again.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_hello_already_sent_is_answered_in_the_turn_that_accepts_its_connection() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut held = Failing::with("hello-turn", "exec sleep 30", crate::engine::engine, 100);
@@ -1546,7 +1546,7 @@ mod tests {
     /// The turn that answers a newcomer's `hello` reads the child's output too, so newcomers
     /// that keep coming can't hold a flood up.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_turn_that_answers_a_hello_reads_the_flood_too() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut held = Failing::with("hello-flood-turn", "exec yes", crate::engine::engine, 100);
@@ -1578,7 +1578,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_holder_whose_engine_fails_keeps_its_child_and_answers_with_a_new_engine() {
         bazhen_test_signal::require_sandbox().unwrap();
         let script = "stty -echoctl; printf '<fail>'; sleep 0.2; printf '\\033[6n'; exec sleep 30";
@@ -1593,7 +1593,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_holder_whose_engine_keeps_failing_runs_on_without_one() {
         bazhen_test_signal::require_sandbox().unwrap();
         let script = "while :; do printf '<fail>'; sleep 0.02; done";
@@ -1780,7 +1780,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn snapshots_owed_across_connections_stay_under_the_bound_and_one_held_is_served_once_read() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut big = Failing::big("snapshot-bound", 2, NEVER);
@@ -1811,7 +1811,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn only_a_peer_stuck_owing_a_snapshot_is_dropped_for_one_that_waits_and_never_the_writer() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut big = Failing::big("snapshot-evict", 10, NEVER);
@@ -1913,7 +1913,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_close_ends_once_all_owed_is_written_and_not_before_its_time_if_not() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("close-done", "exit 0");
@@ -1942,7 +1942,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_subscriber_is_pushed_the_title_and_the_switch_to_the_alternate_screen() {
         bazhen_test_signal::require_sandbox().unwrap();
         let script = "read _; printf '\\033]0;hi\\007\\033[?1049h'; exec sleep 30";
@@ -1978,7 +1978,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_snapshot_draws_the_screen_once() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("snapshot-once", "printf 'xyzzy'; exec sleep 30");
@@ -2011,7 +2011,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_connection_without_the_writer_slot_reads_the_screen_and_history_as_text() {
         bazhen_test_signal::require_sandbox().unwrap();
         let script = "for n in $(seq 1 30); do printf '%s\\r\\n' $n; done; printf '\\033[31mred'; exec sleep 30";
@@ -2029,7 +2029,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_screen_is_read_after_its_child_has_exited() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("screen-exited", "printf 'last words'");
@@ -2041,7 +2041,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_screen_with_no_engine_left_is_refused_unavailable() {
         bazhen_test_signal::require_sandbox().unwrap();
         let script = "while :; do printf '<fail>'; sleep 0.02; done";
@@ -2056,7 +2056,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_subscription_from_an_offset_streams_from_that_offset() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("subscribe-from", "printf '0123456789'; exec sleep 30");
@@ -2089,7 +2089,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_subscription_after_a_snapshot_of_a_terminal_yet_to_write_is_answered() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("subscribe-at-zero", "exec sleep 30");
@@ -2112,7 +2112,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_respawn_sent_before_hello_is_refused_and_respawns_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("respawn-first", "exec sleep 30");
@@ -2144,7 +2144,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn an_accept_with_no_connection_waiting_goes_on_accepting() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("accept-idle", "sleep 30");
@@ -2181,7 +2181,7 @@ mod tests {
     /// A newcomer to a full holder is safe from the next for `NEW_GRACE`, read or not, whichever
     /// turns the two arrive in, and no longer: then, unread, it is the first replaced.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_newcomer_is_safe_from_the_next_for_its_grace_and_no_longer() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("newcomer", "exec sleep 30");
@@ -2203,7 +2203,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn the_writers_snapshot_is_answered_before_older_ones() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut big = Failing::big("snapshot-writer-first", 1, NEVER);
@@ -2241,7 +2241,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_snapshot_that_waited_longest_is_answered_before_a_newer_one() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut big = Failing::big("snapshot-order", 1, NEVER);
@@ -2278,7 +2278,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_subscribe_sent_with_a_snapshot_starts_at_its_offset_though_the_snapshot_holds_it_a_turn() {
         bazhen_test_signal::require_sandbox().unwrap();
         let script = format!("{BIG}; while :; do echo tick; sleep 0.005; done");
@@ -2324,7 +2324,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_subscriber_that_snapshots_again_while_output_goes_on_is_sent_no_byte_twice() {
         bazhen_test_signal::require_sandbox().unwrap();
         let script = format!("{BIG}; while :; do echo tick; sleep 0.005; done");
@@ -2391,7 +2391,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_subscribe_after_a_snapshot_a_respawn_overtook_is_refused() {
         bazhen_test_signal::require_sandbox().unwrap();
         // Output after the snapshot, which the respawn then overtakes.
@@ -2467,7 +2467,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_snapshot_whose_engine_fails_once_comes_from_the_empty_engine_after_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut failing = Failing::start("snapshot-fails-once", "printf before; exec sleep 30");
@@ -2489,7 +2489,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_snapshot_whose_engine_fails_twice_is_refused_failed() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut failing = Failing::start("snapshot-fails-twice", "exec sleep 30");
@@ -2502,7 +2502,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_writer_that_still_owes_a_snapshot_waits_its_turn_for_the_next() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut failing = Failing::with("writer-loop", "exec sleep 30", crate::engine::engine, 100);
@@ -2533,7 +2533,7 @@ mod tests {
     /// its new connection both come after the turn's `poll`, as when the loop was busy: the turn
     /// that accepts the newcomer reads the open connections again first.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_writer_that_reconnects_after_the_turn_s_poll_finds_its_slot_free() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut held = Failing::with("writer-back", "exec sleep 30", crate::engine::engine, 100);
@@ -2591,7 +2591,7 @@ mod tests {
     /// they do when a writer hangs up and reconnects at once: the newcomer's `hello`, read in a
     /// later turn, finds the slot free.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_writers_hang_up_frees_the_slot_for_a_hello_in_the_next_turn() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut failing = Failing::start("writer-hands-over", "exec sleep 30");

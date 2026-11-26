@@ -11,42 +11,40 @@ client. Agents, tasks, and orchestration come later.
 
 - Node.js 24 or newer (development uses the version `.nvmrc` pins)
 - pnpm 12 (pinned through `packageManager`)
-- [proto](https://moonrepo.dev/docs/proto/install), which installs moon, the repository's task
-  runner, at the version `.prototools` pins
+- GNU Make 3.81 or newer, the repository's task runner: macOS ships 3.81
 - tmux 3.x, only for terminals on tmux (`runtime.default = "tmux"`); 3.5 or later avoids a crash
   Bazhen can only work around before it ([docs/tmux.md](docs/tmux.md))
 - Rust through rustup, which installs the toolchain `rust-toolchain.toml` pins on first use, and
-  once per machine the cargo tools `moon run :check` and `moon run :test-falsify` run:
+  once per machine the cargo tools `make check` and `make test-falsify` run:
   `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2 cargo-mutants@27.1.0`
 - macOS or Linux
-- For the tests that run real tmux, Docker, or Podman with its `docker` shim (`moon run :test-real`)
+- For the tests that run real tmux, Docker, or Podman with its `docker` shim (`make test-real`)
 
 ## Setup
 
-Install proto once per machine, then, in the checkout:
+In the checkout:
 
 ```sh
-proto install                   # moon, at the version .prototools pins
 pnpm install --frozen-lockfile  # the dependencies, and the git hooks
-moon run :check                 # every check CI runs on a workstation
+make check                      # every check CI runs on a workstation
 ```
 
-Every command is a moon task: `moon tasks` lists them, and `moon run :<task> -- <args>` passes
-arguments on to the task's command.
+Every command is a make target: `make help` lists them, and `make <target> ARGS='<args>'` passes
+arguments on to the target's command, which reads them as its shell would.
 
 ## Commands
 
-| Command                             | Does                                                                                                                                     |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm install --frozen-lockfile`    | Install exactly what the lockfile records, and the git hooks (husky)                                                                     |
-| `moon run :dev`                     | Start the daemon (`http://127.0.0.1:7900`) and the web dev server (`http://127.0.0.1:7901`); no vite keyboard shortcuts                  |
-| `moon run :bazhen -- <noun> <verb>` | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `devices [list \| pair \| revoke <id> \| dismiss <id>]`, and the rest below |
-| `moon run :check`                   | Standards check, lint, format check, type-check, small and medium tests, clippy, cargo-deny, nextest                                     |
-| `moon run :test`                    | Small tests                                                                                                                              |
-| `moon run :test-real -- [suite…]`   | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                                      |
-| `moon run :test-falsify`            | Run the branch's new tests against the base's source, Rust ones against mutants of the change; CI runs it on PRs                         |
-| `moon run :build`                   | Compile packages to `dist/`, build the web bundle, which the daemon serves at `http://127.0.0.1:7900`, and the holder                    |
-| `moon run :format`                  | Rewrite files with oxfmt and rustfmt                                                                                                     |
+| Command                            | Does                                                                                                                                     |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile`   | Install exactly what the lockfile records, and the git hooks (husky)                                                                     |
+| `make dev`                         | Start the daemon (`http://127.0.0.1:7900`) and the web dev server (`http://127.0.0.1:7901`); no vite keyboard shortcuts                  |
+| `make bazhen ARGS='<noun> <verb>'` | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `devices [list \| pair \| revoke <id> \| dismiss <id>]`, and the rest below |
+| `make check`                       | Standards check, lint, format check, type-check, small and medium tests, clippy, cargo-deny, nextest                                     |
+| `make test`                        | Small tests                                                                                                                              |
+| `make test-real ARGS='[suite…]'`   | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                                      |
+| `make test-falsify`                | Run the branch's new tests against the base's source, Rust ones against mutants of the change; CI runs it on PRs                         |
+| `make build`                       | Compile packages to `dist/`, build the web bundle, which the daemon serves at `http://127.0.0.1:7900`, and the holder                    |
+| `make format`                      | Rewrite files with oxfmt and rustfmt                                                                                                     |
 
 Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).
 
@@ -54,7 +52,7 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 
 - `apps/daemon` — the service: configuration and paths, HTTP API, SQLite store, PTY seam
 - `crates/bazhen` — `bazhen`, the command agents and people run, a client of the daemon's Unix
-  socket (Rust); `moon run :build` builds it at `target/release/bazhen`. `bazhen start` finds the
+  socket (Rust); `make build` builds it at `target/release/bazhen`. `bazhen start` finds the
   checkout from the binary's resolved path, three levels up, so link to the binary rather than
   copy it, and keep it under the checkout: a `CARGO_TARGET_DIR` elsewhere breaks `start`.
   Agents run `bazhen` from their PATH, so link it into a directory on the PATH they start with,
@@ -132,7 +130,7 @@ Each line of history costs memory in every view of a terminal, and in the daemon
 tmux terminal: at 100,000 lines of 200 columns, a full history is roughly 240 MB per view.
 
 Desktop notifications go through `notify-send` on Linux, and on macOS through Bazhen's own
-notifier app, which `moon run :build-notify` builds with Xcode's command-line tools (restart the
+notifier app, which `make build-notify` builds with Xcode's command-line tools (restart the
 daemon after). The first notification asks for permission for "Bazhen"; clicking one opens the
 inbox. `bazhen doctor` says when the app isn't built.
 
@@ -181,14 +179,14 @@ fingerprint ([docs/lan.md](docs/lan.md)).
 Otherwise Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
 own route to that port that runs on this machine, such as a local reverse proxy: a proxy on
 another host can't reach a loopback port. [docs/caddy.md](docs/caddy.md) sets up Caddy, with
-your own domain or without one. Build the web app (`moon run :build`), point the route at the
+your own domain or without one. Build the web app (`make build`), point the route at the
 daemon, `http://127.0.0.1:7900`, which serves the built app as well as the API, and list the address
 it presents, exactly as the browser shows it (scheme, host and any port), in
 `BAZHEN_EXTERNAL_ORIGINS` or `web.external_origins`:
-`BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com moon run :bazhen -- start`. The daemon then
+`BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com make bazhen ARGS=start`. The daemon then
 accepts that address, and refuses every other non-loopback one; it logs it at start, and
 `bazhen doctor` lists it. Build again after you pull: the daemon serves whatever was built last,
-from the next page load on. Never point a route at the web dev server (`moon run :dev`, port 7901):
+from the next page load on. Never point a route at the web dev server (`make dev`, port 7901):
 it serves the repository's source. It refuses a request with another Host, another page's Origin, or
 a proxy's forwarding header, but a forwarder that presents a loopback Host and adds no header
 (`socat`, `ssh -R`, a proxy set to rewrite Host) gets through, and with it the source. Plain
@@ -444,7 +442,7 @@ keeps the environment of whatever started it, which can be a `codex app-server d
 `codex update` run inside an agent. So each agent's thread also sets `BAZHEN_AGENT_ID` and
 `BAZHEN_AGENT_AUTH_FILE` empty, and under the server the thread alone says which agent a call is. The daemon knows
 the server by its command line (`codex` or `codex-<platform>`, run as `app-server`), so a Codex
-that renames its binary or that subcommand would be missed; `moon run :test-real -- api` checks the
+that renames its binary or that subcommand would be missed; `make test-real ARGS=api` checks the
 Codex the tests install, and `bazhen doctor` warns when a live Codex agent's server doesn't match.
 
 Every Codex agent's commands run under the same server, so only the thread a call names tells one
@@ -497,4 +495,4 @@ been checked on a Mac; how far the start time and session checks cover that ther
 Without the peer reader, the daemon can't read which process calls. Then a call from inside an
 agent that presents nothing passes as yours, and one that presents another agent's token, which
 it can read, passes as that agent. The daemon warns at start, and `bazhen doctor` shows
-`peer reader: none`. `moon run :build` builds `bazhen-peer`, which the daemon installs at start.
+`peer reader: none`. `make build` builds `bazhen-peer`, which the daemon installs at start.

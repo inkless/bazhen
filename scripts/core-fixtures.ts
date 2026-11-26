@@ -1,6 +1,6 @@
 // What packages/core decides, recorded for the Rust crates that decide it too: each machine's
 // every state and event, the commands an agent is offered in each state, how Bazhen labels and
-// quotes mail, and which role files resolve. `moon run :schema` writes it to
+// quotes mail, and which role files resolve. `make schema` writes it to
 // packages/protocol/fixtures/core/, where crates/bazhen-core's tests read it.
 
 import {

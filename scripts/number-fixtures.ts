@@ -1,5 +1,5 @@
 // What crates/bazhen-protocol's js_number is held to: numbers as Node's JSON.stringify writes them.
-// `moon run :schema` writes them to packages/protocol/fixtures/numbers/. Each number is given by
+// `make schema` writes them to packages/protocol/fixtures/numbers/. Each number is given by
 // its IEEE 754 bits, since a decimal would be read back through the very rounding under test.
 //
 // Most are ties: dyadic numbers whose exact decimal is one digit longer than the shortest digits

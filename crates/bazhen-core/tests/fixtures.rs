@@ -1,4 +1,4 @@
-//! The crate against what `moon run :schema` records of packages/core and of the TypeScript
+//! The crate against what `make schema` records of packages/core and of the TypeScript
 //! daemon's role files (packages/protocol/fixtures/core/ and fixtures/roles/): every machine's
 //! every state and event, every command offered, every mail label, every resolution of role files
 //! and every role file's text, each with the same answer in the same words. A fixture file no test

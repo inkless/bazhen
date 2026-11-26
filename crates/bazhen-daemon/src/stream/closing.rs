@@ -121,7 +121,7 @@ mod tests {
     // Sandbox-only by name alone: it calls ClosingBudget::close, which the signal scan can't tell
     // from a holder stream's close; it only counts bytes, and signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn ends_the_oldest_closing_streams_past_the_budget_but_never_the_one_closing_now() {
         bazhen_test_signal::require_sandbox().unwrap();
         let budget = ClosingBudget::new(10);
@@ -141,7 +141,7 @@ mod tests {
     // Sandbox-only by name alone: it calls ClosingBudget::close, which the signal scan can't tell
     // from a holder stream's close; it only counts bytes, and signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn counts_a_closing_stream_only_for_what_it_still_holds_and_forgets_one_once_it_has_closed() {
         bazhen_test_signal::require_sandbox().unwrap();
         let budget = ClosingBudget::new(10);
