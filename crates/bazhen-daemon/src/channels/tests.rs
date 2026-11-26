@@ -38,6 +38,7 @@ struct Fixture {
     tracker: TaskTracker,
     stop: CancellationToken,
     _dir: TempDir,
+    _codex: TempDir,
     thread: Option<Thread>,
 }
 
@@ -82,7 +83,8 @@ fn fixture() -> Fixture {
         crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
     let home = dir.path().join("home");
     std::fs::create_dir_all(home.join("repo")).unwrap();
-    let codex_home = dir.path().join("codex");
+    let codex = TempDir::short("cx");
+    let codex_home = codex.path().to_path_buf();
     std::fs::create_dir_all(codex_home.join("app-server-control")).unwrap();
     let hooks = Arc::new(Hooks::default());
     // Launched by a harness of the test's under Codex's id, as Codex launches only over its server.
@@ -130,6 +132,7 @@ fn fixture() -> Fixture {
         tracker: TaskTracker::new(),
         stop: CancellationToken::new(),
         _dir: dir,
+        _codex: codex,
         thread: Some(thread),
     };
     f.set_running();

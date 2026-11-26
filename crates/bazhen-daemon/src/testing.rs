@@ -77,9 +77,19 @@ pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
     pub(crate) fn new(name: &str) -> Self {
+        Self::under(&std::env::temp_dir(), name)
+    }
+
+    /// One under `/tmp`, for a socket bound at a long fixed path below it, as Codex's is: macOS's
+    /// temp dir alone takes half of the 104 bytes a socket's path can have there.
+    pub(crate) fn short(name: &str) -> Self {
+        Self::under(Path::new("/tmp"), name)
+    }
+
+    fn under(root: &Path, name: &str) -> Self {
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("bz-daemon-{name}-{}-{n}", std::process::id()));
+        let dir = root.join(format!("bz-daemon-{name}-{}-{n}", std::process::id()));
         std::fs::create_dir(&dir).unwrap();
         Self(dir)
     }
