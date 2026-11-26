@@ -996,6 +996,8 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to edge::edge for ResendAttentionRequest, which the protocol's edge target fuzzes; reads the path only as the item's id, for the store to look up",
   "crates/bazhen-daemon/src/task_verbs.rs::note":
     "hands its body to edge::edge for AddTaskNoteRequest, which the protocol's edge target fuzzes; reads the path only as the task's id, through TaskId::parse, for the store to look up",
+  "crates/bazhen-daemon/src/task_verbs.rs::assign":
+    "hands its body to edge::edge for AssignTaskRequest, which the protocol's edge target fuzzes; reads the path only as the task's id, through TaskId::parse, for the store to look up",
   "crates/bazhen-daemon/src/hooks.rs::hook":
     "hands its body to edge::edge for HookRequest, which the protocol's edge target fuzzes; decodes nothing itself",
   "crates/bazhen-daemon/src/hooks.rs::ack":
@@ -5183,6 +5185,10 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
   "crates/bazhen-hook/src/pane_title.rs": {
     names: ['"codex'],
     why: "the pane-title hook, which posts a Codex TUI's title to its route",
+  },
+  "crates/bazhen-daemon/src/task_mail.rs": {
+    names: ['"claude-code', '"codex'],
+    why: "the task brief, verbatim as the TypeScript daemon gives it: its delegate line names the harnesses --launch takes",
   },
   "crates/bazhen-daemon/src/agents/prompts.rs": {
     names: ['"claude-code', '"codex'],

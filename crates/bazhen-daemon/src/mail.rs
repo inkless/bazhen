@@ -3,7 +3,6 @@
 //! takes by push is handed to it (`codex/mail.ts`'s `deliver`). A harness that takes none refuses
 //! the send, as does one that takes none for the agent now.
 
-use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,7 +10,9 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use bazhen_harness::{AgentRef, Delivery, Harness, Outgoing, PushPort, Pushed, SessionRef};
+use bazhen_harness::{
+    AgentRef, Delivery, Harness, Harnesses, Outgoing, PushPort, Pushed, SessionRef,
+};
 use bazhen_protocol::agents::HarnessId;
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
@@ -20,6 +21,8 @@ use bazhen_protocol::mail::{MailboxState, SendMessageRequest, SendMessageRespons
 use bazhen_protocol::mail_events::{MailAccepted, MailUndeliverable, UndeliverableReason};
 use bazhen_store::{AppendError, MailChange, OnceError, Store, Writer as StoreWriter};
 use serde::Serialize;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::agents::Agents;
 use crate::callers::{Caller, caller_of};
@@ -31,10 +34,10 @@ pub(crate) const MAIL_LIMIT: usize = 20_000;
 
 /// The agent states that take no more mail: one closing or closed gives its mail up, and one that
 /// failed never started, with nothing to give it up (`GONE`).
-const GONE: [&str; 3] = ["closing", "closed", "failed"];
+pub(crate) const GONE: [&str; 3] = ["closing", "closed", "failed"];
 
 /// The caller states from which an agent may no longer send (`CLOSED_CALLER`).
-const CLOSED_CALLER: [&str; 4] = ["closing", "closed", "failed", "lost"];
+pub(crate) const CLOSED_CALLER: [&str; 4] = ["closing", "closed", "failed", "lost"];
 
 /// How many times a message is pushed before it is given up as undeliverable.
 const PUSH_ATTEMPTS: u32 = 3;
@@ -110,11 +113,23 @@ struct KeptPeerSend<'a> {
     body: &'a str,
 }
 
-/// A send's answer, and how the message it queued is to be delivered: none for a repeat of a
-/// send, which gets its first answer and hands nothing over again.
+/// A message a write queued, and how it is to be delivered once the write commits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Queued {
+    pub(crate) agent: AgentId,
+    pub(crate) message: MessageId,
+    pub(crate) delivery: Delivery,
+}
+
+/// Where a write that can't reach the daemon's routes hands what it queued, once it commits.
+/// Unbounded, so a write at start, before anything drains it, neither waits nor loses mail.
+pub(crate) type Handing = mpsc::UnboundedSender<Queued>;
+
+/// A send's answer, and the message it queued: none for a repeat of a send, which gets its first
+/// answer and hands nothing over again.
 struct Sent {
     response: SendMessageResponse,
-    queued: Option<Delivery>,
+    queued: Vec<Queued>,
 }
 
 /// `POST /v1/agents/:id/messages`: the human sends as Bazhen, an agent as itself to another. The
@@ -131,7 +146,7 @@ pub(crate) async fn send(
         let agents = shared.agents.clone().ok_or(Sending::Unavailable)?;
         let caller = caller_of(caller);
         let run = Arc::clone(&agents);
-        let (agent, sent) = shared
+        let sent = shared
             .store
             .run(move |store| {
                 let agent = store
@@ -139,13 +154,13 @@ pub(crate) async fn send(
                     .resolve_agent(&reference)?
                     .and_then(|agent| AgentId::parse(&agent))
                     .ok_or_else(|| Sending::Unnamed(reference.clone()))?;
-                let sent = sent(store, &run, caller.as_ref(), &agent, &req)?;
-                Ok::<_, Sending>((agent, sent))
+                sent(store, &run, caller.as_ref(), &agent, &req)
             })
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
-        let message = sent.response.message_id.clone();
-        deliver(&shared, &agents, sent.queued, message, agent).await;
+        for queued in sent.queued {
+            deliver(&shared, &agents, queued).await;
+        }
         Ok(sent.response)
     };
     match sent.await {
@@ -155,23 +170,46 @@ pub(crate) async fn send(
 }
 
 /// Hands a message just queued over as `queued` says: pushed, or offered to the agent's waiter.
-/// None, for a repeat of a request, hands nothing over again.
-pub(crate) async fn deliver(
-    shared: &Shared,
-    agents: &Arc<Agents>,
-    queued: Option<Delivery>,
-    message: MessageId,
-    agent: AgentId,
-) {
-    match queued {
-        Some(Delivery::Push) => pushing(shared, agents, message, agent),
-        Some(Delivery::Pull) => {
+pub(crate) async fn deliver(shared: &Shared, agents: &Arc<Agents>, queued: Queued) {
+    let Queued {
+        agent,
+        message,
+        delivery,
+    } = queued;
+    match delivery {
+        Delivery::Push => pushing(shared, agents, message, agent),
+        Delivery::Pull => {
             // Queued, the message waits for the next waiter or tool call when this fails.
             if let Err(err) = shared.hooks.mailbox.offer(shared, &agent).await {
                 tracing::warn!("bazhen: couldn't offer mail to {agent}: {err}");
             }
         }
-        Some(Delivery::None) | None => {}
+        Delivery::None => {}
+    }
+}
+
+/// Delivers each message handed over on the channel, in the order handed, until the daemon stops
+/// or nothing is left to hand any. A stop still delivers what was handed before it: each was
+/// committed, and is owed its push or offer.
+pub(crate) async fn hand_over(
+    shared: Shared,
+    agents: Arc<Agents>,
+    mut handed: mpsc::UnboundedReceiver<Queued>,
+    stop: CancellationToken,
+) {
+    loop {
+        let queued = tokio::select! {
+            biased;
+            () = stop.cancelled() => break,
+            queued = handed.recv() => queued,
+        };
+        let Some(queued) = queued else {
+            return;
+        };
+        deliver(&shared, &agents, queued).await;
+    }
+    while let Ok(queued) = handed.try_recv() {
+        deliver(&shared, &agents, queued).await;
     }
 }
 
@@ -183,12 +221,13 @@ fn sent(
     agent: &AgentId,
     req: &SendMessageRequest,
 ) -> Result<Sent, Sending> {
-    let fresh = Cell::new(None);
+    let harnesses = agents.harnesses();
+    let mut fresh = Vec::new();
     let response = match caller {
         None => {
             let kept = kept(agent, &req.body, None)?;
             store.once(&req.idempotency_key, &kept, |w| {
-                queue(w, agents, agent, &req.body, None, &fresh)
+                queue(w, harnesses, agent, &req.body, None, &mut fresh)
             })?
         }
         Some(caller) => {
@@ -222,7 +261,7 @@ fn sent(
                 if let Some(prior) = w.replay(&key, &kept)? {
                     return Ok(prior);
                 }
-                let response = queue(w, agents, agent, &text, Some(caller), &fresh)?;
+                let response = queue(w, harnesses, agent, &text, Some(caller), &mut fresh)?;
                 w.answered(&key, &kept, &response)?;
                 Ok(response)
             })?
@@ -230,8 +269,27 @@ fn sent(
     };
     Ok(Sent {
         response,
-        queued: fresh.get(),
+        queued: fresh,
     })
+}
+
+/// Bazhen's own mail to `agent`, sent in a verb's write under `key`, a key derived from the
+/// verb's, as `Mailbox.send` sends it: a retry of the verb sends it no second time.
+pub(crate) fn send_under(
+    w: &StoreWriter<'_>,
+    harnesses: &Harnesses,
+    agent: &AgentId,
+    key: &str,
+    body: &str,
+    fresh: &mut Vec<Queued>,
+) -> Result<SendMessageResponse, Sending> {
+    let kept = kept(agent, body, None)?;
+    if let Some(prior) = w.replay(key, &kept)? {
+        return Ok(prior);
+    }
+    let response = queue(w, harnesses, agent, body, None, fresh)?;
+    w.answered(key, &kept, &response)?;
+    Ok(response)
 }
 
 fn kept(agent: &AgentId, body: &str, from: Option<&AgentId>) -> Result<String, OnceError> {
@@ -242,22 +300,22 @@ fn kept(agent: &AgentId, body: &str, from: Option<&AgentId>) -> Result<String, O
     })?)
 }
 
-/// Queues `body` for `agent`, if its harness takes mail for it now, noting in `fresh` how it is
-/// to be delivered.
+/// Queues `body` for `agent`, if its harness takes mail for it now, adding to `fresh` how it is
+/// to be delivered once the write commits.
 pub(crate) fn queue(
     w: &StoreWriter<'_>,
-    agents: &Agents,
+    harnesses: &Harnesses,
     agent: &AgentId,
     body: &str,
     from: Option<&AgentId>,
-    fresh: &Cell<Option<Delivery>>,
+    fresh: &mut Vec<Queued>,
 ) -> Result<SendMessageResponse, Sending> {
     let takes_none = || Sending::NoAgent(format!("no agent {agent} that takes mail"));
     let binding = w
         .reads()
         .agent_binding(agent.as_str())?
         .ok_or_else(takes_none)?;
-    let harness = harness_of(agents, &binding.harness).ok_or_else(takes_none)?;
+    let harness = harness_of(harnesses, &binding.harness).ok_or_else(takes_none)?;
     let delivery = harness.capabilities().delivery;
     if delivery == Delivery::None {
         return Err(takes_none());
@@ -278,15 +336,19 @@ pub(crate) fn queue(
         })
         .map_err(|refusal| Sending::NoAgent(format!("no agent {agent} {}", refusal.reason)))?;
     let (message_id, event) = w.queue_mail(agent, body, from)?;
-    fresh.set(Some(delivery));
+    fresh.push(Queued {
+        agent: agent.clone(),
+        message: message_id.clone(),
+        delivery,
+    });
     Ok(SendMessageResponse {
         message_id,
         event_ids: vec![event],
     })
 }
 
-pub(crate) fn harness_of<'a>(agents: &'a Agents, harness: &str) -> Option<&'a dyn Harness> {
-    agents.harnesses().get(HarnessId::parse(harness)?)
+pub(crate) fn harness_of<'a>(harnesses: &'a Harnesses, harness: &str) -> Option<&'a dyn Harness> {
+    harnesses.get(HarnessId::parse(harness)?)
 }
 
 /// An agent's own message to another, after a line naming the sender, so the reader knows which
@@ -341,7 +403,7 @@ async fn push(
         let Some(now) = pushable(store, message, agent).await? else {
             return Ok(());
         };
-        let Some(harness) = harness_of(agents, &now.harness) else {
+        let Some(harness) = harness_of(agents.harnesses(), &now.harness) else {
             return Ok(());
         };
         let pushed = harness

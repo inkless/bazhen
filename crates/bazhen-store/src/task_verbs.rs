@@ -2,13 +2,16 @@
 //! caller that can act, on a task whose checks let it.
 
 use bazhen_core::task::{TaskRefused, check_note};
-use bazhen_protocol::ids::{AgentId, TaskId};
-use bazhen_protocol::task_events::TaskNoted;
+use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
+use bazhen_protocol::names::Role;
+use bazhen_protocol::task_events::{AssignmentGranted, TaskNoted};
 use bazhen_protocol::tasks::TaskCommandResponse;
 use serde::Serialize;
 
 use crate::tasks::open;
-use crate::{AppendError, NewEvent, OnceError, Store, TaskChange, TaskReadError};
+use crate::{
+    AppendError, AssignmentChange, NewEvent, OnceError, Store, TaskChange, TaskReadError, Writer,
+};
 
 /// A note the caller asks to add to a task, its text already held to the protocol's rules and
 /// trimmed: the human's, or an agent's.
@@ -101,6 +104,42 @@ impl Store {
                 event_ids: vec![noted],
             })
         })
+    }
+}
+
+/// A role on a task that a verb gives an agent, its checks already passed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewGrant<'a> {
+    pub caller: Option<&'a AgentId>,
+    pub task: &'a TaskId,
+    pub agent: &'a AgentId,
+    pub role: &'a Role,
+    /// The assignment it is granted under: none when the human or the task's owner grants it.
+    pub parent: Option<AssignmentId>,
+}
+
+impl Writer<'_> {
+    /// Records the grant, answering the new assignment's id and its event's.
+    ///
+    /// # Errors
+    ///
+    /// [`AppendError`]; nothing is recorded then.
+    pub fn grant(&self, grant: &NewGrant<'_>) -> Result<(AssignmentId, u64), AppendError> {
+        let id = AssignmentId::mint(
+            crate::now_ms(),
+            crate::urandom().map_err(AppendError::NoId)?,
+        );
+        let granted = self.append(&NewEvent::Assignment {
+            assignment: id.clone(),
+            actor: actor(grant.caller),
+            change: AssignmentChange::Granted(AssignmentGranted {
+                task_id: grant.task.clone(),
+                agent_id: grant.agent.clone(),
+                role: grant.role.clone(),
+                parent_assignment_id: grant.parent.clone(),
+            }),
+        })?;
+        Ok((id, granted))
     }
 }
 

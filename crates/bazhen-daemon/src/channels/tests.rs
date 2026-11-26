@@ -73,6 +73,7 @@ fn agents_over(store: &Writer, dir: &TempDir, harnesses: Harnesses, hooks: &Arc<
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
         hooks: Arc::clone(hooks),
+        handing: tokio::sync::mpsc::unbounded_channel().0,
     })
 }
 

@@ -8,6 +8,7 @@
 
 use bazhen_core::task::{ActiveAssignment, TaskView};
 use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
+use bazhen_protocol::names::Role;
 use bazhen_protocol::tasks::{Assignment, Task, TaskDetail, TaskNote, TaskState};
 use serde::Deserialize;
 
@@ -136,36 +137,7 @@ impl Reads<'_> {
         // finish the task between two of them, which would show it open beside assignments its
         // finish ended. The transaction is only read, and rolled back when it drops.
         let tx = self.0.unchecked_transaction()?;
-        let id = task.as_str();
-        let task_row = "SELECT id, title, state, owner_agent_id AS ownerAgentId,
-            parent_task_id AS parentTaskId, brief, note FROM tasks WHERE id = ?";
-        let Some(row) = rows::<DetailRow>(&tx, task_row, [id])?.into_iter().next() else {
-            return Ok(None);
-        };
-        Ok(Some(TaskDetail {
-            id: row.task.id,
-            title: row.task.title,
-            state: row.task.state,
-            owner_agent_id: row.task.owner_agent_id,
-            parent_task_id: row.task.parent_task_id,
-            brief: row.brief,
-            note: row.note,
-            assignments: rows(
-                &tx,
-                &format!("{ASSIGNMENT} WHERE task_id = ? ORDER BY created_event_id"),
-                [id],
-            )?,
-            subtasks: rows(
-                &tx,
-                &format!("{TASK} WHERE parent_task_id = ? ORDER BY created_event_id"),
-                [id],
-            )?,
-            notes: rows(
-                &tx,
-                &format!("{NOTE} WHERE n.task_id = ? ORDER BY n.event_id"),
-                [id],
-            )?,
-        }))
+        detail(&tx, task)
     }
 
     /// The latest handoff note on the task written since it was last granted, which the brief of
@@ -317,6 +289,67 @@ impl Reads<'_> {
             [agent.as_str()],
         )
     }
+
+    /// Whether agent `agent` has held `role` on any task, now or before: one that has is sent
+    /// the role's prompt only the first time.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn has_held(self, agent: &AgentId, role: &Role) -> rusqlite::Result<bool> {
+        self.0.query_row(
+            "SELECT EXISTS (SELECT 1 FROM assignments WHERE agent_session_id = ? AND role = ?)",
+            [agent.as_str(), role.as_str()],
+            |row| row.get(0),
+        )
+    }
+}
+
+impl crate::Writer<'_> {
+    /// Task `task` in full, as [`Reads::task_detail`] reads it, read in the writer's own
+    /// transaction, which is one snapshot already.
+    ///
+    /// # Errors
+    ///
+    /// [`TaskReadError`] when a row doesn't read as the protocol's, or `SQLite` fails.
+    pub fn task_detail(&self, task: &TaskId) -> Result<Option<TaskDetail>, TaskReadError> {
+        detail(self.connection(), task)
+    }
+}
+
+/// Task `task` in full, every statement on `db`, which reads them in one snapshot when it is a
+/// transaction.
+fn detail(db: &rusqlite::Connection, task: &TaskId) -> Result<Option<TaskDetail>, TaskReadError> {
+    let id = task.as_str();
+    let task_row = "SELECT id, title, state, owner_agent_id AS ownerAgentId,
+        parent_task_id AS parentTaskId, brief, note FROM tasks WHERE id = ?";
+    let Some(row) = rows::<DetailRow>(db, task_row, [id])?.into_iter().next() else {
+        return Ok(None);
+    };
+    Ok(Some(TaskDetail {
+        id: row.task.id,
+        title: row.task.title,
+        state: row.task.state,
+        owner_agent_id: row.task.owner_agent_id,
+        parent_task_id: row.task.parent_task_id,
+        brief: row.brief,
+        note: row.note,
+        assignments: rows(
+            db,
+            &format!("{ASSIGNMENT} WHERE task_id = ? ORDER BY created_event_id"),
+            [id],
+        )?,
+        subtasks: rows(
+            db,
+            &format!("{TASK} WHERE parent_task_id = ? ORDER BY created_event_id"),
+            [id],
+        )?,
+        notes: rows(
+            db,
+            &format!("{NOTE} WHERE n.task_id = ? ORDER BY n.event_id"),
+            [id],
+        )?,
+    }))
 }
 
 /// Each row `sql` reads, as the type its columns name.

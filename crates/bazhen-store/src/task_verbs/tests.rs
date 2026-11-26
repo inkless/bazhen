@@ -3,7 +3,7 @@
 use bazhen_core::task::Refusal;
 
 use super::*;
-use crate::task_reads::tests::{Row, agent, holding, role, task};
+use crate::task_reads::tests::{Row, agent, asgn, holding, role, task};
 
 fn note(caller: Option<u8>, on: u8, key: &str, text: &str) -> NewNote {
     NewNote {
@@ -136,5 +136,66 @@ fn answers_a_key_used_again_with_its_first_answer_and_refuses_it_for_another_not
             .notes
             .len(),
         1
+    );
+}
+
+#[test]
+fn grants_a_role_under_the_assignment_given_and_counts_its_agent_as_having_held_it() {
+    let (_dir, mut store) = holding(&tasks());
+    let (agent3, task1) = (agent(3), task(1));
+    let reviewer = role("reviewer");
+    let (granted, event) = store
+        .write(|w| {
+            w.grant(&NewGrant {
+                caller: Some(&agent(2)),
+                task: &task1,
+                agent: &agent3,
+                role: &reviewer,
+                parent: Some(asgn(1)),
+            })
+        })
+        .unwrap();
+    let view = store.reads().task_view(&task1).unwrap().unwrap();
+    let held = view.active.iter().find(|a| a.id == granted).unwrap();
+    assert_eq!(
+        (
+            &held.agent_id,
+            held.role.as_str(),
+            &held.parent_assignment_id
+        ),
+        (&agent3, "reviewer", &Some(asgn(1)))
+    );
+    assert_eq!(store.reads().granters(&granted).unwrap(), [agent(2)]);
+    let (kind, actor): (String, String) = store
+        .reads()
+        .0
+        .query_row(
+            "SELECT type, actor FROM events WHERE id = ?",
+            [i64::try_from(event).unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (kind.as_str(), actor.as_str()),
+        ("assignment.granted", agent(2).as_str())
+    );
+}
+
+#[test]
+fn says_an_agent_has_held_a_role_it_holds_or_held_on_any_task_and_no_other() {
+    let (_dir, store) = holding(&[
+        Row::Task(1, "open", None, None, None, 1),
+        Row::Asgn(1, 1, 2, "worker", None, None, 2),
+        Row::Asgn(2, 1, 3, "lead", None, Some("completed"), 3),
+    ]);
+    let held = |n, key| store.reads().has_held(&agent(n), &role(key)).unwrap();
+    assert_eq!(
+        [
+            held(2, "worker"),
+            held(3, "lead"),
+            held(2, "lead"),
+            held(4, "worker")
+        ],
+        [true, true, false, false]
     );
 }
