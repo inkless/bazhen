@@ -649,10 +649,12 @@ What differs:
     fuzz jobs alone build on nightly, pinned there as `NIGHTLY`, because libFuzzer's
     instrumentation needs it; everything else builds on the pinned toolchain. Its `properties`
     job runs the property tests (above), not the targets. To run a target locally,
-    install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run
-    `make capped ARGS='cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048'
-    -max_total_time=600` from the crate's directory. cargo-fuzz starts its target without cargo's
-    test runner, so the cap and libFuzzer's own limits are given by hand.
+    install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run, from the
+    crate's directory as the `fuzz` workflow does, `node ../../scripts/capped.ts --memory 4G
+    --time 30m -- cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048
+    -max_total_time=600`. `make capped` can't take its place: it runs from the root, where
+    cargo-fuzz finds no `fuzz` directory. cargo-fuzz starts its target without cargo's test
+    runner, so the cap and libFuzzer's own limits are given by hand.
 - **Repairing a base whose Rust tests cannot be listed.** HEAD must still list successfully.
   Keep the repair in its own PR. Falsify accepts only changes to existing regular Rust files
   in a workspace crate's `src` directory when their syntax matches after treating a shorthand field `x` and
