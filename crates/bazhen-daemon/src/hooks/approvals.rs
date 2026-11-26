@@ -193,6 +193,17 @@ impl Approvals {
         Some(id.clone())
     }
 
+    /// Drops the requests held for the open items `harness`'s server asked under `key`, which it
+    /// has asked again where no one agent is found to hold the new one for: the one held may be
+    /// one the server no longer waits on.
+    pub(crate) fn unhold(&self, harness: HarnessId, key: &ToolKey) {
+        for entry in self.registry().open.values_mut() {
+            if served_by(entry, harness) && &entry.key == key {
+                entry.responder = None;
+            }
+        }
+    }
+
     /// The open items `harness`'s server asked under `key`, whichever agent each is of.
     pub(crate) fn served_matching(&self, harness: HarnessId, key: &ToolKey) -> Vec<AttentionId> {
         self.registry()

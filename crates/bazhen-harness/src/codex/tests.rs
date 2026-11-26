@@ -760,7 +760,22 @@ fn a_request_for_no_agent_bazhen_runs_or_none_for_the_human_is_left_to_the_tui()
         &command(),
         "7",
     );
-    assert_eq!(unbound, Ingested::nothing());
+    // Told under its key, so an item an agent had on the thread holds nothing of it, but held
+    // for no one.
+    let asked = Observed::ApprovalAsked {
+        key: tool("call-1"),
+        summary: "Run rm -rf build (outside the sandbox)".to_owned(),
+        question: false,
+    };
+    assert_eq!(
+        unbound,
+        Ingested {
+            observed: vec![on(THREAD, asked)],
+            origin: None,
+            reply: Reply::Quiet,
+            reply_gate: Gate::None,
+        }
+    );
     let other = ask(
         &codex,
         Some(&a),
