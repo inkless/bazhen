@@ -994,6 +994,8 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to edge::edge for DismissAttentionRequest, which the protocol's edge target fuzzes; reads the path only as the item's id, for the store to look up",
   "crates/bazhen-daemon/src/attention.rs::resend":
     "hands its body to edge::edge for ResendAttentionRequest, which the protocol's edge target fuzzes; reads the path only as the item's id, for the store to look up",
+  "crates/bazhen-daemon/src/task_verbs.rs::note":
+    "hands its body to edge::edge for AddTaskNoteRequest, which the protocol's edge target fuzzes; reads the path only as the task's id, through TaskId::parse, for the store to look up",
   "crates/bazhen-daemon/src/hooks.rs::hook":
     "hands its body to edge::edge for HookRequest, which the protocol's edge target fuzzes; decodes nothing itself",
   "crates/bazhen-daemon/src/hooks.rs::ack":

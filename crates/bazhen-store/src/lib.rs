@@ -26,6 +26,7 @@ mod readiness;
 mod snapshot;
 mod task_events;
 mod task_reads;
+mod task_verbs;
 mod tasks;
 mod terminals;
 #[cfg(test)]
@@ -64,6 +65,7 @@ pub use readiness::{STARTS, Waiting};
 pub use snapshot::{SnapshotError, SnapshotView};
 pub use task_events::{AssignmentChange, TaskChange};
 pub use task_reads::{Stranded, TaskReadError};
+pub use task_verbs::{NewNote, TaskVerbError};
 pub use tasks::{CreateTaskError, NewTask};
 pub use terminals::{AgentTerminal, RuntimeRow, ShellRow, start_unsettled, takes_exit};
 

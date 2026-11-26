@@ -46,6 +46,11 @@ const UNSHARED_CHECKS: &[Unshared] = &[];
 
 /// Each message a route reads, the route, and whether it is the HTTP listener's alone.
 const ROUTES: &[(&str, &str, bool)] = &[
+    (
+        "AddTaskNoteRequest",
+        "/v1/tasks/task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d/notes",
+        false,
+    ),
     ("CreateTaskRequest", "/v1/tasks", false),
     (
         "DismissNoticeRequest",

@@ -338,4 +338,4 @@ fn active_of(a: Assignment) -> ActiveAssignment {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
