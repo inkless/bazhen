@@ -155,7 +155,7 @@ fn event(step: &Step) -> NewEvent {
     let payload = step.payload.get();
     let actor = step.actor.clone();
     match step.kind.split_once('.').map_or("", |(family, _)| family) {
-        "environment" => NewEvent::EnvironmentRegistered {
+        "environment" if step.kind == "environment.registered" => NewEvent::EnvironmentRegistered {
             environment: decode(&entity),
             payload: decode(payload),
         },

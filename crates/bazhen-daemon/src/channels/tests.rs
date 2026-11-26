@@ -10,7 +10,8 @@ use bazhen_harness::{
 };
 use bazhen_protocol::agent_events::AgentExited;
 use bazhen_protocol::agents::{
-    ActivityValue, ExitStatus, LaunchAgentRequest, LaunchAgentResponse, RespawnAgentRequest,
+    ActivityValue, ExitStatus, LaunchAgentRequest, LaunchAgentResponse, RelaunchAgentRequest,
+    RespawnAgentRequest,
 };
 use bazhen_store::{AgentChange, AppendError, NewEvent};
 use serde_json::{Value, json};
@@ -33,6 +34,10 @@ use crate::writer::Thread;
 
 /// Long enough for any step here, which comes at once or never.
 const LIMIT: Duration = Duration::from_secs(10);
+
+/// A first wait to connect again longer than any here, so a channel connects again in a test
+/// only when asked to.
+const NEVER: Duration = Duration::from_secs(600);
 
 /// A Codex agent, running on the session `STUB_SESSION`, whose launch named it `rev` and set its
 /// compaction window; the daemon serving it with the Codex adapter, on a Codex home of the test's.
@@ -201,26 +206,34 @@ impl Fixture {
         binding.and_then(|b| b.session).map(|session| session.id)
     }
 
-    /// Whether the channel to Codex's server has no connection up, as the agents' channels show
-    /// it: read from their debug form, which is all of a channel's link a test can see.
+    /// Whether the channel to Codex's server has no connection up.
     fn unconnected(&self) -> bool {
         let agents = self.shared.agents.as_ref().unwrap();
-        format!("{agents:?}").contains("Link { up: None")
+        !agents.channel(HarnessId::Codex).unwrap().unwrap().up()
     }
 
     /// `agent`'s process exited, as its terminal and the store show it; its generation.
     async fn exited(&self, agent: &AgentId) -> u64 {
+        let exited = AgentChange::Exited(AgentExited {
+            exit: ExitStatus::Unknown,
+        });
+        self.ended(agent, Fake::exit_unseen, exited).await
+    }
+
+    /// `agent`'s terminal lost, as its terminal and the store show it; its generation.
+    async fn lost(&self, agent: &AgentId) -> u64 {
+        self.ended(agent, Fake::gone, AgentChange::Lost).await
+    }
+
+    /// `agent`'s terminal ended as `end` ends it, and recorded as `change` says; its generation.
+    async fn ended(&self, agent: &AgentId, end: fn(&Fake, &str), change: AgentChange) -> u64 {
         let reader = self.shared.store.reader().unwrap();
         let found = reader
             .reads()
             .agent_terminal(agent.as_str())
             .unwrap()
             .unwrap();
-        self.fake
-            .exit_unseen(found.terminal_id.as_ref().unwrap().as_str());
-        let change = AgentChange::Exited(AgentExited {
-            exit: ExitStatus::Unknown,
-        });
+        end(&self.fake, found.terminal_id.as_ref().unwrap().as_str());
         let event = NewEvent::Agent {
             agent: agent.clone(),
             actor: "system".to_owned(),
@@ -269,12 +282,24 @@ impl Fixture {
 
     /// Listens where the Codex home's server would, and starts the channels to it.
     fn started(&self) -> UnixListener {
+        self.started_retrying(FIRST_RETRY)
+    }
+
+    /// The same, each channel first waiting `first_retry` to connect again once a connection
+    /// ends.
+    fn started_retrying(&self, first_retry: Duration) -> UnixListener {
         let socket = self
             .codex_home
             .join("app-server-control/app-server-control.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         let commands = Arc::new(Commands::new(crate::env::Env::new()));
-        start(&self.shared, &commands, &self.tracker, &self.stop);
+        start_retrying(
+            &self.shared,
+            &commands,
+            &self.tracker,
+            &self.stop,
+            first_retry,
+        );
         listener
     }
 
@@ -557,7 +582,8 @@ fn connects_again_for_an_agent_bound_after_the_connection_its_launch_made_ended(
     f.fake
         .set(|state| state.hold_creates = Some(Arc::clone(&gate)));
     let resumed = runtime().block_on(async {
-        let listener = f.started();
+        // Never connecting again of its own accord, so only the launch can connect it.
+        let listener = f.started_retrying(NEVER);
         let launched = f.launching("k-2");
         let mut server = f.handshaken(&listener).await;
         started_thread(&mut server, "t-new").await;
@@ -585,6 +611,22 @@ fn refuses_a_launch_over_a_server_before_the_channels_start_recording_nothing() 
         (refused.map(|r| r.agent_id), f.events()),
         (Err(AgentError::Unavailable(NO_CHANNEL.to_owned())), before)
     );
+}
+
+#[test]
+fn records_no_more_than_the_first_128_bytes_of_the_version_its_server_names() {
+    let f = fixture();
+    // Two bytes each, so the 128th byte ends one.
+    let named = "\u{e9}".repeat(100);
+    let versions = runtime().block_on(async {
+        let told = Event::Version(Some(named.clone()));
+        super::heard(&f.shared, HarnessId::Codex, told)
+            .await
+            .unwrap();
+        f.of("environment.harness_version")
+    });
+    let recorded: Vec<_> = versions.iter().map(|v| v["version"].clone()).collect();
+    assert_eq!(recorded, [json!("\u{e9}".repeat(64))]);
 }
 
 #[test]
@@ -644,6 +686,41 @@ fn respawns_a_codex_agent_on_its_thread_resumed_over_the_channel() {
         let resumed = json!({ "id": asked["id"], "result": { "thread": thread } });
         say(&mut server, resumed).await;
         within(LIMIT, respawned).await.unwrap().unwrap();
+        Some((asked["method"].clone(), asked["params"]["threadId"].clone()))
+    });
+    assert_eq!(resumed, Some((json!("thread/resume"), json!("t-new"))));
+}
+
+#[test]
+fn relaunches_a_lost_codex_agent_on_its_thread_resumed_over_the_channel() {
+    let f = fixture();
+    f.set("state = 'closed'");
+    let resumed = runtime().block_on(async {
+        let listener = f.started();
+        let launched = f.launching("k-2");
+        let mut server = f.handshaken(&listener).await;
+        started_thread(&mut server, "t-new").await;
+        let agent = within(LIMIT, launched).await.unwrap().unwrap().agent_id;
+        let generation = f.lost(&agent).await;
+        let agents = Arc::clone(f.shared.agents.as_ref().unwrap());
+        let relaunch = RelaunchAgentRequest {
+            idempotency_key: "k-3".to_owned(),
+            generation,
+            theme: None,
+            fresh: None,
+        };
+        let mut relaunched = f.tracker.spawn(async move {
+            let replaced = |_| -> BoxFuture<'static, ()> { Box::pin(async {}) };
+            agents.relaunch(agent.as_str(), &relaunch, replaced).await
+        });
+        let asked = tokio::select! {
+            asked = heard(&mut server) => asked,
+            _ = &mut relaunched => return None,
+        };
+        let thread = json!({ "id": asked["params"]["threadId"], "status": { "type": "idle" } });
+        let resumed = json!({ "id": asked["id"], "result": { "thread": thread } });
+        say(&mut server, resumed).await;
+        within(LIMIT, relaunched).await.unwrap().unwrap();
         Some((asked["method"].clone(), asked["params"]["threadId"].clone()))
     });
     assert_eq!(resumed, Some((json!("thread/resume"), json!("t-new"))));

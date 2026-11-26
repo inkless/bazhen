@@ -350,7 +350,7 @@ impl Agents {
     /// The channel `harness`'s starts go over, none for a harness with no server. One with a
     /// server can't be started before the daemon has started its channel, so it is refused with
     /// nothing recorded, rather than failed for want of a server.
-    fn channel(&self, harness: HarnessId) -> Result<Option<&Channel>, AgentError> {
+    pub(crate) fn channel(&self, harness: HarnessId) -> Result<Option<&Channel>, AgentError> {
         if let Some(channels) = self.channels.get() {
             return Ok(channels.get(harness));
         }

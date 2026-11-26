@@ -4,6 +4,7 @@
 //! new connection lands ahead of what the connection says of its sessions.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bazhen_harness::{Bound, IngestContext, LaunchRequest, Report, RunPort, SessionRef};
 use bazhen_protocol::agents::HarnessId;
@@ -22,6 +23,9 @@ use crate::writer::Writer;
 
 /// How many events a channel tells ahead of the task that reads them before it waits for it.
 const QUEUE: usize = 256;
+
+/// The most of a version a server names that is recorded, in bytes.
+const VERSION_CAP: usize = 128;
 
 /// The channel to each served harness's server, for the harnesses that run one.
 #[derive(Debug, Default)]
@@ -46,6 +50,17 @@ pub(crate) fn start(
     tracker: &TaskTracker,
     stop: &CancellationToken,
 ) {
+    start_retrying(shared, run, tracker, stop, FIRST_RETRY);
+}
+
+/// [`start`], each channel first waiting `first_retry` to connect again once a connection ends.
+fn start_retrying(
+    shared: &Shared,
+    run: &Arc<Commands>,
+    tracker: &TaskTracker,
+    stop: &CancellationToken,
+    first_retry: Duration,
+) {
     let Some(agents) = shared.agents.as_ref() else {
         return;
     };
@@ -65,7 +80,7 @@ pub(crate) fn start(
             bound: Box::new(move || bound(&store, harness)),
             run: Arc::clone(run) as Arc<dyn RunPort>,
             events,
-            first_retry: FIRST_RETRY,
+            first_retry,
         };
         channels.push((harness, Channel::start(options, tracker, stop.clone())));
         tracker.spawn(hear(shared.clone(), harness, told));
@@ -139,8 +154,13 @@ async fn heard(shared: &Shared, harness: HarnessId, event: Event) -> Result<(), 
 }
 
 /// Records the version `harness`'s server answered a handshake on, when it isn't the last one
-/// recorded.
-async fn recorded(shared: &Shared, harness: HarnessId, version: String) -> Result<(), String> {
+/// recorded: no more than its first [`VERSION_CAP`] bytes, as the server names what it likes.
+async fn recorded(shared: &Shared, harness: HarnessId, mut version: String) -> Result<(), String> {
+    let mut cap = VERSION_CAP.min(version.len());
+    while !version.is_char_boundary(cap) {
+        cap -= 1;
+    }
+    version.truncate(cap);
     shared
         .store
         .run(move |store| store.write(|w| w.record_harness_version(harness, &version)))
