@@ -210,3 +210,73 @@ fn words_the_mail_a_task_taken_away_or_moved_up_sends_as_the_typescript_daemon_d
         ]
     );
 }
+
+#[test]
+fn words_the_mail_a_finish_sends_as_the_typescript_daemon_does() {
+    let peer = Agent {
+        id: &agent(),
+        name: "reviewer-1",
+    };
+    let nameless = Agent {
+        id: &agent(),
+        name: "",
+    };
+    let task = named();
+    assert_eq!(
+        [
+            finished_mail(&task, TaskOutcome::Done, Some(peer), None),
+            finished_mail(&task, TaskOutcome::Cancelled, None, Some("a\n\nb")),
+            completed_mail(&task, nameless, None),
+            completed_mail(&task, peer, Some("tests pass")),
+            cancelled_mail(&task, None),
+            cancelled_mail(&task, Some(peer)),
+        ],
+        [
+            format!(
+                "Task {TASK} (Fix the build) was marked done by reviewer-1 ({}).",
+                agent()
+            ),
+            format!(
+                "Task {TASK} (Fix the build) was marked cancelled by the human.\n\nNote, each \
+                 line quoted:\n> a\n>\n> b"
+            ),
+            format!(
+                "agent {} finished its part of task {TASK} (Fix the build).",
+                agent()
+            ),
+            format!(
+                "reviewer-1 ({}) finished its part of task {TASK} (Fix the build).\n\nNote, each \
+                 line quoted:\n> tests pass",
+                agent()
+            ),
+            format!("Task {TASK} (Fix the build) was cancelled by the human. Stop working on it."),
+            format!(
+                "Task {TASK} (Fix the build) was cancelled by reviewer-1 ({}). Stop working on \
+                 it.",
+                agent()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn sums_a_finish_up_for_the_inbox_on_one_line_cut_short_whole() {
+    let task = named();
+    let long = format!("{}\u{1f600}z", "x".repeat(498));
+    assert_eq!(
+        [
+            done_summary(&task, None),
+            done_summary(&task, Some("line one\n\tline two")),
+            printable("\u{ad}\u{200b} a\u{0}\u{7f}\u{2066}b \u{feff}"),
+            printable(&long),
+            printable(&"y".repeat(500)),
+        ],
+        [
+            format!("Task {TASK} (Fix the build) is done."),
+            format!("Task {TASK} (Fix the build) is done: line one line two"),
+            "a b".to_owned(),
+            format!("{}…", "x".repeat(498)),
+            "y".repeat(500),
+        ]
+    );
+}

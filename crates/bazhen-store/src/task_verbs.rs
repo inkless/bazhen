@@ -5,9 +5,10 @@ use bazhen_core::task::{TaskRefused, check_note};
 use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
 use bazhen_protocol::names::Role;
 use bazhen_protocol::task_events::{
-    AssignmentEnded, AssignmentEndedReason, AssignmentGranted, TaskNoted, TaskOwnerChanged,
+    AssignmentEnded, AssignmentEndedReason, AssignmentGranted, TaskFinished, TaskNoted,
+    TaskOwnerChanged,
 };
-use bazhen_protocol::tasks::TaskCommandResponse;
+use bazhen_protocol::tasks::{TaskCommandResponse, TaskOutcome};
 use serde::Serialize;
 
 use crate::tasks::open;
@@ -159,6 +160,29 @@ impl Writer<'_> {
             assignment: assignment.clone(),
             actor: actor(caller),
             change: AssignmentChange::Ended(AssignmentEnded { reason }),
+        })
+    }
+
+    /// Finishes `task` as `outcome`, with `note`, by `caller`: every assignment on it ends, and
+    /// with each every one granted under it.
+    ///
+    /// # Errors
+    ///
+    /// [`AppendError`]: a task already finished is refused.
+    pub fn finish_task(
+        &self,
+        caller: Option<&AgentId>,
+        task: &TaskId,
+        outcome: TaskOutcome,
+        note: Option<&str>,
+    ) -> Result<u64, AppendError> {
+        self.append(&NewEvent::Task {
+            task: task.clone(),
+            actor: actor(caller),
+            change: TaskChange::Finished(TaskFinished {
+                outcome,
+                note: note.map(str::to_owned),
+            }),
         })
     }
 

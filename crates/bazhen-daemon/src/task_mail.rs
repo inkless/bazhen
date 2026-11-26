@@ -4,10 +4,17 @@
 use bazhen_protocol::ids::AgentId;
 use bazhen_protocol::names::Role;
 use bazhen_protocol::roles::RoleDefinition;
-use bazhen_protocol::tasks::{Task, TaskDetail};
-use bazhen_protocol::text::quote_note;
+use bazhen_protocol::tasks::{Task, TaskDetail, TaskOutcome};
+use bazhen_protocol::text::{quote_note, trim};
 
+use crate::devices::{control_or_format, whole};
 use crate::mail::MAIL_LIMIT;
+
+/// The most UTF-16 units an item a verb raises for the human sums its news in.
+const SUMMARY_MAX: usize = 500;
+
+/// The note on a subtask cancelled because its parent finished.
+pub(crate) const CANCELLED_WITH_PARENT: &str = "Cancelled with its parent task.";
 
 /// An agent as mail names it: by its name, which a reader knows it by, and its id, which lasts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +224,84 @@ pub(crate) fn owned_mail(task: &Task) -> String {
          part of. Assign it, finish it or cancel it.",
         task.id, task.title
     )
+}
+
+/// `head`, then the note under it, each of its lines quoted, where there is one.
+fn with_note(head: String, note: Option<&str>) -> String {
+    match note {
+        None => head,
+        Some(note) => format!("{head}\n\nNote, each line quoted:\n{}", quote_note(note)),
+    }
+}
+
+/// To an agent that gave the task out, when it finishes.
+pub(crate) fn finished_mail(
+    task: &Task,
+    outcome: TaskOutcome,
+    from: Who<'_>,
+    note: Option<&str>,
+) -> String {
+    let head = format!(
+        "Task {} ({}) was marked {} by {}.",
+        task.id,
+        task.title,
+        outcome.as_str(),
+        by(from)
+    );
+    with_note(head, note)
+}
+
+/// To whoever gave a worker its part, when the worker reports it done.
+pub(crate) fn completed_mail(task: &Task, worker: Agent<'_>, note: Option<&str>) -> String {
+    let head = format!(
+        "{} finished its part of task {} ({}).",
+        agent_named(worker),
+        task.id,
+        task.title
+    );
+    with_note(head, note)
+}
+
+/// To an agent still working on a task someone else cancelled.
+pub(crate) fn cancelled_mail(task: &Task, from: Who<'_>) -> String {
+    format!(
+        "Task {} ({}) was cancelled by {}. Stop working on it.",
+        task.id,
+        task.title,
+        by(from)
+    )
+}
+
+/// What the human's inbox says of a task an agent finished.
+pub(crate) fn done_summary(task: &Task, note: Option<&str>) -> String {
+    printable(&match note {
+        None => format!("Task {} ({}) is done.", task.id, task.title),
+        Some(note) => format!("Task {} ({}) is done: {note}", task.id, task.title),
+    })
+}
+
+/// `text` as one line the inbox can show: each run of control and format characters a space,
+/// trimmed, and cut short with an ellipsis past [`SUMMARY_MAX`] (`printable`).
+pub(crate) fn printable(text: &str) -> String {
+    let mut clean = String::with_capacity(text.len());
+    let mut run = false;
+    for c in text.chars() {
+        if control_or_format(c) {
+            if !run {
+                clean.push(' ');
+            }
+            run = true;
+        } else {
+            clean.push(c);
+            run = false;
+        }
+    }
+    let clean = trim(&clean);
+    if length(clean) > SUMMARY_MAX {
+        format!("{}…", whole(clean, SUMMARY_MAX - 1))
+    } else {
+        clean.to_owned()
+    }
 }
 
 /// The escalation raised on the agent a subtask was delegated by, when it falls to the human.

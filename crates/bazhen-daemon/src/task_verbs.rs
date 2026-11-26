@@ -8,18 +8,22 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bazhen_core::roles::RoleBook;
 use bazhen_core::task::{
-    Refusal, TaskRefused, TasksHeld, check_delegate, check_grant, check_unassign,
+    ActiveAssignment, Finish, Refusal, Subtasks, TaskRefused, TasksHeld, check_delegate,
+    check_finish, check_grant, check_unassign,
 };
 use bazhen_harness::Harnesses;
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
 use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
+use bazhen_protocol::mail::AttentionKind;
+use bazhen_protocol::mail_events::AttentionOpened;
 use bazhen_protocol::names::Role;
 use bazhen_protocol::roles::RoleDefinition;
 use bazhen_protocol::task_events::AssignmentEndedReason;
 use bazhen_protocol::tasks::{
     AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse, CreateTaskResponse,
-    Grant as TaskGrant, TaskCommandResponse, UnassignTaskRequest,
+    FinishTaskRequest, Grant as TaskGrant, Task, TaskCommandResponse, TaskOutcome,
+    UnassignTaskRequest,
 };
 use bazhen_store::{
     AppendError, Assigning, CreateTaskError, NewGrant, NewNote, NewTask, OnceError, Reads,
@@ -32,7 +36,8 @@ use crate::mail::{CLOSED_CALLER, GONE, MAIL_LIMIT, Queued, Sending, queue, refus
 use crate::routes::{Shared, fail, internal};
 use crate::task_lift::lift_stranded;
 use crate::task_mail::{
-    Agent, Handoff, assigned_mail, length, line_ended_mail, role_mail, unassigned_mail,
+    Agent, CANCELLED_WITH_PARENT, Handoff, Who, assigned_mail, cancelled_mail, completed_mail,
+    done_summary, finished_mail, length, line_ended_mail, printable, role_mail, unassigned_mail,
 };
 
 /// What a verb answers when the store did nothing: the status the TypeScript daemon gives each.
@@ -481,6 +486,314 @@ impl Taking<'_> {
         event_ids.extend(lifted.event_ids);
         Ok(TaskCommandResponse { event_ids })
     }
+}
+
+/// The finish as the TypeScript daemon keeps it under its key.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeptFinish<'a> {
+    caller: Option<&'a str>,
+    task_id: &'a str,
+    outcome: TaskOutcome,
+    note: Option<&'a str>,
+    cascade: bool,
+}
+
+/// `POST /v1/tasks/:id/finish`: ends the task, and with it every assignment on it, or for a
+/// worker only its own part. Who gave the work out and who was still on it are told; with
+/// `cascade`, its open subtasks are cancelled with it. What that leaves stranded moves up.
+pub(crate) async fn finish(
+    State(shared): State<Shared>,
+    caller: Option<Extension<Caller>>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let finished = async {
+        let req =
+            edge::<FinishTaskRequest>(&body).map_err(|refused| Sending::Invalid(refused.0))?;
+        let run = shared.agents.clone().ok_or(Sending::Unavailable)?;
+        let task = TaskId::parse(&id).ok_or_else(|| Granting::NoTask(id.clone()))?;
+        let caller = caller_of(caller);
+        let roles = shared.roles.current();
+        let response = shared
+            .store
+            .run(move |store| {
+                let cascade = req.cascade == Some(true);
+                let kept = serde_json::to_string(&KeptFinish {
+                    caller: caller.as_ref().map(AgentId::as_str),
+                    task_id: task.as_str(),
+                    outcome: req.outcome,
+                    note: req.note.as_deref(),
+                    cascade,
+                })?;
+                let mut queued = Vec::new();
+                let response = store.once(&req.idempotency_key, &kept, |w| {
+                    let finishing = Finishing {
+                        caller: caller.as_ref(),
+                        task: &task,
+                        outcome: req.outcome,
+                        note: req.note.as_deref(),
+                        subtasks: if cascade {
+                            Subtasks::CancelWithIt
+                        } else {
+                            Subtasks::Refuse
+                        },
+                        book: &roles.book,
+                    };
+                    finishing.record(w, run.harnesses(), &mut queued)
+                })?;
+                // Committed: handed over here, as `assign` hands its mail over.
+                run.hand(queued);
+                Ok::<_, Granting>(response)
+            })
+            .await
+            .map_err(|err| Sending::Internal(err.to_string()))??;
+        Ok::<_, Granting>(response)
+    };
+    match finished.await {
+        Ok(response) => axum::Json(response).into_response(),
+        Err(err) => granting(err),
+    }
+}
+
+/// A task a verb finishes, as its caller asks.
+struct Finishing<'a> {
+    caller: Option<&'a AgentId>,
+    task: &'a TaskId,
+    outcome: TaskOutcome,
+    note: Option<&'a str>,
+    subtasks: Subtasks,
+    book: &'a RoleBook,
+}
+
+impl Finishing<'_> {
+    /// Finishes the task, or the caller's part in it, then moves up the subtasks that leaves
+    /// stranded, all in one write: a step that fails undoes the finish, which its caller can try
+    /// again, so no giver goes untold of a finish that was recorded (`finish`).
+    fn record(
+        &self,
+        w: &StoreWriter<'_>,
+        harnesses: &Harnesses,
+        queued: &mut Vec<Queued>,
+    ) -> Result<TaskCommandResponse, Granting> {
+        let reads = w.reads();
+        check_caller(reads, self.caller)?;
+        let view = reads
+            .task_view(self.task)?
+            .ok_or_else(|| no_such(self.task))?;
+        let finish = check_finish(&view, self.caller, self.outcome, self.subtasks, self.book)?;
+        let task = reads.task(self.task)?.ok_or_else(|| no_such(self.task))?;
+        let caller_name = name_of(reads, self.caller)?;
+        let from = self.caller.map(|id| Agent {
+            id,
+            name: &caller_name,
+        });
+        let mut event_ids = match finish {
+            Finish::Assignment(own) => {
+                let giver = reads.granters(&own.id)?.into_iter().next();
+                let giver = giver.or_else(|| view.owner_agent_id.clone());
+                self.complete(w, harnesses, &task, own, giver, queued)?
+            }
+            Finish::Task => {
+                within_limit(&finished_mail(&task, self.outcome, from, self.note))?;
+                self.end_with_subtasks(w, harnesses, from, queued)?
+            }
+        };
+        let lifted = lift_stranded(w, harnesses, queued)?;
+        if lifted.outran {
+            return Err(Sending::Internal(
+                "subtasks were still stranded after lifting every level".to_owned(),
+            )
+            .into());
+        }
+        event_ids.extend(lifted.event_ids);
+        Ok(TaskCommandResponse { event_ids })
+    }
+
+    /// A worker's part done: its assignment ends, and with it those granted under it, who are
+    /// told their line has ended. Whoever gave the part out hears; the human, through the inbox.
+    fn complete(
+        &self,
+        w: &StoreWriter<'_>,
+        harnesses: &Harnesses,
+        task: &Task,
+        own: &ActiveAssignment,
+        giver: Option<AgentId>,
+        queued: &mut Vec<Queued>,
+    ) -> Result<Vec<u64>, Granting> {
+        let reads = w.reads();
+        let worker_name = name_of(reads, Some(&own.agent_id))?;
+        let worker = Agent {
+            id: &own.agent_id,
+            name: &worker_name,
+        };
+        let body = completed_mail(task, worker, self.note);
+        within_limit(&body)?;
+        let under = reads.active_under(std::slice::from_ref(&own.id))?;
+        let ended = w.end_assignment(self.caller, &own.id, AssignmentEndedReason::Completed)?;
+        let mut to = Vec::new();
+        match giver {
+            Some(agent) => to.push(Tell { agent, body }),
+            None => task_done(w, &own.agent_id, &task.id, printable(&body))?,
+        }
+        for a in under {
+            let on = reads.task(&a.task_id)?.ok_or_else(|| no_such(&a.task_id))?;
+            to.push(Tell {
+                body: line_ended_mail(&on),
+                agent: a.agent_id,
+            });
+        }
+        let mut event_ids = vec![ended];
+        event_ids.extend(tell(w, harnesses, to, self.caller, queued)?);
+        Ok(event_ids)
+    }
+
+    /// The task finished, its open subtasks cancelled first when the caller asked, deepest
+    /// first, so each finishes before its parent. No agent cancels a subtask the human owns.
+    fn end_with_subtasks(
+        &self,
+        w: &StoreWriter<'_>,
+        harnesses: &Harnesses,
+        from: Who<'_>,
+        queued: &mut Vec<Queued>,
+    ) -> Result<Vec<u64>, Granting> {
+        let reads = w.reads();
+        let subtasks = match self.subtasks {
+            Subtasks::CancelWithIt => reads.open_subtasks_under(self.task)?,
+            Subtasks::Refuse => Vec::new(),
+        };
+        if self.caller.is_some() {
+            let mut human = Vec::new();
+            for id in &subtasks {
+                let sub = reads.task(id)?.ok_or_else(|| no_such(id))?;
+                if sub.owner_agent_id.is_none() {
+                    human.push(id.as_str());
+                }
+            }
+            if !human.is_empty() {
+                return Err(Granting::Refused(TaskRefused {
+                    refusal: Refusal::Forbidden,
+                    message: format!(
+                        "subtasks {} are the human's: only the human cancels them",
+                        human.join(", ")
+                    ),
+                }));
+            }
+        }
+        let mut event_ids = Vec::new();
+        for id in &subtasks {
+            let cancelled = Ended {
+                task: id,
+                outcome: TaskOutcome::Cancelled,
+                note: Some(CANCELLED_WITH_PARENT),
+            };
+            event_ids.extend(self.end(w, harnesses, &cancelled, from, queued)?);
+        }
+        let own = Ended {
+            task: self.task,
+            outcome: self.outcome,
+            note: self.note,
+        };
+        event_ids.extend(self.end(w, harnesses, &own, from, queued)?);
+        Ok(event_ids)
+    }
+
+    /// One task finished, and the agents that gave it out and that were still on it told
+    /// (`end`): who gave it out is read before the finish ends their assignments.
+    fn end(
+        &self,
+        w: &StoreWriter<'_>,
+        harnesses: &Harnesses,
+        ended: &Ended<'_>,
+        from: Who<'_>,
+        queued: &mut Vec<Queued>,
+    ) -> Result<Vec<u64>, Granting> {
+        let reads = w.reads();
+        let view = reads
+            .task_view(ended.task)?
+            .ok_or_else(|| no_such(ended.task))?;
+        let task = reads.task(ended.task)?.ok_or_else(|| no_such(ended.task))?;
+        let mut givers: Vec<AgentId> = view.owner_agent_id.iter().cloned().collect();
+        for a in &view.active {
+            if let Some(giver) = reads.granters(&a.id)?.into_iter().next()
+                && !givers.contains(&giver)
+            {
+                givers.push(giver);
+            }
+        }
+        let workers: Vec<AgentId> = view
+            .active
+            .iter()
+            .map(|a| a.agent_id.clone())
+            .filter(|agent| !givers.contains(agent))
+            .collect();
+        let finished = w.finish_task(self.caller, ended.task, ended.outcome, ended.note)?;
+        // The human's task, done by an agent: the human hears through the inbox, not mail.
+        if let Some(caller) = self.caller
+            && ended.outcome == TaskOutcome::Done
+            && view.owner_agent_id.is_none()
+        {
+            task_done(w, caller, ended.task, done_summary(&task, ended.note))?;
+        }
+        let told = finished_mail(&task, ended.outcome, from, ended.note);
+        let stop = match ended.outcome {
+            TaskOutcome::Cancelled => cancelled_mail(&task, from),
+            TaskOutcome::Done => told.clone(),
+        };
+        let mut to: Vec<Tell> = givers
+            .into_iter()
+            .map(|agent| Tell {
+                agent,
+                body: told.clone(),
+            })
+            .collect();
+        to.extend(workers.into_iter().map(|agent| Tell {
+            agent,
+            body: stop.clone(),
+        }));
+        let mut event_ids = vec![finished];
+        event_ids.extend(tell(w, harnesses, to, self.caller, queued)?);
+        Ok(event_ids)
+    }
+}
+
+/// Tells the human, through an item raised on `agent`, that the work on `task` is done.
+fn task_done(
+    w: &StoreWriter<'_>,
+    agent: &AgentId,
+    task: &TaskId,
+    summary: String,
+) -> Result<(), Granting> {
+    w.open_attention(AttentionOpened {
+        agent_id: agent.clone(),
+        summary,
+        kind: Some(AttentionKind::TaskDone),
+        task_id: Some(task.as_str().to_owned()),
+        message_id: None,
+        tool_use_id: None,
+        main_agent: true,
+    })?;
+    Ok(())
+}
+
+/// Refuses mail longer than a mailbox takes, before anything is written (`MAIL_LIMIT`).
+fn within_limit(body: &str) -> Result<(), Granting> {
+    let long = length(body);
+    if long > MAIL_LIMIT {
+        return Err(Sending::TooLong(long).into());
+    }
+    Ok(())
+}
+
+/// A task a finish ends: the one asked for, or a subtask cancelled with it.
+struct Ended<'a> {
+    task: &'a TaskId,
+    outcome: TaskOutcome,
+    note: Option<&'a str>,
+}
+
+fn no_such(task: &TaskId) -> Granting {
+    Granting::NoTask(task.as_str().to_owned())
 }
 
 /// Mail a verb sends one agent.
