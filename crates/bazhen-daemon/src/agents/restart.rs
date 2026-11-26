@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use bazhen_harness::{BoxFuture, LaunchError, LaunchRequest, LaunchSpec};
+use bazhen_harness::{BoxFuture, ChannelPort, LaunchError, LaunchRequest, LaunchSpec};
 use bazhen_protocol::agent_events::{
     AgentRelaunchRejected, AgentRelaunchRequested, AgentRespawnRejected, AgentRestarted,
     RelaunchRejectedReason, RespawnRejectedReason,
@@ -27,6 +27,7 @@ use super::lifecycle::{Begun, Doing, append, asked, from_runtime, offers, record
 use super::prompts::{Composed, FLEET, compose};
 use super::{AgentError, Agents, minted, session_tag};
 use crate::budget::Counts;
+use crate::channel::reconnect::Channel;
 use crate::failure::failure_detail;
 use crate::shells::RUNTIME;
 use crate::terminals::{Kind, NewTerminal, Recorded, Restart, TerminalError};
@@ -141,6 +142,8 @@ struct Resumed {
 /// What a start again is started with, beside the agent.
 struct Again<'a> {
     launch: &'a AgentLaunch,
+    /// The channel to its harness's server, for a harness that has one.
+    channel: Option<&'a Channel>,
     /// The session it resumes, or none for a fresh one.
     session: Option<&'a ExternalRef>,
     /// The environment a session it starts is in.
@@ -234,6 +237,7 @@ impl Agents {
         };
         // Known before anything happens, so it is refused with nothing recorded.
         let session = self.resumable(id, &launch, "")?;
+        let channel = self.channel(launch.harness)?;
         self.refuse_taken(&agent, &launch, session).await?;
         let (prompt, prompt_file) = self.prompt_for(&agent, &launch)?;
         let requesting = agent.clone();
@@ -243,6 +247,7 @@ impl Agents {
         replaced(agent.clone()).await;
         let again = Again {
             launch: &launch,
+            channel,
             session: Some(session),
             environment: session.environment_id.clone(),
             generation: generation + 1,
@@ -271,10 +276,10 @@ impl Agents {
                     prompt_hash,
                     resumed,
                 };
-                self.finish(&agent, key, &request, move |w| {
+                let finished = self.finish(&agent, key, &request, move |w| {
                     Ok(vec![requested, done.recorded(w)?])
-                })
-                .await
+                });
+                self.keep_connected(channel, finished.await)
             }
         }
     }
@@ -308,6 +313,7 @@ impl Agents {
         };
         let fresh = req.fresh == Some(true);
         // Known before anything happens, so it is refused with nothing recorded.
+        let channel = self.channel(launch.harness)?;
         let session = if fresh {
             None
         } else {
@@ -347,6 +353,7 @@ impl Agents {
         replaced(agent.clone()).await;
         let again = Again {
             launch: &launch,
+            channel,
             session,
             environment,
             generation,
@@ -380,10 +387,10 @@ impl Agents {
                     prompt_hash,
                     resumed,
                 };
-                self.finish(&agent, key, &request, move |w| {
+                let finished = self.finish(&agent, key, &request, move |w| {
                     Ok(vec![requested, done.recorded(w)?])
-                })
-                .await
+                });
+                self.keep_connected(channel, finished.await)
             }
         }
     }
@@ -642,13 +649,14 @@ impl Agents {
             name: again.launch.name.clone().filter(|name| !name.is_empty()),
             compact_window_tokens: again.launch.compact_window_tokens.map(u64::from),
         };
+        let channel = again.channel.map(|c| c as &dyn ChannelPort);
         let starting = match again.session {
-            Some(session) => harness.resume(&request, session, None).ok_or_else(|| {
+            Some(session) => harness.resume(&request, session, channel).ok_or_else(|| {
                 Failed::Harness(LaunchError::Refused(
                     "its harness starts no session again".to_owned(),
                 ))
             })?,
-            None => harness.launch(&request, None),
+            None => harness.launch(&request, channel),
         };
         let LaunchSpec {
             argv,
