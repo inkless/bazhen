@@ -135,6 +135,7 @@ async fn taken(
     message_id: &str,
 ) -> Result<(), String> {
     let Some(message) = MessageId::parse(message_id) else {
+        tracing::debug!("bazhen: a turn took {message_id:?}, which no message could be");
         return Ok(());
     };
     let session = session.0.clone();

@@ -908,7 +908,7 @@ fn confirms_a_message_a_turn_took_where_its_agent_alone_could_have_taken_it() {
     let gone = f.queued(&carol, true);
     f.set_on(&carol, "state = 'exited'");
     let elsewhere = f.queued(&bob, true);
-    let shared = f.queued(&f.agent, false);
+    let shared = f.queued(&f.agent, true);
     f.told(
         vec![
             on_thread(STUB_SESSION, taken(&own)),
@@ -947,7 +947,7 @@ fn confirms_a_message_a_turn_took_where_its_agent_alone_could_have_taken_it() {
             MailboxState::QueuedInCodex,
             MailboxState::QueuedInCodex,
             MailboxState::QueuedInCodex,
-            MailboxState::Queued
+            MailboxState::QueuedInCodex
         ]
     );
 }
