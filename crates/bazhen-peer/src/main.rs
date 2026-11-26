@@ -25,7 +25,15 @@ fn main() -> ExitCode {
             let _ = writeln!(io::stderr().lock(), "{refused}");
             ExitCode::from(match refused {
                 Refused::Foreign { .. } => 2,
-                Refused::Unreadable(_) | Refused::Replaced { .. } | Refused::Endless => 1,
+                Refused::Unreadable(_)
+                | Refused::Replaced { .. }
+                | Refused::Endless
+                | Refused::NoEnd
+                | Refused::Ambiguous
+                | Refused::NoReadableHolder { .. }
+                | Refused::TooManyHolders { .. }
+                | Refused::HolderChanged
+                | Refused::Changed(_) => 1,
             })
         }
     }

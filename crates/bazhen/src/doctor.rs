@@ -1,9 +1,9 @@
 //! What `bazhen status` and `bazhen doctor` say of the daemon, as lines.
 
 use bazhen_protocol::daemon::{
-    AgentCli, AgentShell, Containment, DoctorResponse, EnvSource, Holder, Lan, MemoryCap,
-    OriginsFrom, Refusing, RunningHolder, RuntimeHealthReport, RuntimeReportState, Terminals,
-    ToolCalls, Web,
+    AgentCli, AgentShell, Containment, DoctorResponse, EnvSource, Holder, HttpCallers, Lan,
+    MemoryCap, OriginsFrom, Refusing, RunningHolder, RuntimeHealthReport, RuntimeReportState,
+    Terminals, ToolCalls, Web,
 };
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::nullable::Nullable;
@@ -104,6 +104,9 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
     if let Some(web) = &d.web {
         out.extend(web_lines(web));
     }
+    if let Some(callers) = &d.http_callers {
+        out.extend(http_callers_lines(callers));
+    }
     if let Some(n) = &d.notifications {
         out.push(format!(
             "desktop notifications: {}",
@@ -166,6 +169,21 @@ fn peer_reader_lines(reader: &Nullable<bazhen_protocol::daemon::PeerReader>) -> 
         ],
         Nullable::Value(reader) => vec![format!("peer reader: {}", reader.path)],
         Nullable::Absent => vec![],
+    }
+}
+
+/// Whether the daemon tells who calls it over loopback HTTP, and a warning when it can't: then it
+/// refuses every HTTP caller, the web client included.
+fn http_callers_lines(callers: &HttpCallers) -> Vec<String> {
+    match callers {
+        HttpCallers::Identified => vec!["HTTP callers: identified by their process".to_owned()],
+        HttpCallers::Unidentified { why } => vec![
+            "HTTP callers: unidentified".to_owned(),
+            format!(
+                "  warning: the daemon can't tell which process calls it over loopback HTTP \
+                 ({why}), so it refuses every HTTP caller, the web client included"
+            ),
+        ],
     }
 }
 
@@ -578,6 +596,28 @@ mod tests {
             unbuilt[1],
             "  warning: no bazhen on the PATH agents start with, so they can't run it; run `moon run :build`, \
              then link target/release/bazhen into a directory on it"
+        );
+    }
+
+    #[test]
+    fn warns_when_the_daemon_cant_tell_who_calls_it_over_http() {
+        assert_eq!(
+            [
+                http_callers_lines(&HttpCallers::Identified),
+                http_callers_lines(&HttpCallers::Unidentified {
+                    why: "/proc/net/tcp can't be read".to_owned()
+                }),
+            ],
+            [
+                vec!["HTTP callers: identified by their process".to_owned()],
+                vec![
+                    "HTTP callers: unidentified".to_owned(),
+                    "  warning: the daemon can't tell which process calls it over loopback HTTP \
+                     (/proc/net/tcp can't be read), so it refuses every HTTP caller, the web \
+                     client included"
+                        .to_owned()
+                ],
+            ]
         );
     }
 

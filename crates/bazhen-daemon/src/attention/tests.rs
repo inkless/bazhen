@@ -31,9 +31,9 @@ fn call<F: Future<Output = Response>>(
     )
 }
 
-/// The human's answer over HTTP, where the gate let in every caller.
+/// The human's answer, which no guard read a caller of.
 async fn by_human(state: State<Shared>, id: Path<String>, body: Bytes) -> Response {
-    answer(state, id, None, None, body).await
+    answer(state, id, None, body).await
 }
 
 /// The status and refusal of a call, its item named `A`.

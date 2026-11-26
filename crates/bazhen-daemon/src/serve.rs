@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bazhen_client::paths::{DRAIN, LOCK_WAIT, Paths, lock_of};
+use bazhen_protocol::daemon::HttpCallers;
 use bazhen_store::{AppendError, OpenError, Store};
 
 use crate::retention;
@@ -239,6 +240,19 @@ async fn shell_integration(
     }
 }
 
+/// Whether the daemon can tell who calls it over loopback HTTP, found before it serves any such
+/// caller, and a warning where it can't.
+async fn http_callers(peers: &crate::peer::Peers) -> HttpCallers {
+    let found = crate::peer::calling_itself(peers).await;
+    if let HttpCallers::Unidentified { why } = &found {
+        tracing::warn!(
+            "bazhen can't tell which process calls it over loopback HTTP, so it refuses every HTTP \
+             caller, the web client included: {why}"
+        );
+    }
+    found
+}
+
 /// The shells over `runner`'s terminals, with this machine's environment registered, the shells
 /// kept from before reconciled with what runs, what the budget says of those still open, and the
 /// events told from before any of it. A wait on a restarted shell's prompt ends at `stop`. The
@@ -319,7 +333,10 @@ async fn shells(
             agents: Arc::new(agents),
             events,
         },
-        doctor: runner.doctor,
+        doctor: Settled {
+            http_callers: Some(http_callers(&shared.peers).await),
+            ..runner.doctor
+        },
     })
 }
 
@@ -1206,6 +1223,13 @@ mod tests {
                     &serde_json::json!("auto"),
                     Some(&serde_json::Value::Null),
                 ),
+                "{doctor}"
+            );
+            // It called itself over loopback as it started, and found its own process.
+            #[cfg(target_os = "linux")]
+            assert_eq!(
+                doctor["httpCallers"],
+                serde_json::json!({ "state": "identified" }),
                 "{doctor}"
             );
             assert_eq!(

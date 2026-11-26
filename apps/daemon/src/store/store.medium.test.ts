@@ -506,6 +506,18 @@ describe("Store", () => {
     upgraded.close();
   });
 
+  it("upgrades a database paired before devices said how they paired, none paired through a forwarder", () => {
+    const path = dbPath();
+    const before = MIGRATIONS.findIndex((m) => m.name === "2026-11-25-device-forwarded");
+    const old = Store.open(path, MIGRATIONS.slice(0, before));
+    old.pairDevice("phone", "hash", true, new Date(), loopbackPairing);
+    old.close();
+    Store.open(path).close();
+    expect(read(path, (db) => db.prepare("SELECT name, forwarded FROM devices").all())).toEqual([
+      { name: "phone", forwarded: 0 },
+    ]);
+  });
+
   it("upgrades a schema-17 database, its shells running nothing until one is seen to", () => {
     const path = dbPath();
     const v17 = Store.open(path, MIGRATIONS.slice(0, 17));
@@ -2070,7 +2082,8 @@ describe("mail as a wait reads it", () => {
 
   it("upgrades a database from before senders were kept, each message's sender read back", () => {
     const path = dbPath();
-    const old = Store.open(path, MIGRATIONS.slice(0, -1));
+    const before = MIGRATIONS.findIndex((m) => m.name === "2026-11-18-mailbox-sender-and-settled");
+    const old = Store.open(path, MIGRATIONS.slice(0, before));
     const env = withEnvironment(old);
     const { agentId: a } = launch(old, env);
     const { agentId: b } = launch(old, env);

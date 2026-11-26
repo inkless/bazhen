@@ -171,7 +171,9 @@ pub(crate) async fn stream(
     };
     // A device's view is held, to close when the device is revoked or lapses.
     let (device, device_name) = match viewer {
-        Some(Extension(paired::Viewer::Device { id, name, required })) => (
+        Some(Extension(paired::Viewer::Device {
+            id, name, required, ..
+        })) => (
             Some(
                 shared
                     .pairing
@@ -1267,7 +1269,7 @@ mod tests {
         connections.spawn_on(
             crate::accept::serve_on(
                 listener,
-                crate::routes::socket_router(shared),
+                crate::testing::without_the_callers_socket(crate::routes::socket_router(shared)),
                 crate::accept::SOCKET,
                 stop.token().clone(),
                 TaskTracker::new(),

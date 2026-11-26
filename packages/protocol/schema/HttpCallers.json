@@ -1,0 +1,34 @@
+{
+  "$id": "HttpCallers",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "properties": {
+        "state": {
+          "const": "identified",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "state": {
+          "const": "unidentified",
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "why"
+      ],
+      "type": "object"
+    }
+  ]
+}

@@ -1,15 +1,16 @@
 //! Who called on the socket (`auth/callers.ts`): the human, an agent, or refused, from what the
 //! request presents and whose process made it; and the guard that holds each route to its callers.
 
-use axum::extract::{Request, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{OriginalUri, Request, State};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::ids::AgentId;
 
+use crate::paired::{ThroughForwarder, Viewer};
 use crate::peer::{self, PeerRead, PeerSocket, Reading, Via};
-use crate::routes::{Shared, fail, header, internal};
+use crate::routes::{Shared, fail, header, internal, retry_soon};
 use crate::writer::Writer;
 
 /// Who called, as the guard found it: an agent, or the human as none.
@@ -22,7 +23,14 @@ pub(crate) struct Caller(pub(crate) Option<AgentId>);
 pub(crate) enum Identity {
     Human,
     Agent(AgentId),
-    Refused { reason: String, retry: bool },
+    /// A TCP caller whose socket no readable process holds, each one that may hold it unseen the
+    /// human's, presenting no agent's credential: the human only where its request carries a
+    /// device paired the same way (`http_guard`).
+    Unheld,
+    Refused {
+        reason: String,
+        retry: bool,
+    },
 }
 
 /// Why a caller whose process wasn't read in time is refused.
@@ -116,9 +124,21 @@ pub(crate) fn identify(
             });
         }
         Some(Reading::Codex(via)) => return as_codex(credentials, presented, *via),
-        Some(Reading::Agent(agent)) => return as_peer(credentials, presented, agent),
+        Some(Reading::Agent(agent, _)) => return as_peer(credentials, presented, agent),
         Some(Reading::Withheld) if presented.thread.is_some() => {
             return as_codex(credentials, presented, Via::Environment);
+        }
+        Some(Reading::Unheld) => {
+            let presents =
+                presented.token.is_some() || presented.said.is_some() || presented.thread.is_some();
+            return Ok(if presents {
+                refused(
+                    "a caller whose socket no readable process holds can't present an agent's \
+                     credentials",
+                )
+            } else {
+                Identity::Unheld
+            });
         }
         Some(Reading::Withheld | Reading::Outside) | None => {}
     }
@@ -237,6 +257,7 @@ pub(crate) const AGENT_OPEN: &[(&str, &str)] = &[
 /// The human's routes, on any method, each with what an agent is told it can't do.
 pub(crate) const HUMANS_ONLY: &[(&str, &str)] = &[
     ("/v1/pairing/codes", "pair a device"),
+    ("/v1/pairing", "pair a browser"),
     ("/v1/devices", "list paired devices"),
     ("/v1/devices/:id/revoke", "revoke a device"),
     ("/v1/daemon/stop", "stop the daemon"),
@@ -276,17 +297,17 @@ fn matches(pattern: &str, path: &str) -> bool {
     }
 }
 
-/// Who called, or why the store couldn't say.
+/// Who called, and how its process is the agent it reads as, or why the store couldn't say.
 async fn who(
     shared: &Shared,
     socket: Option<PeerSocket>,
     presented: Presented,
-) -> Result<Identity, String> {
+) -> Result<(Identity, Option<String>), String> {
     let read = match &socket {
         Some(socket) => Some(shared.peers.read(socket).await),
         None => None,
     };
-    identified(shared, read, presented).await
+    identified_how(shared, read, presented).await
 }
 
 /// Who called, by `read` of its socket's peer where there is one, or why the store couldn't say.
@@ -295,6 +316,15 @@ pub(crate) async fn identified(
     read: Option<PeerRead>,
     presented: Presented,
 ) -> Result<Identity, String> {
+    Ok(identified_how(shared, read, presented).await?.0)
+}
+
+/// `identified`, with how the caller's process is the agent it reads as, where it is one's.
+async fn identified_how(
+    shared: &Shared,
+    read: Option<PeerRead>,
+    presented: Presented,
+) -> Result<(Identity, Option<String>), String> {
     let store = shared.store.clone();
     tokio::task::spawn_blocking(move || {
         let mut credentials = Stored {
@@ -311,7 +341,13 @@ pub(crate) async fn identified(
             })
             .transpose()
             .map_err(|err| err.to_string())?;
-        identify(&mut credentials, &presented, reading.as_ref()).map_err(|err| err.to_string())
+        let how = match &reading {
+            Some(Reading::Agent(agent, how)) => Some(how.of(agent)),
+            _ => None,
+        };
+        let identity = identify(&mut credentials, &presented, reading.as_ref())
+            .map_err(|err| err.to_string())?;
+        Ok((identity, how))
     })
     .await
     .map_err(|err| err.to_string())?
@@ -321,7 +357,27 @@ fn forbidden(message: &str) -> Response {
     fail(StatusCode::FORBIDDEN, ErrorCode::Forbidden, message)
 }
 
-/// Identifies every socket request under `/v1`, and every upgrade, before any route sees it
+/// Why a caller whose socket no readable process holds is refused without a device paired the
+/// same way: only a forwarder, as `ssh -L` is, leaves its socket so, and a browser behind one
+/// pairs through it once.
+pub(crate) const UNHELD: &str = "no process holding the caller's socket can be read: pair this browser \
+                      through the forwarder it uses (`bazhen devices pair`)";
+
+/// `guard` for the loopback HTTP listener, whose every connection carries its two addresses
+/// (`accept::Connected`): a request under `/v1`, or an upgrade, that carries none can't be
+/// identified, so it is refused rather than taken for the human's.
+pub(crate) async fn http_guard(
+    State(shared): State<Shared>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if request.extensions().get::<PeerSocket>().is_none() {
+        return forbidden("the caller's connection can't be read");
+    }
+    guard(State(shared), request, next).await
+}
+
+/// Identifies every request under `/v1`, and every upgrade, before any route sees it
 /// (foundation-design §9.1): a credential that doesn't hold refuses every route, an agent is
 /// refused every route but those in `AGENT_OPEN`, and only the human may open a stream. Each route
 /// reads who called from its `Caller`. A caller not read in time is told to try again.
@@ -331,13 +387,18 @@ pub(crate) async fn guard(
     next: Next,
 ) -> Response {
     let upgrade = request.headers().contains_key("upgrade");
-    let path = request.uri().path().to_owned();
+    // Under a nest, the URI is what the nest left of it; the original is the whole path.
+    let path = request
+        .extensions()
+        .get::<OriginalUri>()
+        .map_or_else(|| request.uri().path(), |original| original.path())
+        .to_owned();
     let under_v1 = path == "/v1" || path.starts_with("/v1/");
     if !upgrade && (!under_v1 || SELF_IDENTIFIED.contains(&path.as_str())) {
         return next.run(request).await;
     }
     let socket = request.extensions().get::<PeerSocket>().cloned();
-    let who = match who(&shared, socket, presented_by(request.headers())).await {
+    let (who, how) = match who(&shared, socket, presented_by(request.headers())).await {
         Ok(who) => who,
         Err(_) if upgrade => return forbidden("the caller's process can't be read for sure"),
         Err(err) => return internal(&err),
@@ -346,22 +407,37 @@ pub(crate) async fn guard(
         Identity::Refused {
             reason,
             retry: true,
-        } => {
-            return fail(
-                StatusCode::SERVICE_UNAVAILABLE,
-                ErrorCode::Unavailable,
-                &reason,
-            );
-        }
+        } => return retry_soon(&reason),
         Identity::Refused { reason, .. } => (None, Some(reason)),
         Identity::Human => (Some(None), None),
         Identity::Agent(agent) => (Some(Some(agent)), None),
+        Identity::Unheld if request.method() == Method::POST && path == "/v1/pairing" => {
+            request.extensions_mut().insert(ThroughForwarder);
+            (Some(None), None)
+        }
+        Identity::Unheld
+            if matches!(
+                request.extensions().get::<Viewer>(),
+                Some(Viewer::Device {
+                    forwarded: true,
+                    ..
+                })
+            ) =>
+        {
+            (Some(None), None)
+        }
+        Identity::Unheld => (None, Some(UNHELD.to_owned())),
     };
+    // An agent's refusal says how its process is the agent's, where its reading says.
+    let because = |why: Option<&String>| why.map_or_else(String::new, |why| format!(": {why}"));
     if upgrade {
         return match (caller, refusal) {
             (Some(None), _) => next.run(request).await,
             (_, Some(refusal)) => forbidden(&refusal),
-            _ => forbidden("an agent can't open a stream"),
+            _ => forbidden(&format!(
+                "an agent can't open a stream{}",
+                because(how.as_ref())
+            )),
         };
     }
     if caller != Some(None)
@@ -369,7 +445,7 @@ pub(crate) async fn guard(
             .iter()
             .find(|(pattern, _)| matches(pattern, &path))
     {
-        let why = refusal.map_or_else(String::new, |refusal| format!(": {refusal}"));
+        let why = because(refusal.as_ref().or(how.as_ref()));
         return forbidden(&format!("an agent can't {what}{why}"));
     }
     if let Some(refusal) = refusal {
@@ -381,13 +457,14 @@ pub(crate) async fn guard(
         .any(|(m, pattern)| *m == method && matches(pattern, &path));
     let caller = caller.unwrap_or(None);
     if caller.is_some() && !open {
-        return forbidden(&format!("an agent can't use {method} {path}"));
+        let why = because(how.as_ref());
+        return forbidden(&format!("an agent can't use {method} {path}{why}"));
     }
     request.extensions_mut().insert(Caller(caller));
     next.run(request).await
 }
 
-/// The caller as the route reads it: the human where no guard named one, as over HTTP.
+/// The caller as the route reads it: the human where no guard named one.
 pub(crate) fn caller_of(caller: Option<axum::Extension<Caller>>) -> Option<AgentId> {
     caller.and_then(|axum::Extension(Caller(caller))| caller)
 }
@@ -483,7 +560,11 @@ mod tests {
     const MARKED_ONLY: Reading = Reading::Codex(Via::Environment);
 
     fn under(agent: AgentId) -> Reading {
-        Reading::Agent(agent)
+        let how = peer::How {
+            pid: 150,
+            by: peer::By::Ancestry,
+        };
+        Reading::Agent(agent, how)
     }
 
     #[test]
@@ -794,7 +875,7 @@ mod tests {
         use serde_json::{Value, json};
         use tower::ServiceExt as _;
 
-        use super::{THREAD, TOKEN, agent};
+        use super::{HUMANS_ONLY, THREAD, TOKEN, agent};
         use crate::peer::{PeerSocket, Peers, READ};
         use crate::routes::{Shared, Stop, http_router, socket_router};
         use crate::testing::{TempDir, runtime};
@@ -882,6 +963,20 @@ mod tests {
             body: Option<Value>,
             peered: bool,
         ) -> (u16, Value) {
+            let (ours, _theirs) = UnixStream::pair().unwrap();
+            let socket = peered.then(|| PeerSocket::accepted_now(ours.as_fd()));
+            ask_on(router, method, path, headers, body, socket)
+        }
+
+        /// What `router` answers a request on `socket`, or on none.
+        fn ask_on(
+            router: Router,
+            method: &str,
+            path: &str,
+            headers: &[(&str, &str)],
+            body: Option<Value>,
+            socket: Option<PeerSocket>,
+        ) -> (u16, Value) {
             let mut builder = axum::http::Request::builder().method(method).uri(path);
             for (name, value) in headers {
                 builder = builder.header(*name, *value);
@@ -889,11 +984,8 @@ mod tests {
             let mut request = builder
                 .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
                 .unwrap();
-            let (ours, _theirs) = UnixStream::pair().unwrap();
-            if peered {
-                request
-                    .extensions_mut()
-                    .insert(PeerSocket::accepted_now(ours.as_fd()));
+            if let Some(socket) = socket {
+                request.extensions_mut().insert(socket);
             }
             runtime().block_on(async {
                 let response = router.oneshot(request).await.unwrap();
@@ -1144,7 +1236,14 @@ mod tests {
                     None,
                     true
                 ),
-                refused("forbidden", "an agent can't open a stream")
+                refused(
+                    "forbidden",
+                    &format!(
+                        "an agent can't open a stream: the caller, pid 150, was started from \
+                         {}'s terminal",
+                        agent('1').as_str()
+                    )
+                )
             );
             thread.finish();
         }
@@ -1257,28 +1356,194 @@ mod tests {
             thread.finish();
         }
 
-        #[test]
-        fn answers_the_human_as_the_caller_over_http_whatever_it_presents() {
-            let (_dir, store, thread) = daemon();
+        const HOST: (&str, &str) = ("host", "127.0.0.1:7900");
+
+        /// The loopback listener's routes over `store`, its callers read by `peers`.
+        fn http(store: &Writer, peers: Peers, pairing_required: bool) -> Router {
+            let mut shared = Shared::new("f".repeat(64).as_str(), Stop::default(), store.clone());
+            shared.peers = peers;
             let gate = crate::routes::Gate {
                 allow: crate::guard::allowlists(7900, None, &[]),
-                pairing_required: false,
+                pairing_required,
             };
-            let http = http_router(
-                Shared::new("f".repeat(64).as_str(), Stop::default(), store.clone()),
-                gate,
+            http_router(shared, gate)
+        }
+
+        #[test]
+        fn refuses_an_agent_over_http_what_the_socket_refuses_it_naming_how_it_is_the_agent() {
+            let (_dir, store, thread) = daemon();
+            let ask_as = |peer: Peer, method, path: &str, headers: &[(&str, &str)]| {
+                let headers = [&[HOST], headers].concat();
+                let router = http(&store, reading(Ok(peer)), false);
+                ask(router, method, path, &headers, None, true)
+            };
+            let as_agent = |method, path: &str, headers: &[(&str, &str)]| {
+                ask_as(peer(150, &[100, 10, 1], None), method, path, headers)
+            };
+            let one = agent('1');
+            let started = format!(
+                "the caller, pid 150, was started from {}'s terminal",
+                one.as_str()
             );
+            for (pattern, what) in HUMANS_ONLY {
+                let path = pattern.replace(":id", "x");
+                assert_eq!(
+                    as_agent("POST", &path, &[]),
+                    refused("forbidden", &format!("an agent can't {what}: {started}")),
+                    "{path}"
+                );
+            }
+            let orphaned = Peer {
+                session: Some(pid(100)),
+                ..peer(150, &[1], None)
+            };
             assert_eq!(
+                [
+                    as_agent("GET", "/v1/events", &[UPGRADE]),
+                    as_agent("GET", "/v1/terminals/x/stream", &[UPGRADE]),
+                    as_agent("GET", "/v1/nowhere", &[]),
+                    as_agent("GET", "/v1/", &[]),
+                    ask_as(orphaned, "POST", "/v1/shells", &[]),
+                    as_agent("GET", "/v1/caller", &[]),
+                ],
+                [
+                    refused(
+                        "forbidden",
+                        &format!("an agent can't open a stream: {started}")
+                    ),
+                    refused(
+                        "forbidden",
+                        &format!("an agent can't open a stream: {started}")
+                    ),
+                    refused(
+                        "forbidden",
+                        &format!("an agent can't use GET /v1/nowhere: {started}")
+                    ),
+                    refused(
+                        "forbidden",
+                        &format!("an agent can't use GET /v1/: {started}")
+                    ),
+                    refused(
+                        "forbidden",
+                        &format!(
+                            "an agent can't open a shell: the caller, pid 150, is in {}'s \
+                             terminal's session",
+                            one.as_str()
+                        )
+                    ),
+                    (200, json!({ "agentId": one.as_str() })),
+                ]
+            );
+            // A process under no terminal is the human, and an agent's token names its agent, as
+            // on the socket.
+            let outside = |headers: &[(&str, &str)]| {
+                let peers = reading(Ok(peer(5000, &[1], None)));
+                let headers = [&[HOST], headers].concat();
                 ask(
-                    http,
+                    http(&store, peers, false),
                     "GET",
                     "/v1/caller",
-                    &[("host", "127.0.0.1:7900"), ("bazhen-agent-token", TOKEN)],
+                    &headers,
                     None,
-                    false
-                ),
-                (200, json!({ "agentId": null }))
+                    true,
+                )
+            };
+            assert_eq!(
+                [outside(&[]), outside(&[("bazhen-agent-token", TOKEN)])],
+                [
+                    (200, json!({ "agentId": null })),
+                    (200, json!({ "agentId": agent('1').as_str() })),
+                ]
             );
+            thread.finish();
+        }
+
+        #[test]
+        fn refuses_an_http_caller_it_cant_identify_and_tells_one_that_raced_to_try_again() {
+            let (_dir, store, thread) = daemon();
+            let unread = "the caller's process can't be read for sure: \
+                          the caller's ancestors go past 256 processes";
+            let late_reason = "the caller's process wasn't read in time; try again";
+            let raced = || Peers::with(READ, |_, _| Err(Refused::HolderChanged));
+            let at = |port| Ok(std::net::SocketAddr::from(([127, 0, 0, 1], port)));
+            let over_tcp = PeerSocket::tcp_accepted_now(at(40000), at(7900));
+            let ask_on = |peers, path, headers: &[(&str, &str)], socket| {
+                let headers = [&[HOST], headers].concat();
+                ask_on(
+                    http(&store, peers, false),
+                    "GET",
+                    path,
+                    &headers,
+                    None,
+                    socket,
+                )
+            };
+            let unix = || {
+                let (ours, _theirs) = UnixStream::pair().unwrap();
+                Some(PeerSocket::accepted_now(ours.as_fd()))
+            };
+            assert_eq!(
+                [
+                    ask_on(reading(Err("endless")), "/v1/health", &[], unix()),
+                    ask_on(Peers::default(), "/v1/health", &[], None),
+                    ask_on(Peers::default(), "/v1/events", &[UPGRADE], None),
+                    ask_on(
+                        Peers::default().with_tcp(None),
+                        "/v1/caller",
+                        &[],
+                        Some(over_tcp)
+                    ),
+                    ask_on(raced(), "/v1/caller", &[], unix()),
+                    ask_on(late(), "/v1/state", &[], unix()),
+                ],
+                [
+                    refused("forbidden", unread),
+                    refused("forbidden", "the caller's connection can't be read"),
+                    refused("forbidden", "the caller's connection can't be read"),
+                    refused(
+                        "forbidden",
+                        &format!(
+                            "the caller's process can't be read for sure: {}",
+                            crate::peer::UNIDENTIFIABLE
+                        )
+                    ),
+                    refused("unavailable", late_reason),
+                    refused("unavailable", late_reason),
+                ]
+            );
+            thread.finish();
+        }
+
+        /// A wrong host, an origin the daemon doesn't admit and a browser yet to pair are each
+        /// answered before the caller's process is looked for.
+        #[test]
+        fn answers_over_http_what_the_host_origin_and_pairing_refuse_before_reading_the_caller() {
+            let (_dir, store, thread) = daemon();
+            let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counted = || {
+                let reads = std::sync::Arc::clone(&reads);
+                Peers::with(READ, move |_, _| {
+                    reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(peer(5000, &[1], None))
+                })
+            };
+            let ask = |pairing_required, method, headers: &[(&str, &str)]| {
+                let router = http(&store, counted(), pairing_required);
+                ask(router, method, "/v1/tasks", headers, None, true).0
+            };
+            let evil = [HOST, ("origin", "https://evil.example")];
+            assert_eq!(
+                [
+                    ask(false, "GET", &[("host", "evil.example")]),
+                    ask(false, "POST", &evil),
+                    ask(true, "GET", &[HOST]),
+                    ask(true, "GET", &[HOST, UPGRADE]),
+                ],
+                [421, 403, 401, 401]
+            );
+            assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert_eq!(ask(false, "GET", &[HOST, UPGRADE]), 404);
+            assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
             thread.finish();
         }
     }

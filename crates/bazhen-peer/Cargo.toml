@@ -11,5 +11,8 @@ bazhen-pid = { workspace = true }
 rustix = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lints]
 workspace = true

@@ -1,0 +1,23 @@
+# The caller lookup's fuzz targets. libFuzzer needs nightly, so this crate is a workspace of its own,
+# built only by `cargo +nightly fuzz` (.github/workflows/fuzz.yml).
+[package]
+name = "bazhen-peer-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bazhen-peer = { path = ".." }
+libfuzzer-sys = "=0.4.13"
+
+[[bin]]
+name = "proc_net_tcp"
+path = "fuzz_targets/proc_net_tcp.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

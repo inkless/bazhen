@@ -436,7 +436,11 @@ mod tests {
         let path = format!("/v1/terminals/{id}/screen?history=5");
         let read = [
             got(&runtime, socket_router(shared(&h)), &path),
-            got(&runtime, http_router(shared(&h), gate), &path),
+            got(
+                &runtime,
+                crate::testing::connected(http_router(shared(&h), gate)),
+                &path,
+            ),
         ];
         assert_eq!(read.map(|(status, _)| status), [200, 200]);
         let state = h.fake.state.lock().unwrap();

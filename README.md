@@ -460,6 +460,21 @@ process runs as another of your groups, as a `newgrp` or `sg` shell's do. Such a
 by the `CODEX_THREAD_ID` that `bazhen` sends instead, so a client that sends none, left running
 after its shell exits, isn't marked.
 
+The Rust daemon reads the caller of a loopback HTTP request the same way: as the processes that
+hold the connection's other end, which Linux's `/proc` names. So an agent's `curl`, script or
+browser is refused over HTTP what it is refused on the socket, and the refusal names the process it
+read and the agent's terminal it was started from. A browser first started from an agent's
+terminal, as `xdg-open` starts one for a dev server or a login step when no browser is running, is
+that agent's until you restart it outside Bazhen. A connection that another user's process holds,
+such as a proxy's, is refused. So is one forwarded by `ssh -L`, whose `sshd` can't be read, until
+the browser is paired through that forward once: then a request through it that carries the
+paired browser's cookie is yours, as long as every process of yours that may hold its socket
+unseen reads as yours (docs/remote.md, Pairing). `hidepid` hides only other users' processes, so
+it leaves this working. Where `/proc` doesn't say who holds a socket (`/proc` mounted with
+`subset=pid`, which hides `/proc/net`; a daemon in another PID namespace; or macOS), every API
+request over HTTP is refused: the daemon warns at start, and `bazhen doctor` shows
+`HTTP callers: unidentified`.
+
 These checks catch an agent's ordinary and accidental calls, not a determined agent's. Agents run
 as you, the same user, so an agent that does any of these looks like you to Bazhen:
 
@@ -467,8 +482,9 @@ as you, the same user, so an agent that does any of these looks like you to Bazh
   (`setsid -f env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE bazhen devices pair`, `systemd-run --user`,
   `at`), or, from Codex, leaves the app-server's tree with `CODEX_THREAD_ID` unset;
 - types into one of your shells (`tmux -S <socket> send-keys -t <shell pane>`);
-- reaches the web port on loopback where pairing isn't required (trusted by design under
-  `web.pairing = "auto"`);
+- reaches the TypeScript daemon's web port on loopback where pairing isn't required (trusted by
+  design under `web.pairing = "auto"`), or the Rust daemon's through a forwarder you started, such
+  as the web client's dev server, or by driving your browser;
 - rewrites Bazhen's files.
 
 Run agents inside their harness's sandbox to stop those.

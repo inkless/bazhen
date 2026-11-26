@@ -159,6 +159,10 @@ pub const MIGRATIONS: &[Migration] = &[
         "2026-11-18-mailbox-sender-and-settled",
         include_str!("migrations/2026-11-18-mailbox-sender-and-settled.sql"),
     ),
+    sql(
+        "2026-11-25-device-forwarded",
+        include_str!("migrations/2026-11-25-device-forwarded.sql"),
+    ),
 ];
 
 /// The migrations the runner that numbered them knew, in its order: a database it left at version

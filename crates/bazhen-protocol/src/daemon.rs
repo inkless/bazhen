@@ -391,6 +391,16 @@ pub enum Containment {
     Unchecked,
 }
 
+/// Whether the daemon can tell which process calls it over loopback HTTP, as it found by calling
+/// itself once it started. Where it can't, every HTTP caller is refused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "state", rename_all = "lowercase")]
+pub enum HttpCallers {
+    Identified,
+    Unidentified { why: String },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
@@ -450,6 +460,9 @@ pub struct DoctorResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "Containment"))]
     pub containment: Option<Containment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "HttpCallers"))]
+    pub http_callers: Option<HttpCallers>,
     pub env: CapturedEnv,
 }
 

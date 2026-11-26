@@ -31,10 +31,9 @@ use bazhen_store::{
 };
 
 use crate::agents::Agents;
-use crate::callers::Caller;
+use crate::callers::{Caller, caller_of};
 use crate::hooks::approvals::{Approvals, Responder};
 use crate::mail::{Sending, deliver, queue, refusal};
-use crate::paired::Viewer;
 use crate::routes::{Shared, fail, internal};
 
 /// Agents gone for good: mail can't reach them, so a reply can't either.
@@ -140,22 +139,12 @@ fn kept(id: &str, verb: &str, value: &serde_json::Value) -> String {
     serde_json::json!({ "attention": id, verb: value }).to_string()
 }
 
-/// Who answers an approval, as the transport it came on says: on the socket, the caller the
-/// guard identified; over HTTP, the viewer the pairing gate let in, or none where it let in all.
-#[derive(Debug)]
-pub(crate) enum Answerer {
-    Socket(Caller),
-    Http(Option<Viewer>),
-}
-
-/// The actor `answerer`'s answer is recorded by, where it may answer at all. The human may, on
-/// the socket or over HTTP; an agent may not answer what it asks. A process on this machine
-/// reaching the loopback port is taken for the owner, as every human route takes it.
-fn may_answer(answerer: &Answerer) -> Result<&'static str, Refusal> {
-    match answerer {
-        Answerer::Socket(Caller(None))
-        | Answerer::Http(None | Some(Viewer::OwnerLoopback | Viewer::Device { .. })) => Ok("user"),
-        Answerer::Socket(Caller(Some(agent))) => Err(Refusal::Forbidden(format!(
+/// The actor the answer of `caller`, as the guard read it on the socket or over HTTP, is recorded
+/// by, where it may answer at all: the human may; an agent may not answer what it asks.
+fn may_answer(caller: Option<&AgentId>) -> Result<&'static str, Refusal> {
+    match caller {
+        None => Ok("user"),
+        Some(agent) => Err(Refusal::Forbidden(format!(
             "agent {agent} can't answer an approval"
         ))),
     }
@@ -168,15 +157,11 @@ pub(crate) async fn answer(
     State(shared): State<Shared>,
     Path(id): Path<String>,
     caller: Option<Extension<Caller>>,
-    viewer: Option<Extension<Viewer>>,
     body: Bytes,
 ) -> Response {
-    let answerer = match caller {
-        Some(Extension(caller)) => Answerer::Socket(caller),
-        None => Answerer::Http(viewer.map(|Extension(viewer)| viewer)),
-    };
+    let caller = caller_of(caller);
     let answer = match edge::<AnswerAttentionRequest>(&body) {
-        Ok(req) => answered(&shared, id, &answerer, req).await,
+        Ok(req) => answered(&shared, id, caller.as_ref(), req).await,
         Err(refused) => Err(Refusal::Invalid(refused.0)),
     };
     respond(answer)
@@ -185,11 +170,11 @@ pub(crate) async fn answer(
 async fn answered(
     shared: &Shared,
     id: String,
-    answerer: &Answerer,
+    caller: Option<&AgentId>,
     req: AnswerAttentionRequest,
 ) -> Result<AnswerAttentionResponse, Refusal> {
     let attention = AttentionId::parse(&id).ok_or_else(|| Refusal::NotFound(id.clone()))?;
-    let actor = may_answer(answerer)?;
+    let actor = may_answer(caller)?;
     let action = match req.decision {
         ApprovalDecision::Allow => AttentionAction::Allow,
         ApprovalDecision::Deny => AttentionAction::Deny,

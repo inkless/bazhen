@@ -201,8 +201,8 @@ pub(crate) async fn signal(
     .await
 }
 
-/// `POST /v1/agents/:id/rename`: the human renames any agent over either listener, an agent only
-/// itself over the socket. The path names the agent by its id or its live name, resolved before
+/// `POST /v1/agents/:id/rename`: the human renames any agent, an agent only itself, over either
+/// listener. The path names the agent by its id or its live name, resolved before
 /// the key is replayed.
 pub(crate) async fn rename(
     State(shared): State<Shared>,

@@ -18,6 +18,8 @@
 //! `newgrp` or `sg` shell does, is said to be withheld rather than refused: that says nothing of
 //! Codex, and the daemon takes the thread the call presents instead.
 
+pub mod tcp;
+
 use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -34,6 +36,10 @@ use rustix::process::{Pid, geteuid};
 
 /// Past any real process tree's depth: a walk this long is a cycle, and is refused.
 pub const MAX_ANCESTORS: usize = 256;
+
+/// The most processes read as holders of one TCP caller's socket. A socket is shared only by
+/// inheritance or by passing it on, so a real caller's is held by one or a few.
+pub const MAX_HOLDERS: usize = 16;
 
 /// How many times `line_of` reads a caller's line before it refuses one that keeps changing.
 pub const LINE_TRIES: usize = 8;
@@ -102,6 +108,41 @@ pub enum Refused {
     /// The walk went past `MAX_ANCESTORS` without reaching a process with no parent.
     #[error("the caller's ancestors go past {MAX_ANCESTORS} processes")]
     Endless,
+    /// No socket in the connection tables is the caller's end: it has closed, or the connection
+    /// isn't on this host's loopback.
+    #[error("no socket on this host is the caller's end of the connection")]
+    NoEnd,
+    /// More than one socket in the tables is the caller's end, which can't be told apart.
+    #[error("more than one socket on this host is listed as the caller's end of the connection")]
+    Ambiguous,
+    /// No process that holds the caller's socket can be read: only one this user can't read can
+    /// hold it, or none does any more.
+    #[error(
+        "no process holding the caller's socket can be read ({unreadable} of this user's processes \
+         can't be)"
+    )]
+    NoReadableHolder { unreadable: usize },
+    /// More processes hold the caller's socket than are read for one request.
+    #[error("{holders} processes hold the caller's socket, past the {MAX_HOLDERS} read")]
+    TooManyHolders { holders: usize },
+    /// A process that held the caller's socket didn't hold it any more once its line was read.
+    #[error("the caller's socket changed hands while its holder was read")]
+    HolderChanged,
+    /// The caller's line didn't hold still while it was read, or its pid was taken meanwhile.
+    #[error("a process on the caller's line can't be read: {0}")]
+    Changed(&'static str),
+}
+
+impl Refused {
+    /// Whether the caller was refused only for what changed while it was read, so that the same
+    /// request may be read for sure if it is made again.
+    #[must_use]
+    pub fn is_race(&self) -> bool {
+        matches!(
+            self,
+            Self::Replaced { .. } | Self::HolderChanged | Self::Changed(_)
+        )
+    }
 }
 
 /// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
@@ -116,7 +157,16 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
     if uid != geteuid().as_raw() {
         return Err(Refused::Foreign { uid });
     }
-    let pid = bazhen_pid::peer_pid(socket)?;
+    of_pid(bazhen_pid::peer_pid(socket)?, accepted)
+}
+
+/// Who `pid` is, as `of` reads a socket's peer: its session, its line and what that says of
+/// Codex, with its start pinned across the walk and no later than `accepted`.
+///
+/// # Errors
+///
+/// As `Refused` says.
+pub fn of_pid(pid: Pid, accepted: u64) -> Result<Peer, Refused> {
     let started = started(pid, accepted)?;
     let (ancestors, names, codex) = line_of(pid, step, own_args, own_environ, thread::sleep)?;
     let peer = Peer {
@@ -131,6 +181,49 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
         return Err(Refused::Replaced { started, accepted });
     }
     Ok(peer)
+}
+
+/// Who `candidate` is, a process that may hold a loopback caller's socket unseen: its session, its
+/// line and what that says of Codex, as `of_pid` reads them, with its start pinned to the one the
+/// scan read. Its environment, which the kernel hides for a process that isn't dumpable, is taken
+/// as withheld where it is denied; its arguments are still read.
+///
+/// # Errors
+///
+/// `Changed` when it went, or another process took its pid, after the scan read it, which a request
+/// made again may read for sure; else as `Refused` says, a process on its line that can't be read
+/// included.
+#[cfg(target_os = "linux")]
+pub fn candidate_of(candidate: tcp::Candidate) -> Result<Peer, Refused> {
+    let pid = candidate.pid;
+    let moved = Cell::new(false);
+    let pinned = |at: Pid| {
+        let read = step(at);
+        if at == pid && !matches!(&read, Ok(read) if read.started == candidate.started) {
+            moved.set(true);
+        }
+        read
+    };
+    let environ = |at: Pid| match own_environ(at) {
+        Err(denied) if at == pid && denied.kind() == io::ErrorKind::PermissionDenied => Ok(None),
+        read => read,
+    };
+    let line = line_of(pid, pinned, own_args, environ, thread::sleep);
+    let session = bazhen_pid::session(Some(pid));
+    if moved.get() || !step(pid).is_ok_and(|now| now.started == candidate.started) {
+        return Err(Refused::Changed(
+            "a process that may hold the caller's socket went while it was read",
+        ));
+    }
+    let (ancestors, names, codex) = line?;
+    Ok(Peer {
+        pid,
+        session: session?,
+        codex_server: codex.server,
+        environment_withheld: codex.environment_withheld,
+        ancestors,
+        names,
+    })
 }
 
 /// When `pid`'s process started, refused when that was after `accepted`.
@@ -393,9 +486,9 @@ pub fn line_of(
         });
         let read = read.and_then(|read| Ok((walk(pid, step)?, read)));
         if replaced.get() {
-            return Err(Refused::Unreadable(io::Error::other(
+            return Err(Refused::Changed(
                 "the caller's pid was taken by another process while its line was read",
-            )));
+            ));
         }
         refused = match read {
             Ok((again, (walked, codex))) if again == walked => {
@@ -406,9 +499,7 @@ pub fn line_of(
                     .unzip();
                 return Ok((ancestors, names, codex));
             }
-            Ok(_) => Refused::Unreadable(io::Error::other(
-                "the caller's line changed while it was read",
-            )),
+            Ok(_) => Refused::Changed("the caller's line changed while it was read"),
             Err(refused) => refused,
         };
         if gone.get() {
@@ -531,6 +622,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn takes_only_what_changed_while_the_caller_was_read_for_a_race() {
+        let refusals = [
+            Refused::Replaced {
+                started: 2,
+                accepted: 1,
+            },
+            Refused::HolderChanged,
+            Refused::Changed("moved"),
+            Refused::Unreadable(io::Error::other("denied")),
+            Refused::Foreign { uid: 0 },
+            Refused::Endless,
+            Refused::NoEnd,
+            Refused::Ambiguous,
+            Refused::NoReadableHolder { unreadable: 1 },
+            Refused::TooManyHolders { holders: 17 },
+        ];
+        assert_eq!(
+            refusals.map(|r| r.is_race()),
+            [
+                true, true, true, false, false, false, false, false, false, false
+            ]
+        );
+    }
     #[test]
     fn walks_the_ancestors_nearest_first_through_init() {
         let walked = ancestors(pid(50), table(&[(50, 40), (40, 30), (30, 1)])).unwrap();

@@ -14,6 +14,7 @@ alacritty_terminal = { version = "=0.26.0", default-features = false }
 axum = { version = "=0.8.9", default-features = false, features = [
   "http1",
   "json",
+  "original-uri",
   "query",
   "tokio",
   "ws",

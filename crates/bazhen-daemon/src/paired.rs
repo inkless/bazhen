@@ -42,14 +42,22 @@ pub(crate) struct Pairing {
 /// on loopback, or the owner on the socket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Viewer {
-    /// A paired device, by the name it was paired with, which views of terminals carry.
+    /// A paired device, by the name it was paired with, which views of terminals carry; and
+    /// whether it was paired through a forwarder (`ThroughForwarder`).
     Device {
         id: DeviceId,
         name: String,
         required: bool,
+        forwarded: bool,
     },
     OwnerLoopback,
 }
+
+/// Marks a pairing request as one whose caller is a forwarder's: a loopback TCP caller whose
+/// socket no readable process holds, each process that may hold it the human's. Only the caller
+/// guard sets it, from how it read the caller, never from anything the request says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ThroughForwarder;
 
 fn now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
@@ -91,6 +99,7 @@ async fn stored(
                     revoked: row.revoked,
                     secure: row.secure,
                     last_seen_ms: row.last_seen_at_ms,
+                    forwarded: row.forwarded,
                 },
             )
         })),
@@ -156,8 +165,8 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
             touch,
             now,
         );
-        if let (Some((id, name, _)), Standing::Stands | Standing::Touch) = (found, standing) {
-            verified = Some((id, name, standing == Standing::Touch));
+        if let (Some((id, name, stored)), Standing::Stands | Standing::Touch) = (found, standing) {
+            verified = Some((id, name, standing == Standing::Touch, stored.forwarded));
         }
     }
     if required && verified.is_none() {
@@ -174,7 +183,7 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
         return refused_origin(upgrade, "");
     }
     let refresh = match &verified {
-        Some((id, _, true)) => {
+        Some((id, _, true, _)) => {
             let id = id.clone();
             match gated
                 .shared
@@ -189,10 +198,13 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
         }
         _ => None,
     };
-    let viewer = verified.map_or(Viewer::OwnerLoopback, |(id, name, _)| Viewer::Device {
-        id,
-        name,
-        required,
+    let viewer = verified.map_or(Viewer::OwnerLoopback, |(id, name, _, forwarded)| {
+        Viewer::Device {
+            id,
+            name,
+            required,
+            forwarded,
+        }
     });
     request.extensions_mut().insert(viewer);
     let mut response = next.run(request).await;
@@ -237,6 +249,7 @@ pub(crate) async fn pair(State(shared): State<Shared>, request: Request) -> Resp
     let Some(origin) = header(request.headers(), "origin") else {
         return fail(StatusCode::FORBIDDEN, ErrorCode::OriginNotAllowed, "");
     };
+    let forwarded = request.extensions().get::<ThroughForwarder>().is_some();
     let Ok(body) = axum::body::to_bytes(request.into_body(), 64 * 1024).await else {
         return fail(
             StatusCode::BAD_REQUEST,
@@ -275,12 +288,18 @@ pub(crate) async fn pair(State(shared): State<Shared>, request: Request) -> Resp
             ErrorCode::PairingFailed,
             "that code is wrong or has expired",
         ),
-        Attempt::Paired => paired(&shared, name.as_deref(), &origin).await,
+        Attempt::Paired => paired(&shared, name.as_deref(), &origin, forwarded).await,
     }
 }
 
-/// Records a device for a code that matched, and hands its token to the browser, once.
-async fn paired(shared: &Shared, requested: Option<&str>, origin: &str) -> Response {
+/// Records a device for a code that matched, and hands its token to the browser, once: one paired
+/// through a forwarder, when `forwarded`.
+async fn paired(
+    shared: &Shared,
+    requested: Option<&str>,
+    origin: &str,
+    forwarded: bool,
+) -> Response {
     let token = match random_bytes::<32>() {
         Ok(random) => devices::token_of(random),
         Err(err) => return internal(&err),
@@ -293,6 +312,7 @@ async fn paired(shared: &Shared, requested: Option<&str>, origin: &str) -> Respo
         origin: origin.to_owned(),
         // Only a LAN listener knows the peer's address, and this daemon serves none.
         address: None,
+        forwarded,
     };
     let made = match shared
         .store
@@ -467,6 +487,10 @@ mod tests {
     struct Daemon {
         socket: Router,
         http: Router,
+        /// The HTTP router as a caller through a forwarder, such as `ssh -L`, reaches it.
+        forwarder: Router,
+        /// The same, the processes that may hold its socket unseen changing while they are read.
+        changing: Router,
         shared: Shared,
         path: std::path::PathBuf,
         thread: Option<crate::writer::Thread>,
@@ -496,9 +520,18 @@ mod tests {
             allow: guard::allowlists(7900, None, external),
             pairing_required,
         };
+        let through = |unseen| Shared {
+            peers: crate::peer::through_a_forwarder(unseen),
+            ..shared.clone()
+        };
         Daemon {
             socket: socket_router(shared.clone()),
-            http: http_router(shared.clone(), gate),
+            forwarder: crate::testing::from_port_1000(http_router(
+                through(vec![960]),
+                gate.clone(),
+            )),
+            changing: crate::testing::from_port_1000(http_router(through(vec![951]), gate.clone())),
+            http: crate::testing::connected(http_router(shared.clone(), gate)),
             shared,
             path,
             thread: Some(thread),
@@ -531,6 +564,7 @@ mod tests {
         let body = body.map_or_else(Body::empty, |b| Body::from(serde_json::to_vec(&b).unwrap()));
         let request = request.body(body).unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
             .unwrap();
         runtime.block_on(async {
@@ -631,6 +665,80 @@ mod tests {
                 200,
                 unpaired(),
             )
+        );
+    }
+
+    /// A caller whose socket no readable process holds, each that may hold it the human's, as a
+    /// browser's through `ssh -L` is, is the human only with the cookie of a device paired the
+    /// same way: not with none, not with one paired on the host, and not with one whose pairing
+    /// only said, in its headers, that it came through a proxy.
+    #[test]
+    fn lets_a_caller_through_a_forwarder_by_only_with_a_device_paired_through_one() {
+        let daemon = over_a_store(false);
+        let pair = |router: &Router, headers: &[(&str, &str)]| {
+            let mut all = vec![("host", HOST), ("origin", OWN)];
+            all.extend_from_slice(headers);
+            let paired = send(
+                router,
+                "POST",
+                "/v1/pairing",
+                &all,
+                Some(json!({"code": daemon.code(), "name": "Phone"})),
+            );
+            let cookie = paired.cookie.unwrap();
+            cookie.split(';').next().unwrap().to_owned()
+        };
+        let through = pair(&daemon.forwarder, &[]);
+        let on_the_host = pair(&daemon.http, &[]);
+        let said = pair(
+            &daemon.http,
+            &[
+                ("x-forwarded-for", "127.0.0.1"),
+                ("forwarded", "for=127.0.0.1"),
+            ],
+        );
+        let state = |cookie: Option<&str>| {
+            let mut headers = vec![("host", HOST)];
+            headers.extend(cookie.map(|c| ("cookie", c)));
+            let answer = send(&daemon.forwarder, "GET", "/v1/state", &headers, None);
+            (answer.status, answer.body["message"].clone())
+        };
+        let refused = (403, json!(crate::callers::UNHELD));
+        assert_eq!(
+            [
+                state(Some(&through)),
+                state(None),
+                state(Some(&on_the_host)),
+                state(Some(&said)),
+            ],
+            [
+                (200, Value::Null),
+                refused.clone(),
+                refused.clone(),
+                refused
+            ]
+        );
+    }
+
+    /// A caller that changed while it was read is told to try again in a second, as one read
+    /// again soon may be read for sure.
+    #[test]
+    fn tells_a_caller_that_changed_while_it_was_read_to_try_again_in_a_second() {
+        let daemon = over_a_store(false);
+        let answer = send(
+            &daemon.changing,
+            "GET",
+            "/v1/state",
+            &[("host", HOST)],
+            None,
+        );
+        assert_eq!(
+            (
+                answer.status,
+                answer.retry_after,
+                answer.body["error"].clone()
+            ),
+            (503, Some("1".to_owned()), json!("unavailable"))
         );
     }
 
@@ -1006,7 +1114,7 @@ mod tests {
         let stop = CancellationToken::new();
         runtime.spawn(crate::accept::serve_on(
             listener,
-            http_router(daemon.shared.clone(), gate),
+            crate::testing::connected(http_router(daemon.shared.clone(), gate)),
             crate::accept::HTTP,
             stop.clone(),
             tokio_util::task::TaskTracker::new(),

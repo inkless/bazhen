@@ -285,8 +285,13 @@ fn answers_quiet_a_hook_of_another_major_and_tells_a_late_caller_to_try_again() 
         ],
         [quiet.clone(), quiet]
     );
-    let (status, ..) = reply_of(f.hook("wait", &prompt("session-1"), PeerRead::Late));
-    assert_eq!((status, f.of("agent.activity")), (503, vec![]));
+    let late = f.hook("wait", &prompt("session-1"), PeerRead::Late);
+    let retry = late.headers().get("retry-after").cloned();
+    let (status, ..) = reply_of(late);
+    assert_eq!(
+        (status, retry, f.of("agent.activity")),
+        (503, Some(axum::http::HeaderValue::from_static("1")), vec![])
+    );
 }
 
 #[test]

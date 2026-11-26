@@ -947,6 +947,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/process.rs::procargs2_args": "proc_args",
   "crates/bazhen-holder/src/process.rs::procargs2_env": "proc_args",
   "crates/bazhen-daemon/src/config.rs::parse_config": "config",
+  "crates/bazhen-peer/src/tcp.rs::socket_inode": "proc_net_tcp",
 };
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-harness/src/js.rs::Js::parse":
@@ -1664,6 +1665,22 @@ const NOT_DECODERS: Record<string, string> = {
     "queries the store through StoreSource::read for the newest event id and the starts waiting; reads no bytes",
   "crates/bazhen-daemon/src/readiness.rs::StoreSource::events":
     "queries the store through StoreSource::read for the events after an id, which the store wrote; reads no bytes",
+  "crates/bazhen-daemon/src/peer.rs::Tcp::read":
+    "finds the caller's end and its holders through bazhen_peer::tcp, whose row and link decoders the proc_net_tcp target fuzzes, and reads each holder by bazhen_peer::of_pid; parses no bytes itself",
+  "crates/bazhen-daemon/src/peer.rs::calling_itself":
+    "calls the daemon's own loopback listener and reads that call through Peers::read, whose row and link decoders the proc_net_tcp target fuzzes; parses no bytes",
+  "crates/bazhen-daemon/src/peer.rs::blocking":
+    "runs a reader closure on a blocking thread while it holds the caller's turn; reads no bytes",
+  "crates/bazhen-peer/src/tcp.rs::Proc::tables":
+    "reads /proc/net/tcp and tcp6 whole and returns their text unparsed; end hands each line to row, which the proc_net_tcp target fuzzes",
+  "crates/bazhen-peer/src/tcp.rs::peers":
+    "reads a holder's descriptor link only through socket_inode, which the proc_net_tcp target fuzzes, comparing the inode it gives",
+  "crates/bazhen-peer/src/tcp.rs::zombie":
+    "reads a stat line's state only through start_time::stat_field, which the proc_stat target fuzzes, comparing it to Z",
+  "crates/bazhen-peer/src/tcp.rs::lone_zombie":
+    "reads a stat line only through zombie and start_time::stat_field, which the proc_stat target fuzzes, comparing num_threads (field 20) to 1",
+  "crates/bazhen-peer/src/tcp.rs::Proc::stat":
+    "reads /proc/<pid>/stat whole and returns its bytes unparsed; unseen hands them to start_time::start_ticks and stat_field, which the proc_stat target fuzzes",
   "crates/bazhen-daemon/src/callers.rs::Stored::reads":
     "opens the store's reader connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::agent_of":

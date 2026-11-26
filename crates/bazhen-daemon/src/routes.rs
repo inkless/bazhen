@@ -1,6 +1,7 @@
 //! The API's routes and the layers in front of them: one router for the Unix socket, whose 0600
 //! mode makes its caller the owner, and one for loopback HTTP, behind the Host/Origin guard and
-//! the pairing gate (`http/app.ts`, `socket/routes.ts`).
+//! the pairing gate (`http/app.ts`, `socket/routes.ts`). Each identifies its caller with one
+//! guard: the socket's peer, or the processes holding a TCP caller's socket.
 
 use std::sync::{Arc, OnceLock};
 
@@ -200,6 +201,20 @@ pub(crate) fn fail(status: StatusCode, error: ErrorCode, message: &str) -> Respo
         busy: None,
     };
     (status, axum::Json(body)).into_response()
+}
+
+/// A 503 that asks the caller to try again in a second: its process changed while it was read, or
+/// wasn't read in time, and soon it may be.
+pub(crate) fn retry_soon(reason: &str) -> Response {
+    let mut response = fail(
+        StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::Unavailable,
+        reason,
+    );
+    response
+        .headers_mut()
+        .insert("retry-after", axum::http::HeaderValue::from_static("1"));
+    response
 }
 
 /// This machine's name, as `os.hostname()` gives it.
@@ -499,8 +514,9 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
 }
 
 /// The loopback HTTP listener's routes, behind the guard. The API is a router nested at `/v1`,
-/// and the pairing gate is on it, so whatever axum routes there, its fallback included, is gated:
-/// no test of the path's text can miss one. Every other path is the web client's, served to a
+/// and the pairing gate is on it, then the caller guard, so whatever axum routes there, its
+/// fallback included, is gated and its caller identified: no test of the path's text can miss
+/// one. Every other path is the web client's, served to a
 /// browser yet to pair so it can.
 pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
     let web = shared.web.clone();
@@ -539,10 +555,17 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/terminals/{id}/screen", get(terminal_routes::screen))
         .fallback(unrouted)
         .method_not_allowed_fallback(unrouted)
-        .with_state(shared)
+        .with_state(shared.clone())
+        // Past the pairing gate, the caller's process: an agent is refused as on the socket.
+        .layer(middleware::from_fn_with_state(
+            shared.clone(),
+            callers::http_guard,
+        ))
         .layer(middleware::from_fn_with_state(gated.clone(), paired::gate));
     // The nest takes `/v1` and `/v1/<rest>` but not `/v1/` itself, which Hono's `/v1/*` gates.
-    let bare = any(unrouted).layer(middleware::from_fn_with_state(gated, paired::gate));
+    let bare = any(unrouted)
+        .layer(middleware::from_fn_with_state(shared, callers::http_guard))
+        .layer(middleware::from_fn_with_state(gated, paired::gate));
     let router = Router::new().nest("/v1", api).route("/v1/", bare);
     let router = match web {
         Some(bundle) => {
@@ -658,13 +681,13 @@ mod tests {
         let gated = |pairing_required| {
             move |shared| {
                 let allow = guard::allowlists(7900, None, &[]);
-                http_router(
+                crate::testing::connected(http_router(
                     shared,
                     Gate {
                         allow,
                         pairing_required,
                     },
-                )
+                ))
             }
         };
         let (open, body) = state_after("", gated(false), &[("host", HOST)]);
@@ -1079,7 +1102,10 @@ mod tests {
             allow: guard::allowlists(7900, None, &[]),
             pairing_required,
         };
-        http_router(shared(), gate)
+        crate::testing::on_an_empty_store(|writer| {
+            let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), writer);
+            crate::testing::connected(http_router(shared, gate))
+        })
     }
 
     fn request(method: &str, path: &str, headers: &[(&str, &str)]) -> Request {
@@ -1093,6 +1119,7 @@ mod tests {
     /// The status and body a router answers `request` with; a body that isn't JSON is its text.
     fn send(router: Router, request: Request) -> (u16, Value) {
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
             .unwrap();
         runtime.block_on(async {
@@ -1183,13 +1210,15 @@ mod tests {
 
     #[test]
     fn http_has_no_stop_and_answers_health_to_its_own_host_on_get_only() {
-        let shared = shared();
-        let stop = shared.stop.clone();
+        let stop = Stop::default();
         let gate = Gate {
             allow: guard::allowlists(7900, None, &[]),
             pairing_required: false,
         };
-        let router = http_router(shared, gate);
+        let router = crate::testing::on_an_empty_store(|writer| {
+            let shared = Shared::new("f".repeat(64).as_str(), stop.clone(), writer);
+            crate::testing::connected(http_router(shared, gate))
+        });
         assert_eq!(
             [
                 send(
@@ -1215,6 +1244,7 @@ mod tests {
     /// header, and the body's text.
     fn answer(router: Router, request: Request) -> (u16, Option<String>, String) {
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
             .unwrap();
         runtime.block_on(async {
@@ -1529,7 +1559,7 @@ mod tests {
             allow: guard::allowlists(7900, None, &[]),
             pairing_required: false,
         };
-        let http = http_router(shared.clone(), gate);
+        let http = crate::testing::connected(http_router(shared.clone(), gate));
         (
             socket_router(shared),
             http,
@@ -1608,12 +1638,11 @@ mod tests {
                 &json!({ "idempotencyKey": "a", "name": "reviewer" }),
             ),
         );
-        // An agent's id in a header over HTTP is no caller: the human asks there.
         let by_name = send(
             http,
             post(
                 "/v1/agents/REVIEWER/rename",
-                &[LOCAL[0], LOCAL[1], ("bazhen-agent-id", PEER)],
+                &[LOCAL[0], LOCAL[1]],
                 &json!({ "idempotencyKey": "b", "name": "lead" }),
             ),
         );

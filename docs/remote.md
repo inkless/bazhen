@@ -71,6 +71,15 @@ prints on the page at `http://127.0.0.1:7900`. The code works once, for 5 minute
 over plain HTTP, as this is, stays paired while it is used at least once a day. `bazhen devices`
 lists paired browsers and `bazhen devices revoke <id>` ends one.
 
+The Rust daemon tells who calls it over HTTP by the processes holding the connection, and it can't
+read `sshd`'s, so it refuses a browser on the forward until that browser is paired through the
+forward, whatever `web.pairing` says. Pair it as above, entering the code on the page you opened
+through the forward. From then on a request through the forward is yours when it carries that
+browser's cookie and every process of yours on the daemon host that may hold its connection unseen
+reads as yours, not an agent's. A browser paired on the daemon host itself, or through a proxy that
+only says in a header that it forwarded the request, doesn't count. A request that finds those
+processes changing while it reads them is told to try again (`503`).
+
 ## Tailscale
 
 When the daemon host is on your tailnet, run `ssh` against its tailnet name or address. Allow the

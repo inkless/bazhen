@@ -222,6 +222,17 @@ export const DoctorResponse = z.object({
       z.object({ state: z.literal("unchecked") }),
     ])
     .optional(),
+  /**
+   * Whether the daemon can tell which process calls it over loopback HTTP, as it found by calling
+   * itself once it started; if not, why, and every HTTP caller is refused. Absent from a daemon
+   * that doesn't identify its HTTP callers.
+   */
+  httpCallers: z
+    .discriminatedUnion("state", [
+      z.object({ state: z.literal("identified") }),
+      z.object({ state: z.literal("unidentified"), why: z.string() }),
+    ])
+    .optional(),
   env: z.object({
     capturedAt: z.string(),
     /** Captured when the daemon started, or by the latest `bazhen env refresh`. */

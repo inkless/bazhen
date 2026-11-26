@@ -11,6 +11,67 @@ use tokio_tungstenite::tungstenite::Message;
 
 pub(crate) mod stub_harness;
 
+/// What `router` makes of a writer on an empty store of its own, for routes that read the store
+/// but need nothing in it, as the guard does to read a caller over `connected`. The router keeps
+/// the store's directory until it is dropped.
+pub(crate) fn on_an_empty_store(
+    router: impl FnOnce(crate::writer::Writer) -> axum::Router,
+) -> axum::Router {
+    let dir = TempDir::new("empty-store");
+    let path = dir.path().join("bazhen.db");
+    let (writer, _thread) =
+        crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
+    router(writer).layer(axum::Extension(std::sync::Arc::new(dir)))
+}
+
+/// `router` as the loopback listener serves it: each request carries its connection's socket, as
+/// `accept` gives it. Here that is one end of a pair this test holds both ends of, so the caller
+/// reads as the test's own process, outside every terminal: the human.
+pub(crate) fn connected(router: axum::Router) -> axum::Router {
+    let ends = std::sync::Arc::new(std::os::unix::net::UnixStream::pair().unwrap());
+    router.layer(axum::middleware::from_fn(
+        move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            request
+                .extensions_mut()
+                .insert(crate::peer::PeerSocket::accepted_now(
+                    std::os::fd::AsFd::as_fd(&ends.0),
+                ));
+            next.run(request)
+        },
+    ))
+}
+
+/// `router` with each request's `PeerSocket` taken off, so the guard reads no caller and lets the
+/// request through as the owner's, as it did a TCP request before TCP connections carried one.
+///
+/// For the stream harnesses, which serve the socket's router over loopback TCP as a stand-in for
+/// the Unix socket and test the streams, not who calls: on TCP the caller is read through `/proc`,
+/// which only Linux has, and which a sandbox may answer differently from the socket. The HTTP
+/// guard's own tests don't use it: they test what each reading of the caller is let do.
+pub(crate) fn without_the_callers_socket(router: axum::Router) -> axum::Router {
+    router.layer(axum::middleware::from_fn(
+        |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            request.extensions_mut().remove::<crate::peer::PeerSocket>();
+            next.run(request)
+        },
+    ))
+}
+
+/// `router` as the loopback listener serves a TCP caller from port 1000 to its port 7900.
+pub(crate) fn from_port_1000(router: axum::Router) -> axum::Router {
+    router.layer(axum::middleware::from_fn(
+        |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            request
+                .extensions_mut()
+                .insert(crate::peer::PeerSocket::tcp_accepted_now(
+                    Ok(std::net::SocketAddr::from(([127, 0, 0, 1], 1000))),
+                    Ok(std::net::SocketAddr::from(([127, 0, 0, 1], 7900))),
+                ));
+            next.run(request)
+        },
+    ))
+}
+
 /// A directory of the test's own, removed when the test ends, whether or not it passed.
 pub(crate) struct TempDir(PathBuf);
 

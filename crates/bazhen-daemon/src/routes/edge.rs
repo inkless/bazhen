@@ -95,15 +95,17 @@ fn route(message: &str) -> Option<(&'static str, bool)> {
 }
 
 fn router(http: bool) -> Router {
-    let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), Writer::closed());
+    let shared = |writer| Shared::new("f".repeat(64).as_str(), Stop::default(), writer);
     if http {
         let gate = Gate {
             allow: guard::allowlists(7900, None, &[]),
             pairing_required: true,
         };
-        http_router(shared, gate)
+        crate::testing::on_an_empty_store(|writer| {
+            crate::testing::connected(http_router(shared(writer), gate))
+        })
     } else {
-        socket_router(shared)
+        socket_router(shared(Writer::closed()))
     }
 }
 
@@ -139,6 +141,7 @@ fn corpus() -> Vec<Value> {
 #[test]
 fn each_route_refuses_as_invalid_what_the_edge_refuses_and_nothing_it_takes() {
     let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
         .build()
         .unwrap();
     let mut found = Vec::new();
