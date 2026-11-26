@@ -938,12 +938,21 @@ mod tests {
             })
         }
 
-        /// A reader that never reads its peer in time.
-        fn late() -> Peers {
-            Peers::with(Duration::ZERO, |_, _| {
-                std::thread::sleep(Duration::from_millis(20));
+        /// Holds the blocking peer read until the route has answered, however long its task
+        /// waits for another turn after the deadline.
+        fn late(router: impl FnOnce(Peers) -> Router) -> Router {
+            let (release, gate) = std::sync::mpsc::channel();
+            let gate = std::sync::Mutex::new(gate);
+            let peers = Peers::with(Duration::ZERO, move |_, _| {
+                let _ = gate.lock().unwrap().recv();
                 Err(Refused::Endless)
-            })
+            });
+            router(peers).layer(axum::middleware::map_response(
+                move |response: axum::response::Response| {
+                    let _ = release.send(());
+                    std::future::ready(response)
+                },
+            ))
         }
 
         fn router(store: &Writer, peers: Option<Peers>) -> Router {
@@ -1398,7 +1407,7 @@ mod tests {
                         true
                     ),
                     ask(
-                        router(&store, Some(late())),
+                        late(|peers| router(&store, Some(peers))),
                         "GET",
                         "/v1/state",
                         &[],
@@ -1406,7 +1415,7 @@ mod tests {
                         true
                     ),
                     ask(
-                        router(&store, Some(late())),
+                        late(|peers| router(&store, Some(peers))),
                         "POST",
                         "/v1/daemon/stop",
                         &[],
@@ -1414,7 +1423,7 @@ mod tests {
                         true
                     ),
                     ask(
-                        router(&store, Some(late())),
+                        late(|peers| router(&store, Some(peers))),
                         "GET",
                         "/v1/events",
                         &[UPGRADE],
@@ -1571,7 +1580,14 @@ mod tests {
                         Some(over_tcp)
                     ),
                     ask_on(raced(), "/v1/caller", &[], unix()),
-                    ask_on(late(), "/v1/state", &[], unix()),
+                    ask(
+                        late(|peers| http(&store, peers, false)),
+                        "GET",
+                        "/v1/state",
+                        &[HOST],
+                        None,
+                        true
+                    ),
                 ],
                 [
                     refused("forbidden", unread),
