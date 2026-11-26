@@ -10,6 +10,8 @@ mod attention;
 mod budget;
 mod callers;
 mod channel;
+mod channels;
+mod commands;
 pub mod config;
 mod detach;
 mod devices;

@@ -22,6 +22,7 @@ use tokio_util::task::TaskTracker;
 use crate::accept::{self, Limits, serve_on};
 use crate::agents::prompts::daemon_prompts;
 use crate::agents::{Agents, AgentsDeps};
+use crate::commands::Commands;
 use crate::config::Settings;
 use crate::doctor::Settled;
 use crate::guard;
@@ -337,6 +338,7 @@ async fn shells(
             http_callers: Some(http_callers(&shared.peers).await),
             ..runner.doctor
         },
+        commands: runner.commands,
     })
 }
 
@@ -344,6 +346,8 @@ async fn shells(
 struct Running {
     watched: Watched,
     doctor: Settled,
+    /// What runs the harnesses' own commands.
+    commands: Arc<Commands>,
 }
 
 /// How often the running shells' foregrounds, and what their holders speak, are read again: the
@@ -482,6 +486,33 @@ fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, &State)>) {
     }
 }
 
+/// `shared`, serving the shells and agents on `runner`'s terminals, their views' streams, and a
+/// channel to each harness's server that has one, all on `tracker` until `stop`; and what is
+/// watched of them.
+async fn run_on(
+    startup: &Startup,
+    store: &Writer,
+    runner: Runner,
+    tracker: &TaskTracker,
+    stop: &CancellationToken,
+    shared: Shared,
+) -> Result<(Shared, Watched), Refused> {
+    let streaming = runner.streams.clone();
+    let Running {
+        watched,
+        doctor,
+        commands,
+    } = shells(startup, store, runner, tracker, stop, &shared).await?;
+    let bundle = doctor.bundle.clone();
+    let mut shared = shared
+        .with_shells(Arc::clone(&watched.shells), doctor)
+        .with_agents(Arc::clone(&watched.agents))
+        .with_web(bundle);
+    crate::channels::start(&shared, &commands, tracker, stop);
+    shared.streams = crate::stream::on_holders(store, streaming, &watched.shells, tracker, stop);
+    Ok((shared, watched))
+}
+
 /// Serves the socket and loopback HTTP until a stop, then drains them, and says why it stopped.
 /// With `runner`, it runs shells on its terminals, and ends the runtime's watches at the drain.
 async fn listen(
@@ -505,16 +536,9 @@ async fn listen(
     let tracker = TaskTracker::new();
     let mut watching = None;
     if let Some(runner) = runner {
-        let streaming = runner.streams.clone();
-        let Running { watched, doctor } =
-            shells(startup, &store, runner, &tracker, stop.token(), &shared).await?;
-        let bundle = doctor.bundle.clone();
-        shared = shared
-            .with_shells(Arc::clone(&watched.shells), doctor)
-            .with_agents(Arc::clone(&watched.agents))
-            .with_web(bundle);
-        shared.streams =
-            crate::stream::on_holders(&store, streaming, &watched.shells, &tracker, stop.token());
+        let (served, watched) =
+            run_on(startup, &store, runner, &tracker, stop.token(), shared).await?;
+        shared = served;
         watching = Some(watched);
     }
     let_go(&shared, &tracker, startup).await;
@@ -871,6 +895,7 @@ mod tests {
             streams: None,
             hook: None,
             harnesses: bazhen_harness::Harnesses::new(Vec::new()),
+            commands: Arc::new(Commands::new(crate::env::Env::new())),
         }
     }
 

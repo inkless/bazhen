@@ -11,6 +11,7 @@ use bazhen_host_guard::scope;
 use bazhen_runtime_holder::{HolderRoot, HolderRuntime, RuntimeOptions};
 
 use crate::budget::Budget;
+use crate::commands::Commands;
 use crate::doctor::{self, Settled};
 use crate::env::{self, Env};
 use crate::harnesses::{self, World};
@@ -43,6 +44,8 @@ pub(crate) struct Runner {
     pub(crate) hook: Option<String>,
     /// The harnesses agents run in, over that hook client, or over where its link would be.
     pub(crate) harnesses: bazhen_harness::Harnesses,
+    /// What runs the harnesses' own commands, in the environment captured for agents.
+    pub(crate) commands: Arc<Commands>,
 }
 
 /// The holder runtime, with the build installed for its new terminals, or why the daemon can't
@@ -108,6 +111,7 @@ pub(crate) async fn holders(startup: &Startup) -> Result<Runner, Refused> {
         socket: startup.paths.socket.clone(),
     });
     Ok(Runner {
+        commands: Arc::new(Commands::new(captured.env.clone())),
         streams: Some(holder.runtime()),
         terminals: Arc::new(holder),
         budget: Arc::new(budget),
