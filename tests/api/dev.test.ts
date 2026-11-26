@@ -11,7 +11,7 @@ afterAll(async () => {
   await dev.stop();
 });
 
-describe("moon run :dev", () => {
+describe("make dev", () => {
   it("leaves the terminal only to the foreground job", () => {
     expect(dev.backgroundHolders()).toEqual([]);
   });
@@ -20,15 +20,15 @@ describe("moon run :dev", () => {
     expect(dev.appInputs()).toEqual({ daemon: ["/dev/null"], web: ["/dev/null"] });
   });
 
-  // moon passes the Ctrl-C on to both apps and exits without waiting for them to stop, so whether
-  // an app's own "stopped" line is printed is a race, and the apps are waited for here; the daemon
-  // is built to survive being cut short. moon marks the tasks it interrupted as failed, then dies
-  // of the SIGINT itself, as a shell expects of an interrupted program: 128 + 2.
+  // The Ctrl-C reaches both apps from the terminal, as they run in its foreground process group with
+  // make, which waits for them to end. make then says which targets it interrupted and dies of the
+  // SIGINT itself, as a shell expects of an interrupted program: 128 + 2. The apps are waited for
+  // here too, as one may have left a process of its own behind.
   it("ends both apps on Ctrl-C, says it was interrupted, and dies of the SIGINT", async () => {
     const { daemon, web } = dev.apps();
     expect([daemon.length > 0, web.length > 0]).toEqual([true, true]);
     expect(await dev.interrupt()).toBe(130);
-    expect(dev.text).toContain("(interrupted)");
+    expect(dev.text).toMatch(/\*\*\* \[.*\bdev\] Interrupt/);
     expect(await DevRun.survivors([...daemon, ...web])).toEqual([]);
   });
 });

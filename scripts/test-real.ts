@@ -1,4 +1,4 @@
-// `moon run :test-real -- [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`:
+// `make test-real ARGS='[suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]'`:
 // the real-tmux suites, the holder's mutants by group (scripts/holder-mutants.ts), and the soak's
 // short runs (scripts/soak.ts), in a container built from this worktree
 // (docs/standards/testing.md). The build context is a fresh repository holding HEAD and falsify's
@@ -28,7 +28,6 @@ import {
 import { availableParallelism, constants, hostname, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { SLICE, inSignalSandbox, isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
-import { parse as parseToml } from "smol-toml";
 import { RUST_TOOLS } from "./rust-gate.ts";
 import { isMain } from "./is-main.ts";
 
@@ -51,8 +50,8 @@ const BASE_REF = "refs/remotes/origin/main";
 
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
 const USAGE =
-  `usage: moon run :test-real -- [${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
-  "[--group <g> [--shard k/n] [--only <regex>]]";
+  `usage: make test-real ARGS='[${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
+  "[--group <g> [--shard k/n] [--only <regex>]]'";
 
 /**
  * The groups of the holder's mutants, as scripts/holder-mutants.ts names them, whose code the
@@ -79,23 +78,22 @@ export function suiteCommand(suite: Suite, mutants?: MutantsPart): string[] {
     if (mutants === undefined) throw new Error(`the mutants suite needs --group; ${USAGE}`);
     const shard = mutants.shard === undefined ? [] : ["--shard", mutants.shard];
     const only = mutants.only === undefined ? [] : ["--only", mutants.only];
-    return moonRun(SUITES.mutants, "--group", mutants.group, ...shard, ...only);
+    return makeRun(SUITES.mutants, "--group", mutants.group, ...shard, ...only);
   }
-  if (suite !== "falsify") return moonRun(SUITES[suite]);
-  const base = `--base ${BASE_REF}`;
-  return [
-    "sh",
-    "-c",
-    `moon run :${SUITES.falsify} -- ${base} && moon run :test-falsify-base -- ${base}`,
-  ];
+  if (suite !== "falsify") return makeRun(SUITES[suite]);
+  const base = `ARGS='--base ${BASE_REF}'`;
+  return ["sh", "-c", `make ${SUITES.falsify} ${base} && make test-falsify-base ${base}`];
 }
 
-/** `moon run` of a task, with the arguments its command takes after `--`. */
-const moonRun = (task: string, ...args: string[]): string[] => [
-  "moon",
-  "run",
-  `:${task}`,
-  ...(args.length === 0 ? [] : ["--", ...args]),
+/** A word as a shell reads it back: as it is when plain, else in single quotes. */
+export const shellWord = (word: string): string =>
+  /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+
+/** `make` of a target, with the arguments its command takes in ARGS, which its shell reads back. */
+const makeRun = (target: string, ...args: string[]): string[] => [
+  "make",
+  target,
+  ...(args.length === 0 ? [] : [`ARGS=${args.map(shellWord).join(" ")}`]),
 ];
 
 /** Why `text` isn't a JavaScript regex, as holder-mutants reads `--only`, or nothing. */
@@ -164,15 +162,6 @@ export function parseArgs(args: readonly string[]): {
   };
 }
 
-/** The moon version .prototools pins, which every host runs. */
-export function moonVersion(read: (path: string) => string): string {
-  const moon = parseToml(read(".prototools"))["moon"];
-  if (typeof moon !== "string" || !/^\d+\.\d+\.\d+$/.test(moon)) {
-    throw new Error(".prototools pins no exact moon version");
-  }
-  return moon;
-}
-
 /** The image's build arguments: the repository's own pins, and the Rust tools falsify runs. */
 export function pins(read: (path: string) => string): Record<string, string> {
   const pkg = (path: string): Record<string, unknown> => JSON.parse(read(path));
@@ -188,7 +177,6 @@ export function pins(read: (path: string) => string): Record<string, string> {
   return {
     NODE_VERSION: read(".nvmrc").trim(),
     PNPM_VERSION: manager.slice("pnpm@".length),
-    MOON_VERSION: moonVersion(read),
     PLAYWRIGHT_VERSION: playwright,
     NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
     CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],

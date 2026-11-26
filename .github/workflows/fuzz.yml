@@ -183,7 +183,6 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152
       - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/moon
       - name: Run the property tests on random seeds
         timeout-minutes: 105
         run: |
@@ -198,10 +197,10 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
             echo "::group::Round $round: PROPTEST_RNG_SEED=$proptest_seed FC_SEED=$fc_seed"
             replay=""
-            if ! PROPTEST_RNG_SEED="$proptest_seed" moon run :test-rust; then
-              replay="PROPTEST_RNG_SEED=$proptest_seed moon run :test-rust"
-            elif ! FC_SEED="$fc_seed" moon run :test; then
-              replay="FC_SEED=$fc_seed moon run :test"
+            if ! PROPTEST_RNG_SEED="$proptest_seed" make test-rust; then
+              replay="PROPTEST_RNG_SEED=$proptest_seed make test-rust"
+            elif ! FC_SEED="$fc_seed" make test; then
+              replay="FC_SEED=$fc_seed make test"
             fi
             echo "::endgroup::"
             if [ -n "$replay" ]; then

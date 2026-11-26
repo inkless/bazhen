@@ -22,17 +22,16 @@ import {
 const repo: Record<string, string> = {
   ".nvmrc": "26.13.0\n",
   "package.json": JSON.stringify({ packageManager: "pnpm@12.16.1" }),
-  ".prototools": 'moon = "2.6.5"\n',
   "tests/e2e/package.json": JSON.stringify({ devDependencies: { "@playwright/test": "1.64.1" } }),
 };
 const read = (files: Record<string, string>) => (path: string) => files[path] ?? "";
 
-describe("moon run :test-real", () => {
+describe("make test-real", () => {
   it("runs the suites it is given, once each and in order, or all but falsify", () => {
     expect(parseArgs([]).suites).toEqual(["integration", "api", "e2e", "holder", "rust"]);
     expect(parseArgs(["falsify", "api", "falsify"]).suites).toEqual(["falsify", "api"]);
     expect(parseArgs(["soak"]).suites).toEqual(["soak"]);
-    expect(suiteCommand("soak")).toEqual(["moon", "run", ":test-soak"]);
+    expect(suiteCommand("soak")).toEqual(["make", "test-soak"]);
   });
 
   it("judges falsify against main, or the base it is given", () => {
@@ -50,14 +49,9 @@ describe("moon run :test-real", () => {
       mutants: { group: "signal", shard: "1/3" },
     });
     expect(suiteCommand("mutants", { group: "signal", shard: "1/3" })).toEqual([
-      "moon",
-      "run",
-      ":test-mutants-holder",
-      "--",
-      "--group",
-      "signal",
-      "--shard",
-      "1/3",
+      "make",
+      "test-mutants-holder",
+      "ARGS=--group signal --shard 1/3",
     ]);
   });
 
@@ -69,14 +63,9 @@ describe("moon run :test-real", () => {
       mutants: { group: "rest", only },
     });
     expect(suiteCommand("mutants", { group: "rest", only })).toEqual([
-      "moon",
-      "run",
-      ":test-mutants-holder",
-      "--",
-      "--group",
-      "rest",
-      "--only",
-      only,
+      "make",
+      "test-mutants-holder",
+      "ARGS=--group rest --only '^crates/bazhen-holder/src/ring\\.rs:(?:10|12):'",
     ]);
   });
 
@@ -110,32 +99,28 @@ describe("moon run :test-real", () => {
     expect(() => parseArgs(["--base", "--api"])).toThrow("usage");
   });
 
-  it("builds the image on the repository's own node, pnpm, moon, Playwright and Rust tool pins", () => {
+  it("builds the image on the repository's own node, pnpm, Playwright and Rust tool pins", () => {
     expect(pins(read(repo))).toEqual({
       NODE_VERSION: "26.13.0",
       PNPM_VERSION: "12.16.1",
-      MOON_VERSION: "2.6.5",
       PLAYWRIGHT_VERSION: "1.64.1",
       NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
       CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],
     });
   });
 
-  it("runs a suite's moon task, and falsify against the image's base, then the base's falsify", () => {
-    expect(suiteCommand("api")).toEqual(["moon", "run", ":test-api"]);
+  it("runs a suite's make target, and falsify against the image's base, then the base's falsify", () => {
+    expect(suiteCommand("api")).toEqual(["make", "test-api"]);
     expect(suiteCommand("falsify")).toEqual([
       "sh",
       "-c",
-      "moon run :test-falsify -- --base refs/remotes/origin/main && " +
-        "moon run :test-falsify-base -- --base refs/remotes/origin/main",
+      "make test-falsify ARGS='--base refs/remotes/origin/main' && " +
+        "make test-falsify-base ARGS='--base refs/remotes/origin/main'",
     ]);
   });
 
   it("refuses to build when a pin is missing", () => {
     expect(() => pins(read({ ...repo, "package.json": "{}" }))).toThrow("not pinned");
-    expect(() => pins(read({ ...repo, ".prototools": 'moon = "^2.6"\n' }))).toThrow(
-      "pins no exact moon version",
-    );
   });
 
   it("gives a suite half the machine, so its own load cannot take the rest of it", () => {
@@ -281,7 +266,7 @@ async function memoryOf(cgroup: string): Promise<number> {
 const probeHasPid = (args: readonly string[]): Answer =>
   verb(args) === "inspect --format" ? result(0, `4343 ${PROBE_ID}\n`) : passing();
 const isIntegration = (args: readonly string[]) =>
-  args[0] === "run" && args.includes(":test-integration");
+  args[0] === "run" && args.includes("test-integration");
 const buildFails = (args: readonly string[]) => (args[0] === "build" ? result(1) : passing());
 const buildHangs = (args: readonly string[]) => (args[0] === "build" ? "pending" : passing());
 const integrationFails = (args: readonly string[]) => (isIntegration(args) ? result(1) : passing());
@@ -341,7 +326,7 @@ const refusal = (why: string) => ({
   said: expect.stringContaining(why),
 });
 
-describe("moon run :test-real cleans up after itself", () => {
+describe("make test-real cleans up after itself", () => {
   it("names its run, image and containers by its own pid and host, and labels them with both", async () => {
     const fake = fakeHost(passing);
     expect(await run(["api"], fake.host)).toBe(0);
@@ -609,7 +594,7 @@ function grace() {
   return { wait: () => promise, elapse: () => resolve() };
 }
 
-describe("moon run :test-real's stop", () => {
+describe("make test-real's stop", () => {
   it("kills a command still running when the grace period ends", async () => {
     const sent: NodeJS.Signals[] = [];
     const clock = grace();
@@ -705,7 +690,7 @@ const host = cli("docker");
 
 const isList = (c: string[]) => verb(c) === "image ls" || (c[0] === "ps" && !c.includes("--quiet"));
 
-describe("moon run :test-real's sweep of runs that died", () => {
+describe("make test-real's sweep of runs that died", () => {
   it("asks docker only for what this script labelled on this host", async () => {
     const fake = fakeHost(host, { alive: [222] });
     await sweep(fake.host);
