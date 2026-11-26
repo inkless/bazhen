@@ -102,10 +102,13 @@ fn exited(w: &StoreWriter<'_>, exit: &Exit) -> Result<(), AgentError> {
     )?)
 }
 
-fn terminal_of(event: &Event) -> &TerminalId {
+/// The terminal an event tells of, for one that tells of a process; a title is the readiness
+/// follower's.
+fn terminal_of(event: &Event) -> Option<&TerminalId> {
     match event {
-        Event::Exited(exit) => &exit.terminal_id,
-        Event::Respawned(at) | Event::Lost(at) => &at.terminal_id,
+        Event::Exited(exit) => Some(&exit.terminal_id),
+        Event::Respawned(at) | Event::Lost(at) => Some(&at.terminal_id),
+        Event::Title(_) | Event::TitlesMissed => None,
     }
 }
 
@@ -114,9 +117,11 @@ impl Agents {
     /// slow agent holds up no other. A terminal no agent runs in now is no agent's: a shell's,
     /// or one a relaunch left behind.
     pub(crate) fn heard(self: &Arc<Self>, event: Event, tracker: &TaskTracker) {
+        let Some(terminal) = terminal_of(&event).cloned() else {
+            return;
+        };
         let agents = Arc::clone(self);
         tracker.spawn(async move {
-            let terminal = terminal_of(&event).clone();
             if let Err(err) = agents.observed(event).await {
                 tracing::warn!("bazhen: the agent in terminal {terminal}: {err}");
             }
@@ -125,7 +130,9 @@ impl Agents {
 
     /// What `heard` does with one event, in the agent's turn.
     pub(crate) async fn observed(&self, event: Event) -> Result<(), AgentError> {
-        let terminal = terminal_of(&event).clone();
+        let Some(terminal) = terminal_of(&event).cloned() else {
+            return Ok(());
+        };
         let Some(found) = self.in_terminal(&terminal).await? else {
             return Ok(());
         };
@@ -142,6 +149,7 @@ impl Agents {
                 .await
             }
             Event::Lost(_) => self.lost(&terminal).await,
+            Event::Title(_) | Event::TitlesMissed => Ok(()),
         }
     }
 

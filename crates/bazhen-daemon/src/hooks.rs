@@ -74,6 +74,10 @@ pub(crate) struct Hooks {
     pub(crate) limits: Arc<Limits>,
     /// The signs of life kept for starts not yet recorded.
     pub(crate) signs: Arc<Signs>,
+    /// The terminals of starts that wait on their title.
+    pub(crate) titles: Arc<crate::titles::Titles>,
+    /// The agents whose queued mail is being pushed.
+    pub(crate) pushers: Arc<crate::mail::Pushers>,
     /// One hook of an agent at a time, from its binding's read to its last fact.
     order: StdMutex<HashMap<AgentId, Arc<tokio::sync::Mutex<()>>>>,
     start_wait: Duration,
@@ -417,6 +421,8 @@ impl Hooks {
             approvals: Arc::default(),
             limits: Arc::default(),
             signs: Arc::default(),
+            titles: Arc::default(),
+            pushers: Arc::default(),
             order: StdMutex::new(HashMap::new()),
             start_wait,
         }
@@ -946,7 +952,8 @@ impl Hooks {
     }
 
     /// The agent's harness gave a sign of life. From the TUI its terminal started, while the agent
-    /// starts, it records the harness up. From the agent's own session but no start waiting, as
+    /// starts, it records the harness up and pushes the agent's queued mail, for a harness that
+    /// takes mail by push. From the agent's own session but no start waiting, as
     /// when the hook came before its start was recorded, the sign is kept for that start, with
     /// the newest event as it was kept and who sent it.
     async fn ready(
@@ -969,9 +976,9 @@ impl Hooks {
         // Read after the binding this hook was checked against, which the writer read after any
         // start request committed before it: a request the stamp is short of came after the sign.
         let stamp = *shared.store.committed().borrow();
-        if recorded.is_none()
-            && let Some(peer) = peer
-        {
+        if recorded.is_some() {
+            crate::mail::push_queued(shared, agent);
+        } else if let Some(peer) = peer {
             self.signs.remember(agent, sign, stamp, peer.clone());
         }
         Ok(())

@@ -386,6 +386,7 @@ mod tests {
                         exited: false,
                         gone: false,
                         generation: 0,
+                        title: String::new(),
                     },
                 );
             });

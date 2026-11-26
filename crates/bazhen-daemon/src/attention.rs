@@ -376,7 +376,7 @@ pub(crate) async fn reply(
             .await
             .map_err(|err| Refusal::Internal(err.to_string()))??;
         for queued in queued {
-            deliver(&shared, &agents, queued).await;
+            deliver(&shared, queued).await;
         }
         Ok(response)
     };
@@ -432,7 +432,7 @@ pub(crate) async fn resend(
             .await
             .map_err(|err| Refusal::Internal(err.to_string()))??;
         for queued in queued {
-            deliver(&shared, &agents, queued).await;
+            deliver(&shared, queued).await;
         }
         Ok(response)
     };

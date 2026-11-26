@@ -1483,14 +1483,16 @@ impl HolderRuntime {
         read
     }
 
-    /// The title in the holder's `hello`: its current process's, whichever generation that is.
+    /// The title in the holder's `hello`, with the generation of the process it is the title
+    /// of: the holder sets both again together when it starts a process.
     ///
     /// # Errors
     ///
     /// As a verb's.
-    pub async fn title(&self, terminal: &HolderRef) -> Result<String, RuntimeError> {
+    pub async fn title(&self, terminal: &HolderRef) -> Result<(Generation, String), RuntimeError> {
         let (client, _) = self.holder_of(terminal).await?;
-        let title = client.hello().title.clone();
+        let hello = client.hello();
+        let title = (hello.generation, hello.title.clone());
         client.end();
         Ok(title)
     }
@@ -2436,7 +2438,11 @@ mod tests {
                 let terminal = reference(&fixture, &id(1));
                 block_on(async {
                     if answers {
-                        fixture.serve(&id(1), Answering::Hello(Box::new(hello_of(&id(1)))));
+                        let hello = HelloReply {
+                            generation: Generation::new(2).unwrap(),
+                            ..hello_of(&id(1))
+                        };
+                        fixture.serve(&id(1), Answering::Hello(Box::new(hello)));
                     } else {
                         fixture.stale(&id(1));
                     }
@@ -2444,15 +2450,17 @@ mod tests {
                     let title = fixture.runtime.title(&terminal).await;
                     (
                         gone,
-                        title.map_err(|e| {
-                            matches!(
-                                e,
-                                RuntimeError::Stale {
-                                    reason: StaleReason::Gone,
-                                    ..
-                                }
-                            )
-                        }),
+                        title
+                            .map(|(generation, title)| (generation.get(), title))
+                            .map_err(|e| {
+                                matches!(
+                                    e,
+                                    RuntimeError::Stale {
+                                        reason: StaleReason::Gone,
+                                        ..
+                                    }
+                                )
+                            }),
                     )
                 })
             })
@@ -2462,7 +2470,7 @@ mod tests {
             [
                 (true, Err(true)),
                 (false, Err(false)),
-                (false, Ok(String::new()))
+                (false, Ok((2, String::new())))
             ]
         );
     }

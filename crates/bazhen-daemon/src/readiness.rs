@@ -132,6 +132,16 @@ impl Source for StoreSource {
     }
 }
 
+/// What arming a start found.
+enum Arming {
+    /// Its agent no longer waits on its harness.
+    Settled,
+    /// A sign its TUI gave once the start was requested recorded it up.
+    Ready,
+    /// It waits on its harness.
+    Waits,
+}
+
 /// A start timed for its deadline.
 #[derive(Debug, Clone, Copy)]
 struct Armed {
@@ -270,6 +280,7 @@ impl<S: Source> Follower<S> {
         }
         if SETTLES.contains(&kind) {
             self.armed.remove(&agent);
+            self.shared.hooks.titles.unwatch(&agent);
         }
         let hooks = &self.shared.hooks;
         if GONE.contains(&kind) {
@@ -282,37 +293,48 @@ impl<S: Source> Follower<S> {
     }
 
     /// Times the start `start_id`, recorded at `at`, unless its agent no longer waits on its
-    /// harness, or a sign its TUI gave once the start was requested says it is up already.
+    /// harness, or a sign its TUI gave once the start was requested says it is up already, when
+    /// its queued mail is pushed. A start whose harness's TUI says in its title what it shows has
+    /// its terminal watched.
     async fn arm(&mut self, agent: AgentId, start_id: u64, at: &str) {
         let signs = Arc::clone(&self.shared.hooks.signs);
         let id = agent.clone();
         let armed = self
             .shared
             .store
-            .run(move |store| -> Result<bool, bazhen_store::AppendError> {
+            .run(move |store| -> Result<Arming, bazhen_store::AppendError> {
                 if !store.reads().waiting(id.as_str())? {
-                    return Ok(false);
+                    return Ok(Arming::Settled);
                 }
                 let request = store.reads().start_request(id.as_str(), start_id)?;
                 let Some(kept) = signs.take_since(&id, request) else {
-                    return Ok(true);
+                    return Ok(Arming::Waits);
                 };
                 let binding = store.reads().agent_binding(id.as_str())?;
                 let its =
                     binding.is_some_and(|b| crate::hooks::ran_from_pane(&b, Some(&kept.peer)));
                 if !its {
-                    return Ok(true);
+                    return Ok(Arming::Waits);
                 }
                 let ready = store.write(|w| w.record_ready(&id, kept.sign))?;
-                Ok(ready.is_none())
+                Ok(if ready.is_some() {
+                    Arming::Ready
+                } else {
+                    Arming::Waits
+                })
             })
             .await;
         match armed {
-            Ok(Ok(false)) => {
+            Ok(Ok(Arming::Settled)) => {
                 self.armed.remove(&agent);
             }
-            Ok(Ok(true)) => {
+            Ok(Ok(Arming::Ready)) => {
+                self.armed.remove(&agent);
+                crate::mail::push_queued(&self.shared, &agent);
+            }
+            Ok(Ok(Arming::Waits)) => {
                 let due = Instant::now() + self.left(at);
+                watch_title(&self.shared, &agent).await;
                 self.armed.insert(agent, Armed { start_id, due });
             }
             Ok(Err(err)) => {
@@ -322,6 +344,7 @@ impl<S: Source> Follower<S> {
                     agent.as_str()
                 );
                 let due = Instant::now() + self.left(at);
+                watch_title(&self.shared, &agent).await;
                 self.armed.insert(agent, Armed { start_id, due });
             }
             Err(_) => {}
@@ -376,6 +399,47 @@ impl<S: Source> Follower<S> {
             }
         }
     }
+}
+
+/// Watches the terminal `agent` starts in, if its harness's TUI says in its title what it
+/// shows.
+async fn watch_title(shared: &Shared, agent: &AgentId) {
+    let Some(agents) = shared.agents.clone() else {
+        return;
+    };
+    let id = agent.clone();
+    let found = shared
+        .store
+        .run(move |store| {
+            let reads = store.reads();
+            Ok::<_, rusqlite::Error>((
+                reads.agent_terminal(id.as_str())?,
+                reads.agent_binding(id.as_str())?,
+            ))
+        })
+        .await;
+    let (found, binding) = match found {
+        Ok(Ok((Some(found), Some(binding)))) => (found, binding),
+        Ok(Ok(_)) | Err(_) => return,
+        Ok(Err(err)) => {
+            tracing::warn!(
+                "bazhen: readiness can't watch agent {}'s title: {err}",
+                agent.as_str()
+            );
+            return;
+        }
+    };
+    if !crate::titles::reads_titles(&agents, &binding.harness) {
+        return;
+    }
+    let (Some(terminal), Some(generation)) = (found.terminal_id, found.generation) else {
+        return;
+    };
+    let watch = crate::titles::Watch {
+        agent: agent.clone(),
+        generation,
+    };
+    shared.hooks.titles.watch(terminal, watch);
 }
 
 /// What the item says: the deadline, and the harness's hint, where it has one.

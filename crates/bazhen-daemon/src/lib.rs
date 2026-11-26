@@ -54,6 +54,7 @@ mod terminal_routes;
 mod terminals;
 #[cfg(test)]
 mod testing;
+mod titles;
 mod tokens;
 mod turns;
 mod web;
