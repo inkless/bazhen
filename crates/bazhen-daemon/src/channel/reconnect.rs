@@ -179,6 +179,12 @@ impl Channel {
         }
     }
 
+    /// Whether a connection is up.
+    #[cfg(test)]
+    pub(crate) fn up(&self) -> bool {
+        self.shared.link.borrow().up.as_ref().is_some_and(Rpc::open)
+    }
+
     /// The session, once the channel's task isn't using it, and the connection up then. While it
     /// is held the channel can neither pick up the bound sessions on a new connection nor tell of
     /// one that ended, so never call [`Channel::request`] or [`Channel::notify`] while holding

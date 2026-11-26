@@ -4,6 +4,7 @@
 //! new connection lands ahead of what the connection says of its sessions.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bazhen_harness::{Bound, IngestContext, LaunchRequest, Report, RunPort, SessionRef};
 use bazhen_protocol::agents::HarnessId;
@@ -23,19 +24,47 @@ use crate::writer::Writer;
 /// How many events a channel tells ahead of the task that reads them before it waits for it.
 const QUEUE: usize = 256;
 
+/// The most of a version a server names that is recorded, in bytes.
+const VERSION_CAP: usize = 128;
+
+/// The channel to each served harness's server, for the harnesses that run one.
+#[derive(Debug, Default)]
+pub(crate) struct Channels(Vec<(HarnessId, Channel)>);
+
+impl Channels {
+    pub(crate) fn get(&self, harness: HarnessId) -> Option<&Channel> {
+        self.0
+            .iter()
+            .find_map(|(id, channel)| (*id == harness).then_some(channel))
+    }
+}
+
 /// Starts a channel to the server of each harness `shared`'s agents run that has one, and its
-/// task, both on `tracker` until `stop`: once the agents are reconciled, so a channel picks up
-/// only the sessions still served. It connects at once if the daemon serves an agent on one of
-/// its sessions; `run` runs the harness's command that starts its server where none listens.
+/// task, both on `tracker` until `stop`, and hands the agents the channels to start theirs over:
+/// once the agents are reconciled, so a channel picks up only the sessions still served. It
+/// connects at once if the daemon serves an agent on one of its sessions; `run` runs the
+/// harness's command that starts its server where none listens.
 pub(crate) fn start(
     shared: &Shared,
     run: &Arc<Commands>,
     tracker: &TaskTracker,
     stop: &CancellationToken,
 ) {
+    start_retrying(shared, run, tracker, stop, FIRST_RETRY);
+}
+
+/// [`start`], each channel first waiting `first_retry` to connect again once a connection ends.
+fn start_retrying(
+    shared: &Shared,
+    run: &Arc<Commands>,
+    tracker: &TaskTracker,
+    stop: &CancellationToken,
+    first_retry: Duration,
+) {
     let Some(agents) = shared.agents.as_ref() else {
         return;
     };
+    let mut channels = Vec::new();
     for harness in HarnessId::ALL {
         let Some(session) = agents
             .harnesses()
@@ -51,11 +80,12 @@ pub(crate) fn start(
             bound: Box::new(move || bound(&store, harness)),
             run: Arc::clone(run) as Arc<dyn RunPort>,
             events,
-            first_retry: FIRST_RETRY,
+            first_retry,
         };
-        Channel::start(options, tracker, stop.clone());
+        channels.push((harness, Channel::start(options, tracker, stop.clone())));
         tracker.spawn(hear(shared.clone(), harness, told));
     }
+    agents.serve(Channels(channels));
 }
 
 /// The agents the daemon serves on `harness`'s sessions, as its server picks each up again: on
@@ -114,11 +144,30 @@ async fn hear(shared: Shared, harness: HarnessId, mut told: mpsc::Receiver<Event
 async fn heard(shared: &Shared, harness: HarnessId, event: Event) -> Result<(), String> {
     match event {
         Event::Inbound { message, .. } => inbound(shared, harness, message).await,
-        Event::Version(_) => Ok(()),
+        Event::Version(Some(version)) => recorded(shared, harness, version).await,
+        // A server that names none leaves the last one recorded.
+        Event::Version(None) => Ok(()),
         Event::Connected(observed) | Event::Disconnected(observed) => {
             shared.hooks.channel(shared, harness, observed).await
         }
     }
+}
+
+/// Records the version `harness`'s server answered a handshake on, when it isn't the last one
+/// recorded: no more than its first [`VERSION_CAP`] bytes, as the server names what it likes.
+async fn recorded(shared: &Shared, harness: HarnessId, mut version: String) -> Result<(), String> {
+    let mut cap = VERSION_CAP.min(version.len());
+    while !version.is_char_boundary(cap) {
+        cap -= 1;
+    }
+    version.truncate(cap);
+    shared
+        .store
+        .run(move |store| store.write(|w| w.record_harness_version(harness, &version)))
+        .await
+        .map_err(|err| err.to_string())?
+        .map(|_| ())
+        .map_err(|err| err.to_string())
 }
 
 /// Reads what the server sent through its harness, for the agent served on the session the

@@ -2,8 +2,8 @@
 //! gets its projection here in the change that first appends it.
 
 use bazhen_protocol::edge::is_task_brief;
-use bazhen_protocol::events::NoticeClosed;
-use bazhen_protocol::ids::{Id, NoticeId};
+use bazhen_protocol::events::{EnvironmentHarnessVersion, NoticeClosed};
+use bazhen_protocol::ids::{EnvironmentId, Id, NoticeId};
 use bazhen_protocol::tasks::is_task_title;
 use rusqlite::{OptionalExtension, Transaction};
 
@@ -84,6 +84,10 @@ pub(crate) fn project(
                 (environment.as_str(), payload.kind.as_str(), int(id)?),
             )?;
         }
+        NewEvent::HarnessVersion {
+            environment,
+            payload,
+        } => harness_version(tx, id, environment, payload)?,
         NewEvent::Terminal {
             terminal, change, ..
         } => terminals::project(tx, at, terminal, change)?,
@@ -116,6 +120,28 @@ pub(crate) fn project(
             attachments::granted(tx, id, terminal, payload)?;
         }
     }
+    Ok(())
+}
+
+/// The version a harness's server answered on in `environment`, the last one recorded there.
+fn harness_version(
+    tx: &Transaction<'_>,
+    id: u64,
+    environment: &EnvironmentId,
+    payload: &EnvironmentHarnessVersion,
+) -> Result<(), AppendError> {
+    tx.execute(
+        "INSERT INTO harness_versions (environment_id, harness, version, updated_event_id)
+           VALUES (?, ?, ?, ?)
+         ON CONFLICT (environment_id, harness)
+           DO UPDATE SET version = excluded.version, updated_event_id = excluded.updated_event_id",
+        (
+            environment.as_str(),
+            payload.harness.as_str(),
+            &payload.version,
+            int(id)?,
+        ),
+    )?;
     Ok(())
 }
 

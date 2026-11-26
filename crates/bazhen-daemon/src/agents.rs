@@ -14,9 +14,9 @@ pub(crate) mod watch;
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use bazhen_harness::{Harness, Harnesses, LaunchRequest, LaunchSpec};
+use bazhen_harness::{ChannelPort, Harness, Harnesses, LaunchRequest, LaunchSpec};
 use bazhen_protocol::agent_events::{AgentFailed, AgentFailedReason, AgentLaunched, AgentRunning};
 use bazhen_protocol::agents::{
     ExternalRef, ExternalRefKind, HarnessId, LaunchAgentRequest, LaunchAgentResponse,
@@ -33,6 +33,8 @@ use tokio_util::task::TaskTracker;
 use self::lifecycle::{Doing, from_runtime};
 use self::prompts::{Composed, FLEET, Prompts, compose};
 use crate::budget::{Budget, Counts, TerminalLimit};
+use crate::channel::reconnect::Channel;
+use crate::channels::Channels;
 use crate::failure::failure_detail;
 use crate::pairing::random_bytes;
 use crate::roles::Roles;
@@ -127,6 +129,11 @@ impl From<ShellError> for AgentError {
         }
     }
 }
+
+/// Why a harness with a server of its own can't be started before the daemon has started its
+/// channels, which it does once its agents are reconciled.
+pub(crate) const NO_CHANNEL: &str =
+    "the daemon is still starting: try again once it serves its agents";
 
 /// Why no agent can be launched while no hook client is built: agents report through it.
 pub(crate) const NO_HOOK: &str = "this daemon can't launch agents: bazhen-hook, which they report through, isn't built. Build it with moon run :build-hook, then start the daemon again";
@@ -289,6 +296,8 @@ struct Recording {
 /// What a recorded launch goes on to start with.
 struct Launching<'a> {
     harness: &'a dyn Harness,
+    /// The channel to its server, for a harness that has one.
+    channel: Option<&'a Channel>,
     agent: AgentId,
     terminal: TerminalId,
     environment: EnvironmentId,
@@ -317,6 +326,8 @@ pub(crate) struct Agents {
     /// terminal after it, though a holder it spawned may yet answer.
     refused: std::sync::Mutex<HashMap<TerminalId, std::time::Instant>>,
     unreconciled: std::sync::Mutex<reconcile::Unreconciled>,
+    /// Each served harness's channel to its server, once the daemon has started them.
+    channels: OnceLock<Channels>,
 }
 
 impl Agents {
@@ -326,7 +337,52 @@ impl Agents {
             started: std::time::Instant::now(),
             refused: std::sync::Mutex::default(),
             unreconciled: std::sync::Mutex::default(),
+            channels: OnceLock::new(),
         }
+    }
+
+    /// Hands the agents the channels the daemon started, which their starts go over from now.
+    /// Only the first is kept: the daemon starts its channels once.
+    pub(crate) fn serve(&self, channels: Channels) {
+        if self.channels.set(channels).is_err() {
+            tracing::warn!("bazhen: the agents were handed their harnesses' channels again");
+        }
+    }
+
+    /// The channel `harness`'s starts go over, none for a harness with no server. One with a
+    /// server can't be started before the daemon has started its channel, so it is refused with
+    /// nothing recorded, rather than failed for want of a server.
+    pub(crate) fn channel(&self, harness: HarnessId) -> Result<Option<&Channel>, AgentError> {
+        if let Some(channels) = self.channels.get() {
+            return Ok(channels.get(harness));
+        }
+        let served = self
+            .deps
+            .harnesses
+            .get(harness)
+            .and_then(Harness::session)
+            .is_some();
+        if served {
+            return Err(AgentError::Unavailable(NO_CHANNEL.to_owned()));
+        }
+        Ok(None)
+    }
+
+    /// `started`, once a start it records has `channel` connect, now that the agent is bound to
+    /// one of its server's sessions, if no connection is up: one that went down while the agent
+    /// started, when none was bound, isn't made again otherwise. Off the async tasks, as it reads
+    /// the store.
+    fn keep_connected<T, E>(
+        &self,
+        channel: Option<&Channel>,
+        started: Result<T, E>,
+    ) -> Result<T, E> {
+        if let (Ok(_), Some(channel)) = (&started, channel.cloned()) {
+            self.deps
+                .tracker
+                .spawn_blocking(move || channel.keep_connected());
+        }
+        started
     }
 
     /// Runs `command` to its end on the daemon's tasks, whether or not its caller waits for the
@@ -426,6 +482,7 @@ impl Agents {
                 req.harness.as_str()
             ))
         })?;
+        let channel = self.channel(req.harness)?;
         let roles = self.deps.roles.current();
         if let Some(role) = &req.role
             && roles.book.get(role).is_none()
@@ -479,6 +536,7 @@ impl Agents {
         };
         let launching = Launching {
             harness,
+            channel,
             agent,
             terminal,
             environment,
@@ -502,8 +560,12 @@ impl Agents {
     ) -> Result<LaunchAgentResponse, AgentError> {
         let agent = launching.agent.clone();
         let name = launching.name.clone();
+        let channel = launching.channel;
         match self.start(launching).await {
-            Ok(started) => self.running(key, asked, launched, &name, started).await,
+            Ok(started) => {
+                let running = self.running(key, asked, launched, &name, started).await;
+                self.keep_connected(channel, running)
+            }
             Err(StartFailed::Unknown(cause)) => {
                 tracing::warn!("bazhen: agent {agent}'s launch may have started it: {cause}");
                 Err(from_runtime(
@@ -600,6 +662,7 @@ impl Agents {
     async fn start(&self, launching: Launching<'_>) -> Result<Started, StartFailed> {
         let Launching {
             harness,
+            channel,
             agent,
             terminal,
             environment,
@@ -626,7 +689,10 @@ impl Agents {
             name: (!name.is_empty()).then_some(name),
             compact_window_tokens: compact_window_tokens.map(u64::from),
         };
-        let spec = match harness.launch(&request, None).await {
+        let spec = match harness
+            .launch(&request, channel.map(|c| c as &dyn ChannelPort))
+            .await
+        {
             Ok(spec) => spec,
             Err(err) => {
                 token.abandoned().await;

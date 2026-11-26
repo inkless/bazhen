@@ -5,15 +5,22 @@ use std::time::Duration;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use bazhen_harness::{
-    Gate, HarnessDeps, Harnesses, Key, Keyed, Observed, SessionKey, Settled, ToolKey, compiled,
+    BoxFuture, Gate, HarnessDeps, Harnesses, Key, Keyed, Observed, SessionKey, Settled, ToolKey,
+    compiled,
 };
-use bazhen_protocol::agents::{ActivityValue, LaunchAgentRequest};
-use bazhen_store::AppendError;
+use bazhen_protocol::agent_events::AgentExited;
+use bazhen_protocol::agents::{
+    ActivityValue, ExitStatus, LaunchAgentRequest, LaunchAgentResponse, RelaunchAgentRequest,
+    RespawnAgentRequest,
+};
+use bazhen_store::{AgentChange, AppendError, NewEvent};
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
+use tokio::sync::Semaphore;
+use tokio::task::JoinHandle;
 
 use super::*;
-use crate::agents::{Agents, AgentsDeps, prompts};
+use crate::agents::{AgentError, Agents, AgentsDeps, NO_CHANNEL, prompts};
 use crate::budget::Budget;
 use crate::budget::tests::{Machine, roomy};
 use crate::hooks::Hooks;
@@ -28,11 +35,17 @@ use crate::writer::Thread;
 /// Long enough for any step here, which comes at once or never.
 const LIMIT: Duration = Duration::from_secs(10);
 
+/// A first wait to connect again longer than any here, so a channel connects again in a test
+/// only when asked to.
+const NEVER: Duration = Duration::from_secs(600);
+
 /// A Codex agent, running on the session `STUB_SESSION`, whose launch named it `rev` and set its
 /// compaction window; the daemon serving it with the Codex adapter, on a Codex home of the test's.
 struct Fixture {
     shared: Shared,
     agent: AgentId,
+    /// The terminals the Codex agents start in.
+    fake: Arc<Fake>,
     codex_home: PathBuf,
     home: String,
     tracker: TaskTracker,
@@ -51,12 +64,18 @@ impl Drop for Fixture {
     }
 }
 
-fn agents_over(store: &Writer, dir: &TempDir, harnesses: Harnesses, hooks: &Arc<Hooks>) -> Agents {
+fn agents_over(
+    store: &Writer,
+    dir: &TempDir,
+    harnesses: Harnesses,
+    hooks: &Arc<Hooks>,
+    terminals: Arc<Fake>,
+) -> Agents {
     let run = dir.path().join("run");
     let uid = rustix::process::getuid().as_raw();
     Agents::new(AgentsDeps {
         store: store.clone(),
-        terminals: Arc::new(Fake::default()),
+        terminals,
         budget: Arc::new(Budget::new(
             100,
             Arc::new(Machine(StdMutex::new(roomy()))),
@@ -94,6 +113,7 @@ fn fixture() -> Fixture {
         &dir,
         StubHarness::new(pull()).served_as(HarnessId::Codex),
         &hooks,
+        Arc::new(Fake::default()),
     );
     let agent = runtime()
         .block_on(launcher.launch(&LaunchAgentRequest {
@@ -121,13 +141,15 @@ fn fixture() -> Fixture {
         daemon_socket: "/run/b.sock".to_owned(),
         real_path: Arc::new(|path| Some(path.to_owned())),
     });
-    let agents = Arc::new(agents_over(&store, &dir, served, &hooks));
+    let fake = Arc::new(Fake::default());
+    let agents = Arc::new(agents_over(&store, &dir, served, &hooks, Arc::clone(&fake)));
     let shared = Shared::new(&"f".repeat(64), Stop::default(), store)
         .with_hooks(hooks)
         .with_agents(agents);
     let f = Fixture {
         shared,
         agent,
+        fake,
         codex_home,
         home: home.to_string_lossy().into_owned(),
         tracker: TaskTracker::new(),
@@ -173,6 +195,77 @@ impl Fixture {
             .collect()
     }
 
+    fn events(&self) -> usize {
+        let reader = self.shared.store.reader().unwrap();
+        reader.reads().events(0, 1000).unwrap().len()
+    }
+
+    /// The session `agent` is bound to, by its id.
+    fn bound_to(&self, agent: &AgentId) -> Option<String> {
+        let reader = self.shared.store.reader().unwrap();
+        let binding = reader.reads().agent_binding(agent.as_str()).unwrap();
+        binding.and_then(|b| b.session).map(|session| session.id)
+    }
+
+    /// Whether the channel to Codex's server has no connection up.
+    fn unconnected(&self) -> bool {
+        let agents = self.shared.agents.as_ref().unwrap();
+        !agents.channel(HarnessId::Codex).unwrap().unwrap().up()
+    }
+
+    /// `agent`'s process exited, as its terminal and the store show it; its generation.
+    async fn exited(&self, agent: &AgentId) -> u64 {
+        let exited = AgentChange::Exited(AgentExited {
+            exit: ExitStatus::Unknown,
+        });
+        self.ended(agent, Fake::exit_unseen, exited).await
+    }
+
+    /// `agent`'s terminal lost, as its terminal and the store show it; its generation.
+    async fn lost(&self, agent: &AgentId) -> u64 {
+        self.ended(agent, Fake::gone, AgentChange::Lost).await
+    }
+
+    /// `agent`'s terminal ended as `end` ends it, and recorded as `change` says; its generation.
+    async fn ended(&self, agent: &AgentId, end: fn(&Fake, &str), change: AgentChange) -> u64 {
+        let reader = self.shared.store.reader().unwrap();
+        let found = reader
+            .reads()
+            .agent_terminal(agent.as_str())
+            .unwrap()
+            .unwrap();
+        end(&self.fake, found.terminal_id.as_ref().unwrap().as_str());
+        let event = NewEvent::Agent {
+            agent: agent.clone(),
+            actor: "system".to_owned(),
+            change,
+        };
+        let store = &self.shared.store;
+        store
+            .run(move |store| store.write(|w| w.append(&event)))
+            .await
+            .unwrap()
+            .unwrap();
+        found.generation.unwrap()
+    }
+
+    /// A launch of another Codex agent, as the human asks for it, on a task of its own.
+    fn launching(&self, key: &str) -> JoinHandle<Result<LaunchAgentResponse, AgentError>> {
+        let agents = Arc::clone(self.shared.agents.as_ref().unwrap());
+        let request = LaunchAgentRequest {
+            idempotency_key: key.to_owned(),
+            harness: HarnessId::Codex,
+            cwd: "~/repo".to_owned(),
+            project: None,
+            theme: None,
+            name: None,
+            role: None,
+            compact_window_tokens: None,
+        };
+        self.tracker
+            .spawn(async move { agents.launch(&request).await })
+    }
+
     fn open_items(&self) -> usize {
         let reader = self.shared.store.reader().unwrap();
         reader
@@ -188,16 +281,32 @@ impl Fixture {
         activity.map(|activity| activity.value)
     }
 
-    /// The server's side of the channel `start` opens, once its handshake and the pickup of the
-    /// agent's session are answered: the pickup's params.
-    async fn picked_up(&self) -> (Server, Value) {
+    /// Listens where the Codex home's server would, and starts the channels to it.
+    fn started(&self) -> UnixListener {
+        self.started_retrying(FIRST_RETRY)
+    }
+
+    /// The same, each channel first waiting `first_retry` to connect again once a connection
+    /// ends.
+    fn started_retrying(&self, first_retry: Duration) -> UnixListener {
         let socket = self
             .codex_home
             .join("app-server-control/app-server-control.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         let commands = Arc::new(Commands::new(crate::env::Env::new()));
-        start(&self.shared, &commands, &self.tracker, &self.stop);
-        let mut server = accepted(&listener).await;
+        start_retrying(
+            &self.shared,
+            &commands,
+            &self.tracker,
+            &self.stop,
+            first_retry,
+        );
+        listener
+    }
+
+    /// The server's side of the next connection, once its handshake is answered.
+    async fn handshaken(&self, listener: &UnixListener) -> Server {
+        let mut server = accepted(listener).await;
         let init = heard(&mut server).await;
         assert_eq!(init["method"], "initialize", "{init}");
         let codex_home = self.codex_home.to_string_lossy();
@@ -205,6 +314,14 @@ impl Fixture {
         say(&mut server, json!({ "id": init["id"], "result": answer })).await;
         let initialized = heard(&mut server).await;
         assert_eq!(initialized["method"], "initialized", "{initialized}");
+        server
+    }
+
+    /// The server's side of the channel `start` opens, once its handshake and the pickup of the
+    /// agent's session are answered: the pickup's params.
+    async fn picked_up(&self) -> (Server, Value) {
+        let listener = self.started();
+        let mut server = self.handshaken(&listener).await;
         let resume = heard(&mut server).await;
         assert_eq!(resume["method"], "thread/resume", "{resume}");
         let thread = json!({ "id": STUB_SESSION, "status": { "type": "idle" } });
@@ -215,6 +332,19 @@ impl Fixture {
         .await;
         (server, resume["params"].clone())
     }
+}
+
+/// Answers a launch's requests on `server`: the thread it starts, `thread`, and the instructions
+/// put on it. The start's params.
+async fn started_thread(server: &mut Server, thread: &str) -> Value {
+    let start = heard(server).await;
+    assert_eq!(start["method"], "thread/start", "{start}");
+    let started = json!({ "thread": { "id": thread } });
+    say(server, json!({ "id": start["id"], "result": started })).await;
+    let injected = heard(server).await;
+    assert_eq!(injected["method"], "thread/inject_items", "{injected}");
+    say(server, json!({ "id": injected["id"], "result": {} })).await;
+    start["params"].clone()
 }
 
 /// Waits until `done`, failing the test if it never is.
@@ -415,4 +545,184 @@ fn picks_up_an_agent_stored_with_an_empty_name_as_one_with_none() {
     let bound = read_bound(&f.shared.store, HarnessId::Codex).unwrap();
     let names: Vec<_> = bound.into_iter().map(|b| b.launch.name).collect();
     assert_eq!(names, [None]);
+}
+
+#[test]
+fn launches_a_codex_agent_on_the_thread_its_server_starts_over_the_channel() {
+    let f = fixture();
+    // No agent served, so nothing but the launch connects.
+    f.set("state = 'closed'");
+    let (cwd, bound) = runtime().block_on(async {
+        let listener = f.started();
+        let mut launched = f.launching("k-2");
+        let server = tokio::select! {
+            server = f.handshaken(&listener) => Some(server),
+            _ = &mut launched => None,
+        };
+        let Some(mut server) = server else {
+            return (None, None);
+        };
+        let params = started_thread(&mut server, "t-new").await;
+        let agent = within(LIMIT, launched).await.unwrap().unwrap().agent_id;
+        (Some(params["cwd"].clone()), f.bound_to(&agent))
+    });
+    assert_eq!(
+        (cwd, bound),
+        (
+            Some(json!(format!("{}/repo", f.home))),
+            Some("t-new".to_owned())
+        )
+    );
+}
+
+#[test]
+fn connects_again_for_an_agent_bound_after_the_connection_its_launch_made_ended() {
+    let f = fixture();
+    f.set("state = 'closed'");
+    let gate = Arc::new(Semaphore::new(0));
+    f.fake
+        .set(|state| state.hold_creates = Some(Arc::clone(&gate)));
+    let resumed = runtime().block_on(async {
+        // Never connecting again of its own accord, so only the launch can connect it.
+        let listener = f.started_retrying(NEVER);
+        let launched = f.launching("k-2");
+        let mut server = f.handshaken(&listener).await;
+        started_thread(&mut server, "t-new").await;
+        // Ended while its terminal is created, when no agent is bound yet to connect again for.
+        drop(server);
+        until("the connection was let go", || f.unconnected()).await;
+        gate.add_permits(1);
+        within(LIMIT, launched).await.unwrap().unwrap();
+        let again = tokio::time::timeout(LIMIT, f.handshaken(&listener)).await;
+        match again {
+            Ok(mut server) => Some(heard(&mut server).await),
+            Err(_) => None,
+        }
+    });
+    let resumed = resumed.map(|r| (r["method"].clone(), r["params"]["threadId"].clone()));
+    assert_eq!(resumed, Some((json!("thread/resume"), json!("t-new"))));
+}
+
+#[test]
+fn refuses_a_launch_over_a_server_before_the_channels_start_recording_nothing() {
+    let f = fixture();
+    let before = f.events();
+    let refused = runtime().block_on(async { f.launching("k-2").await.unwrap() });
+    assert_eq!(
+        (refused.map(|r| r.agent_id), f.events()),
+        (Err(AgentError::Unavailable(NO_CHANNEL.to_owned())), before)
+    );
+}
+
+#[test]
+fn records_no_more_than_the_first_128_bytes_of_the_version_its_server_names() {
+    let f = fixture();
+    // Two bytes each, so the 128th byte ends one.
+    let named = "\u{e9}".repeat(100);
+    let versions = runtime().block_on(async {
+        let told = Event::Version(Some(named.clone()));
+        super::heard(&f.shared, HarnessId::Codex, told)
+            .await
+            .unwrap();
+        f.of("environment.harness_version")
+    });
+    let recorded: Vec<_> = versions.iter().map(|v| v["version"].clone()).collect();
+    assert_eq!(recorded, [json!("\u{e9}".repeat(64))]);
+}
+
+#[test]
+fn records_the_version_its_server_answers_on_once_for_each_change() {
+    let f = fixture();
+    let versions = runtime().block_on(async {
+        let _picked = f.picked_up().await;
+        until("the version was recorded", || {
+            !f.of("environment.harness_version").is_empty()
+        })
+        .await;
+        for told in [None, Some("1.2.3"), Some("1.3.0")] {
+            let told = Event::Version(told.map(str::to_owned));
+            super::heard(&f.shared, HarnessId::Codex, told)
+                .await
+                .unwrap();
+        }
+        f.of("environment.harness_version")
+    });
+    assert_eq!(
+        versions,
+        [
+            json!({ "harness": "codex", "version": "1.2.3", "previous": null }),
+            json!({ "harness": "codex", "version": "1.3.0", "previous": "1.2.3" }),
+        ]
+    );
+}
+
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn respawns_a_codex_agent_on_its_thread_resumed_over_the_channel() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let f = fixture();
+    f.set("state = 'closed'");
+    let resumed = runtime().block_on(async {
+        let listener = f.started();
+        let launched = f.launching("k-2");
+        let mut server = f.handshaken(&listener).await;
+        started_thread(&mut server, "t-new").await;
+        let agent = within(LIMIT, launched).await.unwrap().unwrap().agent_id;
+        let generation = f.exited(&agent).await;
+        let agents = Arc::clone(f.shared.agents.as_ref().unwrap());
+        let respawn = RespawnAgentRequest {
+            idempotency_key: "k-3".to_owned(),
+            generation,
+            theme: None,
+        };
+        let mut respawned = f.tracker.spawn(async move {
+            let replaced = |_| -> BoxFuture<'static, ()> { Box::pin(async {}) };
+            agents.respawn(agent.as_str(), &respawn, replaced).await
+        });
+        let asked = tokio::select! {
+            asked = heard(&mut server) => asked,
+            _ = &mut respawned => return None,
+        };
+        let thread = json!({ "id": asked["params"]["threadId"], "status": { "type": "idle" } });
+        let resumed = json!({ "id": asked["id"], "result": { "thread": thread } });
+        say(&mut server, resumed).await;
+        within(LIMIT, respawned).await.unwrap().unwrap();
+        Some((asked["method"].clone(), asked["params"]["threadId"].clone()))
+    });
+    assert_eq!(resumed, Some((json!("thread/resume"), json!("t-new"))));
+}
+
+#[test]
+fn relaunches_a_lost_codex_agent_on_its_thread_resumed_over_the_channel() {
+    let f = fixture();
+    f.set("state = 'closed'");
+    let resumed = runtime().block_on(async {
+        let listener = f.started();
+        let launched = f.launching("k-2");
+        let mut server = f.handshaken(&listener).await;
+        started_thread(&mut server, "t-new").await;
+        let agent = within(LIMIT, launched).await.unwrap().unwrap().agent_id;
+        let generation = f.lost(&agent).await;
+        let agents = Arc::clone(f.shared.agents.as_ref().unwrap());
+        let relaunch = RelaunchAgentRequest {
+            idempotency_key: "k-3".to_owned(),
+            generation,
+            theme: None,
+            fresh: None,
+        };
+        let mut relaunched = f.tracker.spawn(async move {
+            let replaced = |_| -> BoxFuture<'static, ()> { Box::pin(async {}) };
+            agents.relaunch(agent.as_str(), &relaunch, replaced).await
+        });
+        let asked = tokio::select! {
+            asked = heard(&mut server) => asked,
+            _ = &mut relaunched => return None,
+        };
+        let thread = json!({ "id": asked["params"]["threadId"], "status": { "type": "idle" } });
+        let resumed = json!({ "id": asked["id"], "result": { "thread": thread } });
+        say(&mut server, resumed).await;
+        within(LIMIT, relaunched).await.unwrap().unwrap();
+        Some((asked["method"].clone(), asked["params"]["threadId"].clone()))
+    });
+    assert_eq!(resumed, Some((json!("thread/resume"), json!("t-new"))));
 }
