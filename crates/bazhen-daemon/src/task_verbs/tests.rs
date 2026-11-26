@@ -1,5 +1,7 @@
 //! The verbs that give agents work, over agents launched on the fake runtime.
 
+use std::sync::Arc;
+
 use axum::body::Body;
 use bazhen_core::roles::RoleBook;
 use bazhen_harness::Delivery;
@@ -264,6 +266,64 @@ fn hands_an_assignments_mail_over_only_once_its_write_commits() {
     assert_eq!(
         (answer.0, granted(&f), bodies(&f).len(), f.hand_over().len()),
         (500, 0, 0, 0)
+    );
+}
+
+/// Polls `route` once, so it queues its write behind a job that holds the writer, then drops it,
+/// as a client that hangs up does, and lets the writer go on: whether the route had answered.
+fn left_before_it_committed(f: &Fixture, route: impl Future<Output = Response>) -> bool {
+    f.runtime.block_on(async {
+        let (go, waits) = std::sync::mpsc::channel::<()>();
+        f.shared
+            .store
+            .queue(move |_| {
+                let _ = waits.recv();
+            })
+            .unwrap();
+        let mut route = Box::pin(route);
+        let answered = route
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+            .is_ready();
+        drop(route);
+        drop(go);
+        f.shared.store.run(|_| ()).await.unwrap();
+        answered
+    })
+}
+
+#[test]
+fn hands_over_the_mail_of_an_assignment_whose_caller_left_before_it_committed() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let body = json!({ "idempotencyKey": "a", "agentId": f.to.as_str(), "role": "worker" });
+    let before = bodies(&f).len();
+    let assigned = left_before_it_committed(
+        &f,
+        assign(
+            State(f.shared.clone()),
+            Some(Extension(Caller(None))),
+            Path(task),
+            Bytes::from(body.to_string()),
+        ),
+    );
+    let (assign_queued, assign_handed) = (bodies(&f).len() - before, f.hand_over().len());
+    let asking = assigning("m", f.peer.as_str(), "worker").to_string();
+    let (asked, grant) = crate::tasks::asked(asking.as_bytes()).unwrap();
+    let before = bodies(&f).len();
+    let created = left_before_it_committed(&f, create(f.shared.clone(), asked, grant));
+    let (create_queued, create_handed) = (bodies(&f).len() - before, f.hand_over().len());
+    assert_eq!(
+        (
+            (assigned, assign_queued > 0, assign_handed),
+            (created, create_queued > 0, create_handed),
+            granted(&f)
+        ),
+        (
+            (false, true, assign_queued),
+            (false, true, create_queued),
+            2
+        )
     );
 }
 
