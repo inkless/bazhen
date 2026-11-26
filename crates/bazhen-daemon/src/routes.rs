@@ -22,9 +22,7 @@ use bazhen_protocol::daemon::{
 };
 use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
 use bazhen_protocol::ids::TaskId;
-use bazhen_store::{
-    CreateTaskError, NewTask, OnceError, SnapshotError, SnapshotView, TaskReadError,
-};
+use bazhen_store::{NewTask, SnapshotError, SnapshotView, TaskReadError};
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
@@ -344,55 +342,24 @@ async fn stream(
         })
 }
 
-/// A task for its caller, made once per idempotency key. An agent's subtask is a delegation, which
-/// needs the assignments this daemon doesn't keep yet.
+/// A task for its caller, made once per idempotency key, with the role the body asks to grant on
+/// it, granted in the same write.
 async fn create_task(
     State(shared): State<Shared>,
     caller: Option<Extension<Caller>>,
     body: Bytes,
 ) -> Response {
-    let task = match tasks::asked(&body) {
-        Ok(task) => task,
+    let (task, assign) = match tasks::asked(&body) {
+        Ok(asked) => asked,
         Err(Refused::Invalid(message)) => {
             return fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &message);
         }
-        Err(Refused::Assigns) => {
-            return fail(
-                StatusCode::BAD_REQUEST,
-                ErrorCode::Unsupported,
-                "this daemon can't assign a task yet",
-            );
-        }
     };
-    let caller = callers::caller_of(caller);
-    if caller.is_some() && task.parent.is_some() {
-        return fail(
-            StatusCode::BAD_REQUEST,
-            ErrorCode::Unsupported,
-            "this daemon can't make an agent's subtask yet",
-        );
-    }
-    let task = NewTask { caller, ..task };
-    match shared
-        .store
-        .run(move |store| store.create_task(&task))
-        .await
-    {
-        Ok(Ok(made)) => axum::Json(made).into_response(),
-        Ok(Err(err @ (CreateTaskError::NoParent(_) | CreateTaskError::NoCaller(_)))) => {
-            fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &err.to_string())
-        }
-        Ok(Err(err @ CreateTaskError::ParentClosed(_))) => {
-            fail(StatusCode::CONFLICT, ErrorCode::Conflict, &err.to_string())
-        }
-        Ok(Err(CreateTaskError::Once(OnceError::Conflict(key)))) => fail(
-            StatusCode::CONFLICT,
-            ErrorCode::Conflict,
-            &format!("idempotency key {key} was first used for a different request"),
-        ),
-        Ok(Err(err)) => internal(&err),
-        Err(err) => internal(&err),
-    }
+    let task = NewTask {
+        caller: callers::caller_of(caller),
+        ..task
+    };
+    crate::task_verbs::create(shared, task, assign).await
 }
 
 /// Task `id` in full, to any caller: its brief and note, every assignment it has had, its
@@ -1819,10 +1786,7 @@ mod tests {
         let grant = json!({ "assign": { "agentId": "reviewer-1", "role": "worker" } });
         assert_eq!(
             send(socket.clone(), ask("d", grant)),
-            (
-                400,
-                refused("unsupported", "this daemon can't assign a task yet")
-            )
+            (503, refused("unavailable", "this daemon runs no terminals"))
         );
         let (status, invalid) = send(socket, ask("e", json!({ "brief": "" })));
         assert_eq!(

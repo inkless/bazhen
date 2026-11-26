@@ -9,17 +9,20 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bazhen_core::roles::RoleBook;
-use bazhen_core::task::{Refusal, TaskRefused, TasksHeld, check_grant};
+use bazhen_core::task::{Refusal, TaskRefused, TasksHeld, check_delegate, check_grant};
 use bazhen_harness::Harnesses;
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
 use bazhen_protocol::ids::{AgentId, TaskId};
 use bazhen_protocol::names::Role;
 use bazhen_protocol::roles::RoleDefinition;
-use bazhen_protocol::tasks::{AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse};
+use bazhen_protocol::tasks::{
+    AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse, CreateTaskResponse,
+    Grant as TaskGrant,
+};
 use bazhen_store::{
-    AppendError, NewGrant, NewNote, OnceError, Reads, TaskReadError, TaskVerbError,
-    Writer as StoreWriter,
+    AppendError, Assigning, CreateTaskError, NewGrant, NewNote, NewTask, OnceError, Reads,
+    TaskReadError, TaskVerbError, Writer as StoreWriter,
 };
 use serde::Serialize;
 
@@ -106,8 +109,19 @@ pub(crate) enum Granting {
     /// The agent to be given the work is gone, or was never there.
     NoAgent(String),
     Refused(TaskRefused),
+    /// The task wasn't made.
+    Create(CreateTaskError),
     /// Its mail wasn't sent, nor anything else recorded, as a send's refusal says.
     Send(Sending),
+}
+
+impl From<CreateTaskError> for Granting {
+    fn from(err: CreateTaskError) -> Self {
+        match err {
+            CreateTaskError::Refused(refused) => Self::Refused(refused),
+            err => Self::Create(err),
+        }
+    }
 }
 
 impl From<Sending> for Granting {
@@ -178,6 +192,14 @@ fn granting(err: Granting) -> Response {
             };
             fail(status, code, &refused.to_string())
         }
+        Granting::Create(err @ (CreateTaskError::NoParent(_) | CreateTaskError::NoCaller(_))) => {
+            fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &err.to_string())
+        }
+        Granting::Create(err @ CreateTaskError::ParentClosed(_)) => {
+            fail(StatusCode::CONFLICT, ErrorCode::Conflict, &err.to_string())
+        }
+        Granting::Create(CreateTaskError::Once(err)) => refusal(Sending::Once(err)),
+        Granting::Create(err) => refusal(Sending::Internal(err.to_string())),
         Granting::Send(err) => refusal(err),
     }
 }
@@ -235,6 +257,7 @@ pub(crate) async fn assign(
                         role: &req.role,
                         book: &roles.book,
                         key: &req.idempotency_key,
+                        under: Under::Checked,
                     };
                     grant.record(w, run.harnesses(), &mut queued)
                 })?;
@@ -246,6 +269,87 @@ pub(crate) async fn assign(
         Ok::<_, Granting>(response)
     };
     match assigned.await {
+        Ok(response) => axum::Json(response).into_response(),
+        Err(err) => granting(err),
+    }
+}
+
+/// Makes a task for its caller, and grants the role `assign` asks for on it in the same write, as
+/// `create` does (`tasks.ts`). The agent is resolved by name or id before the key is replayed, as
+/// the TypeScript daemon's route resolves it. An agent's subtask is granted under the assignment
+/// it was delegated from.
+pub(crate) async fn create(shared: Shared, task: NewTask, assign: Option<TaskGrant>) -> Response {
+    let made = async {
+        let agents = match assign {
+            Some(_) => Some(shared.agents.clone().ok_or(Sending::Unavailable)?),
+            None => None,
+        };
+        let roles = shared.roles.current();
+        let run = agents.clone();
+        let (response, queued) = shared
+            .store
+            .run(move |store| {
+                let agent = match &assign {
+                    Some(grant) => {
+                        let reference = grant.agent_id.as_str();
+                        let agent = store.reads().resolve_agent(reference)?;
+                        Some(agent.ok_or_else(|| Sending::Unnamed(reference.to_owned()))?)
+                    }
+                    None => None,
+                };
+                let assigning =
+                    assign
+                        .as_ref()
+                        .zip(agent.as_deref())
+                        .map(|(grant, agent)| Assigning {
+                            agent_id: agent,
+                            role: grant.role.as_str(),
+                        });
+                let kept = task.request_text_assigning(assigning.as_ref())?;
+                let mut queued = Vec::new();
+                let response = store.once(&task.key, &kept, |w| {
+                    let made = w.create_task(&task, &roles.book)?;
+                    let (Some(grant), Some(agent), Some(run)) = (&assign, &agent, &run) else {
+                        return Ok(CreateTaskResponse {
+                            task_id: made.task_id,
+                            assignment_id: None,
+                            event_ids: vec![made.event],
+                        });
+                    };
+                    if roles.book.get(&grant.role).is_none() {
+                        return Err(Granting::NoRole(grant.role.clone()));
+                    }
+                    let granted = Grant {
+                        caller: task.caller.as_ref(),
+                        task: &made.task_id,
+                        agent,
+                        role: &grant.role,
+                        book: &roles.book,
+                        key: &task.key,
+                        under: match (&task.parent, &task.caller) {
+                            (Some(parent), Some(by)) => Under::Delegated { parent, by },
+                            _ => Under::Checked,
+                        },
+                    }
+                    .record(w, run.harnesses(), &mut queued)?;
+                    let mut event_ids = vec![made.event];
+                    event_ids.extend(granted.event_ids);
+                    Ok(CreateTaskResponse {
+                        task_id: made.task_id,
+                        assignment_id: Some(granted.assignment_id),
+                        event_ids,
+                    })
+                })?;
+                Ok::<_, Granting>((response, queued))
+            })
+            .await
+            .map_err(|err| Sending::Internal(err.to_string()))??;
+        if let Some(agents) = agents {
+            agents.hand(queued);
+        }
+        Ok::<_, Granting>(response)
+    };
+    match made.await {
         Ok(response) => axum::Json(response).into_response(),
         Err(err) => granting(err),
     }
@@ -272,6 +376,17 @@ struct Grant<'a> {
     book: &'a RoleBook,
     /// The verb's key, which the mail's keys are derived from.
     key: &'a str,
+    under: Under<'a>,
+}
+
+/// The assignment a grant is made under.
+enum Under<'a> {
+    /// The one the caller grants from, as the grant is checked.
+    Checked,
+    /// An agent's subtask's, made under `parent`: the assignment on the parent it was delegated
+    /// from, or none, made as the parent's owner. The role must be one its standing on the parent
+    /// grants, as delegating it would be: it owns the new task, where it would grant more.
+    Delegated { parent: &'a TaskId, by: &'a AgentId },
 }
 
 impl Grant<'_> {
@@ -321,7 +436,15 @@ impl Grant<'_> {
             .filter(|a| a.role == *self.role)
             .count();
         let held = TasksHeld(u64::try_from(held).unwrap_or(u64::MAX));
-        let parent = check_grant(&view, self.caller, &agent, self.role, self.book, held)?;
+        let delegated = match self.under {
+            Under::Checked => None,
+            Under::Delegated { parent, by } => {
+                let parent = reads.task_view(parent)?.ok_or_else(no_task)?;
+                Some(check_delegate(&parent, by, self.role, self.book)?)
+            }
+        };
+        let checked = check_grant(&view, self.caller, &agent, self.role, self.book, held)?;
+        let parent = delegated.unwrap_or(checked);
         let (assignment_id, granted) = w.grant(&NewGrant {
             caller: self.caller,
             task: self.task,

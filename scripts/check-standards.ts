@@ -1173,7 +1173,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-host-guard/src/group.rs::Ran::text":
     "hands each stream a run kept to std's String::from_utf8_lossy, which takes any bytes; parses nothing of its own",
   "crates/bazhen-daemon/src/serve.rs::run_on":
-    "hands the runner, holder runtime and all, to shells, and starts the harnesses' channels; reads no bytes",
+    "hands the runner, holder runtime and all, to shells, and starts the mail drain; reads no bytes",
   "crates/bazhen-daemon/src/stream.rs::on_holders":
     "builds the hub over the holder runtime it is given; reads no bytes",
   "crates/bazhen-daemon/src/stream/holder.rs::HolderStreams::new":

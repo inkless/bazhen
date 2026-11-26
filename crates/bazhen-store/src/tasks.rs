@@ -1,14 +1,16 @@
 //! Tasks made by request, as `tasks/tasks.ts` makes them: once per idempotency key, and refused
-//! under a parent that isn't there or isn't open.
+//! under a parent that isn't there or isn't open, or, for an agent, one it has no authority on.
 
+use bazhen_core::roles::RoleBook;
+use bazhen_core::task::{TaskRefused, granting_assignment};
 use bazhen_protocol::events::TaskCreated;
-use bazhen_protocol::ids::{AgentId, TaskId};
+use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
 use bazhen_protocol::nullable::Nullable;
-use bazhen_protocol::tasks::CreateTaskResponse;
+use bazhen_protocol::tasks::{CreateTaskResponse, TaskState};
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
-use crate::{AppendError, NewEvent, OnceError, Store, Writer};
+use crate::{AppendError, NewEvent, OnceError, Store, TaskReadError, Writer};
 
 /// A task the caller asks for, each field already held to the protocol's rules, its title
 /// trimmed: the human's, or an agent's, which owns it.
@@ -31,6 +33,28 @@ struct Kept<'a> {
     brief: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_task_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assign: Option<&'a Assigning<'a>>,
+}
+
+/// The role a request to make a task asks to grant on it, as the request keeps it: the agent as
+/// resolved, and the role. The grant itself is the caller's to make, in the same write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assigning<'a> {
+    pub agent_id: &'a str,
+    pub role: &'a str,
+}
+
+/// A task just made, in the write that made it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MadeTask {
+    pub task_id: TaskId,
+    /// The `task.created` event's id.
+    pub event: u64,
+    /// For an agent's subtask, the assignment on the parent it delegates under; none for one it
+    /// makes as the parent's owner, or the human's.
+    pub delegated_from: Option<AssignmentId>,
 }
 
 impl NewTask {
@@ -41,11 +65,24 @@ impl NewTask {
     ///
     /// `serde_json`'s, which a struct of strings never meets.
     pub fn request_text(&self) -> serde_json::Result<String> {
+        self.request_text_assigning(None)
+    }
+
+    /// The text a repeat of this request must match when it also asks for `assign`.
+    ///
+    /// # Errors
+    ///
+    /// `serde_json`'s, which a struct of strings never meets.
+    pub fn request_text_assigning(
+        &self,
+        assign: Option<&Assigning<'_>>,
+    ) -> serde_json::Result<String> {
         serde_json::to_string(&Kept {
             caller: self.caller.as_ref().map(AgentId::as_str),
             title: &self.title,
             brief: &self.brief,
             parent_task_id: self.parent.as_ref().map(TaskId::as_str),
+            assign,
         })
     }
 }
@@ -61,6 +98,11 @@ pub enum CreateTaskError {
     /// The parent is done or cancelled.
     #[error("the parent task is {0}")]
     ParentClosed(String),
+    /// An agent's subtask under a parent it neither owns nor holds a role on that grants.
+    #[error(transparent)]
+    Refused(TaskRefused),
+    #[error(transparent)]
+    Read(#[from] TaskReadError),
     #[error(transparent)]
     Once(#[from] OnceError),
     #[error(transparent)]
@@ -80,49 +122,78 @@ impl Store {
     /// # Errors
     ///
     /// [`CreateTaskError`]; nothing is recorded then.
-    pub fn create_task(&mut self, task: &NewTask) -> Result<CreateTaskResponse, CreateTaskError> {
+    pub fn create_task(
+        &mut self,
+        task: &NewTask,
+        book: &RoleBook,
+    ) -> Result<CreateTaskResponse, CreateTaskError> {
         self.once(&task.key, &task.request_text()?, |w| {
-            if let Some(caller) = &task.caller
-                && !open(w, caller)?
-            {
-                return Err(CreateTaskError::NoCaller(caller.as_str().to_owned()));
-            }
-            if let Some(parent) = &task.parent {
-                let state: Option<String> = w
-                    .connection()
-                    .query_row(
-                        "SELECT state FROM tasks WHERE id = ?",
-                        [parent.as_str()],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                match state.as_deref() {
-                    None => return Err(CreateTaskError::NoParent(parent.as_str().to_owned())),
-                    Some("open") => {}
-                    Some(state) => return Err(CreateTaskError::ParentClosed(state.to_owned())),
-                }
-            }
-            let id = TaskId::mint(crate::now_ms(), crate::urandom()?);
-            let created = w.append(&NewEvent::TaskCreated {
-                task: id.clone(),
-                actor: task
-                    .caller
-                    .as_ref()
-                    .map_or("human", AgentId::as_str)
-                    .to_owned(),
-                payload: TaskCreated {
-                    title: task.title.clone(),
-                    brief: task.brief.clone(),
-                    owner_agent_id: task.caller.clone(),
-                    parent_task_id: task.parent.clone(),
-                    delegated_from: Nullable::Null,
-                },
-            })?;
+            let made = w.create_task(task, book)?;
             Ok(CreateTaskResponse {
-                task_id: id,
+                task_id: made.task_id,
                 assignment_id: None,
-                event_ids: vec![created],
+                event_ids: vec![made.event],
             })
+        })
+    }
+}
+
+impl Writer<'_> {
+    /// Makes `task` in this write, as `create` does before any grant (`tasks.ts`). An agent's
+    /// subtask is a delegation, which needs the authority delegating would: it is made under the
+    /// assignment on the parent that grants, which `granting_assignment` picks, and is refused
+    /// one where the agent has none and doesn't own the parent.
+    ///
+    /// # Errors
+    ///
+    /// [`CreateTaskError`]; the write is rolled back then.
+    pub fn create_task(
+        &self,
+        task: &NewTask,
+        book: &RoleBook,
+    ) -> Result<MadeTask, CreateTaskError> {
+        if let Some(caller) = &task.caller
+            && !open(self, caller)?
+        {
+            return Err(CreateTaskError::NoCaller(caller.as_str().to_owned()));
+        }
+        let mut delegated_from = None;
+        if let Some(parent) = &task.parent {
+            let view = self
+                .reads()
+                .task_view(parent)?
+                .ok_or_else(|| CreateTaskError::NoParent(parent.as_str().to_owned()))?;
+            if view.state != TaskState::Open {
+                return Err(CreateTaskError::ParentClosed(
+                    view.state.as_str().to_owned(),
+                ));
+            }
+            delegated_from = granting_assignment(&view, task.caller.as_ref(), book)
+                .map_err(CreateTaskError::Refused)?
+                .map(|from| from.id.clone());
+        }
+        let id = TaskId::mint(crate::now_ms(), crate::urandom()?);
+        let event = self.append(&NewEvent::TaskCreated {
+            task: id.clone(),
+            actor: task
+                .caller
+                .as_ref()
+                .map_or("human", AgentId::as_str)
+                .to_owned(),
+            payload: TaskCreated {
+                title: task.title.clone(),
+                brief: task.brief.clone(),
+                owner_agent_id: task.caller.clone(),
+                parent_task_id: task.parent.clone(),
+                delegated_from: delegated_from
+                    .clone()
+                    .map_or(Nullable::Null, Nullable::Value),
+            },
+        })?;
+        Ok(MadeTask {
+            task_id: id,
+            event,
+            delegated_from,
         })
     }
 }
@@ -201,7 +272,9 @@ mod tests {
         let dir = TempDir::new("tasks-kept");
         let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
         let parent = asked(&log["requests"][0]);
-        store.create_task(&parent).unwrap();
+        store
+            .create_task(&parent, &RoleBook::new(Vec::new()))
+            .unwrap();
         assert_eq!(
             kept_request(&store, &parent.key),
             parent.request_text().unwrap()
@@ -213,18 +286,25 @@ mod tests {
         let dir = TempDir::new("tasks-once");
         let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
         let task = asked(&fixture()["log"]["requests"][0]);
-        let first = store.create_task(&task).unwrap();
+        let first = store
+            .create_task(&task, &RoleBook::new(Vec::new()))
+            .unwrap();
         assert_eq!(
             (first.assignment_id.as_ref(), first.event_ids.as_slice()),
             (None, &[1][..])
         );
-        assert_eq!(store.create_task(&task).unwrap(), first);
+        assert_eq!(
+            store
+                .create_task(&task, &RoleBook::new(Vec::new()))
+                .unwrap(),
+            first
+        );
         let other = NewTask {
             brief: "else".to_owned(),
             ..task
         };
         assert!(matches!(
-            store.create_task(&other),
+            store.create_task(&other, &RoleBook::new(Vec::new())),
             Err(CreateTaskError::Once(OnceError::Conflict(key))) if key == "create parent"
         ));
         assert_eq!(store.reads().latest_event_id().unwrap(), 1);
@@ -235,7 +315,10 @@ mod tests {
         let dir = TempDir::new("tasks-parent");
         let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
         let parent = store
-            .create_task(&asked(&fixture()["log"]["requests"][0]))
+            .create_task(
+                &asked(&fixture()["log"]["requests"][0]),
+                &RoleBook::new(Vec::new()),
+            )
             .unwrap()
             .task_id;
         let under = |key: &str, parent: &TaskId| NewTask {
@@ -247,7 +330,7 @@ mod tests {
         };
         let missing = TaskId::mint(1, [9; 16]);
         assert!(matches!(
-            store.create_task(&under("a", &missing)),
+            store.create_task(&under("a", &missing), &RoleBook::new(Vec::new())),
             Err(CreateTaskError::NoParent(id)) if id == missing.as_str()
         ));
         store
@@ -257,7 +340,7 @@ mod tests {
                 [parent.as_str()],
             )
             .unwrap();
-        let refused = store.create_task(&under("b", &parent));
+        let refused = store.create_task(&under("b", &parent), &RoleBook::new(Vec::new()));
         assert!(
             matches!(refused, Err(CreateTaskError::ParentClosed(ref state)) if state == "done"),
             "{refused:?}"
@@ -301,7 +384,9 @@ mod tests {
             brief: "b".to_owned(),
             parent: None,
         };
-        let made = store.create_task(&task("mine", agent('1'))).unwrap();
+        let made = store
+            .create_task(&task("mine", agent('1')), &RoleBook::new(Vec::new()))
+            .unwrap();
         let (actor, owner): (String, String) = store
             .db
             .query_row(
@@ -324,7 +409,7 @@ mod tests {
             ("lost", agent('3')),
             ("unknown", agent('4')),
         ] {
-            let refused = store.create_task(&task(key, caller.clone()));
+            let refused = store.create_task(&task(key, caller.clone()), &RoleBook::new(Vec::new()));
             assert!(
                 matches!(&refused, Err(CreateTaskError::NoCaller(id)) if id == caller.as_str()),
                 "{refused:?}"

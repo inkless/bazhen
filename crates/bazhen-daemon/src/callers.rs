@@ -1095,48 +1095,71 @@ mod tests {
         }
 
         #[test]
-        fn makes_an_agents_task_owned_by_it_and_refuses_its_subtask_or_one_from_an_agent_closing() {
+        fn makes_an_agents_task_and_its_subtask_owned_by_it_and_refuses_one_under_a_task_not_its_own()
+         {
             let (dir, store, thread) = daemon();
             let task = |key: &str| json!({ "idempotencyKey": key, "title": "T", "brief": "b" });
-            let post = |token, body| {
+            let under = |key: &str, parent: &Value| {
+                let mut sub = task(key);
+                sub["parentTaskId"] = parent["taskId"].clone();
+                sub
+            };
+            let post = |token: Option<&str>, body| {
+                let mut headers = vec![("content-type", "application/json")];
+                headers.extend(token.map(|token| ("bazhen-agent-token", token)));
                 ask(
                     router(&store, None),
                     "POST",
                     "/v1/tasks",
-                    &[
-                        ("bazhen-agent-token", token),
-                        ("content-type", "application/json"),
-                    ],
+                    &headers,
                     Some(body),
                     false,
                 )
             };
-            let (status, made) = post(TOKEN, task("mine"));
-            assert_eq!(status, 200, "{made}");
-            let mut sub = task("sub");
-            sub["parentTaskId"] = made["taskId"].clone();
+            let (status, mine) = post(Some(TOKEN), task("mine"));
+            assert_eq!(status, 200, "{mine}");
+            let (status, sub) = post(Some(TOKEN), under("sub", &mine));
+            assert_eq!(status, 200, "{sub}");
+            let (_, humans) = post(None, task("humans"));
+            let forbidden = "only the task's coordinator, lead or owner can assign it";
             assert_eq!(
-                post(TOKEN, sub),
-                (
-                    400,
-                    json!({ "error": "unsupported", "message": "this daemon can't make an agent's subtask yet" })
-                )
+                [
+                    post(Some(TOKEN), under("off", &humans)),
+                    post(Some(CLOSING_TOKEN), task("closing")),
+                ],
+                [
+                    (403, json!({ "error": "forbidden", "message": forbidden })),
+                    (
+                        404,
+                        json!({
+                            "error": "not_found",
+                            "message": format!("no agent {} that is open", agent('2').as_str())
+                        })
+                    ),
+                ]
             );
+            let made: Vec<(String, Option<String>, Option<String>)> = rusqlite::Connection::open(
+                dir.path().join("bazhen.db"),
+            )
+            .unwrap()
+            .prepare(
+                "SELECT id, owner_agent_id, parent_task_id FROM tasks ORDER BY created_event_id",
+            )
+            .unwrap()
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+            let id = |made: &Value| made["taskId"].as_str().unwrap().to_owned();
+            let owner = Some(agent('1').as_str().to_owned());
             assert_eq!(
-                post(CLOSING_TOKEN, task("closing")),
-                (
-                    404,
-                    json!({
-                        "error": "not_found",
-                        "message": format!("no agent {} that is open", agent('2').as_str())
-                    })
-                )
+                made,
+                [
+                    (id(&mine), owner.clone(), None),
+                    (id(&sub), owner, Some(id(&mine))),
+                    (id(&humans), None, None),
+                ]
             );
-            let owner: String = rusqlite::Connection::open(dir.path().join("bazhen.db"))
-                .unwrap()
-                .query_row("SELECT owner_agent_id FROM tasks", (), |row| row.get(0))
-                .unwrap();
-            assert_eq!(owner, agent('1').as_str());
             thread.finish();
         }
 

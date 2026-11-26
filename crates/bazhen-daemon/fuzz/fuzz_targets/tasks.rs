@@ -7,7 +7,7 @@ use libfuzzer_sys::fuzz_target;
 // taken holds to the rules, its title trimmed, and is kept as JSON that names the human as its
 // caller.
 fuzz_target!(|bytes: &[u8]| {
-    if let Ok(task) = asked(bytes) {
+    if let Ok((task, _)) = asked(bytes) {
         assert!((1..=200).contains(&task.key.chars().count()));
         assert!((1..=200).contains(&task.title.chars().count()));
         assert_eq!(task.title.trim(), task.title);
