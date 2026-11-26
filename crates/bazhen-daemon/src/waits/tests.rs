@@ -572,3 +572,47 @@ fn judges_a_wait_for_mail_while_the_writer_is_busy() {
     let (status, answer) = judged.expect("judged behind the writer's work");
     assert_eq!((status, states(&answer)), (200, vec!["queued"]));
 }
+
+#[test]
+fn reads_once_a_commit_however_many_waits_it_wakes() {
+    let d = daemon(crate::accept::SOCKET_MAX, 128);
+    let ids = d.queued(&["a", "b", "c", "d", "e", "f", "g", "h"]);
+    let reads = || d.shared.waits.0.reads.load(Ordering::Relaxed);
+    crate::testing::runtime().block_on(async {
+        let mut waiting = tokio::task::JoinSet::new();
+        for id in &ids {
+            let asked = json!({ "messageIds": [id], "timeoutMs": 60_000 });
+            waiting.spawn(wait(d.shared.clone(), asked));
+        }
+        holding(&d.shared.waits, (8, 0, 1)).await;
+        let before = reads();
+        let settled = ids.clone();
+        d.write(move |w| {
+            for id in &settled {
+                w.mail_step(id, undeliverable())?;
+            }
+            Ok(())
+        });
+        let answered = tokio::time::timeout(Duration::from_secs(10), waiting.join_all())
+            .await
+            .expect("still waiting once every message was settled");
+        assert!(answered.iter().all(|(status, _)| *status == 200));
+        assert_eq!(reads() - before, 1, "reads for the one commit");
+    });
+}
+
+#[test]
+fn answers_a_wait_of_no_time_while_the_open_waits_read() {
+    let d = daemon(crate::accept::SOCKET_MAX, 128);
+    let ids = d.queued(&["one"]);
+    crate::testing::runtime().block_on(async {
+        let _reading = d.shared.waits.0.latest.lock().await;
+        let now = tokio::time::timeout(
+            Duration::from_secs(2),
+            d.wait(json!({ "messageIds": [ids[0]], "timeoutMs": 0 })),
+        )
+        .await
+        .expect("held up behind the open waits' read");
+        assert_eq!((now.0, states(&now.1)), (200, vec!["queued"]));
+    });
+}

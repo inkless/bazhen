@@ -421,13 +421,12 @@ mod tests {
             agent: AGENT.to_owned(),
             state,
         };
-        assert_eq!(
-            read,
-            [
-                state(&first, MailboxState::Queued),
-                state(&last, MailboxState::Undeliverable)
-            ]
-        );
+        let mut want = vec![
+            state(&first, MailboxState::Queued),
+            state(&last, MailboxState::Undeliverable),
+        ];
+        want.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(read, want);
     }
 
     #[test]
