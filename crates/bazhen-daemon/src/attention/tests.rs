@@ -5,7 +5,7 @@ use bazhen_protocol::ids::{AgentId, AttentionId};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::mail::tests::{Fixture, fixture, pull, push};
+use crate::mail::tests::{Fixture, fixture, left_before_it_committed, pull, push};
 
 /// Calls `route` on the item `id` with `body`, and waits for any push it starts.
 fn call<F: Future<Output = Response>>(
@@ -24,7 +24,7 @@ fn call<F: Future<Output = Response>>(
         .runtime
         .block_on(axum::body::to_bytes(response.into_body(), 1 << 20))
         .unwrap();
-    f.settle();
+    f.hand_over();
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -192,6 +192,70 @@ fn resends_mail_given_up_on_as_a_new_message_and_closes_its_item() {
             (200, vec![json!([])]),
         )
     );
+}
+
+#[test]
+fn hands_over_a_reply_even_if_the_caller_leaves_before_commit() {
+    let f = fixture(pull());
+    let id = failed(&f, &f.to);
+    let route = reply_by_human(
+        State(f.shared.clone()),
+        Path(id),
+        Bytes::from_static(br#"{"idempotencyKey":"k","body":"go on"}"#),
+    );
+    let answered = left_before_it_committed(&f, route);
+    assert_eq!((answered, f.hand_over().len()), (false, 1));
+}
+
+#[test]
+fn hands_over_a_resend_even_if_the_caller_leaves_before_commit() {
+    let f = fixture(push(std::iter::repeat_n(
+        Pushed::Failed {
+            detail: "gone".to_owned(),
+        },
+        3,
+    )));
+    f.send(None, &f.to, "k", "hello");
+    let (id, _) = open(&f, &f.to).pop().unwrap();
+    let route = resend(
+        State(f.shared.clone()),
+        Path(id),
+        Bytes::from_static(br#"{"idempotencyKey":"r"}"#),
+    );
+    let answered = left_before_it_committed(&f, route);
+    assert_eq!((answered, f.hand_over().len()), (false, 1));
+}
+
+#[test]
+fn hands_a_reply_over_only_once_its_write_commits() {
+    let f = fixture(pull());
+    let id = failed(&f, &f.to);
+    f.fail_the_last_step();
+    let status = f.status(reply_by_human(
+        State(f.shared.clone()),
+        Path(id),
+        Bytes::from_static(br#"{"idempotencyKey":"k","body":"go on"}"#),
+    ));
+    assert_eq!((status, f.hand_over().len()), (500, 0));
+}
+
+#[test]
+fn hands_a_resend_over_only_once_its_write_commits() {
+    let f = fixture(push(std::iter::repeat_n(
+        Pushed::Failed {
+            detail: "gone".to_owned(),
+        },
+        3,
+    )));
+    f.send(None, &f.to, "k", "hello");
+    let (id, _) = open(&f, &f.to).pop().unwrap();
+    f.fail_the_last_step();
+    let status = f.status(resend(
+        State(f.shared.clone()),
+        Path(id),
+        Bytes::from_static(br#"{"idempotencyKey":"r"}"#),
+    ));
+    assert_eq!((status, f.hand_over().len()), (500, 0));
 }
 
 #[test]

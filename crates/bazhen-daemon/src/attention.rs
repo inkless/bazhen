@@ -34,7 +34,7 @@ use bazhen_store::{
 use crate::agents::Agents;
 use crate::callers::{Caller, caller_of};
 use crate::hooks::approvals::{Approvals, Entry, Responder, ServerHold};
-use crate::mail::{Queued, Sending, deliver, queue, refusal};
+use crate::mail::{Queued, Sending, queue, refusal};
 use crate::routes::{Shared, fail, internal};
 
 /// Agents gone for good: mail can't reach them, so a reply can't either.
@@ -319,9 +319,8 @@ pub(crate) async fn reply(
             edge::<ReplyAttentionRequest>(&body).map_err(|refused| Refusal::Invalid(refused.0))?;
         let actor = may_answer(caller.as_ref())?;
         let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
-        let run = Arc::clone(&agents);
         let approvals = Arc::clone(&shared.hooks.approvals);
-        let (response, queued) = shared
+        shared
             .store
             .run(move |store| {
                 let mut queued = Vec::new();
@@ -347,7 +346,7 @@ pub(crate) async fn reply(
                         // Last, as the harness forgets the question once it answers it.
                         let with = Resolution::Text(&req.body);
                         result =
-                            Some(server_result(&run, &entry.1, hold, with).ok_or_else(refused)?);
+                            Some(server_result(&agents, &entry.1, hold, with).ok_or_else(refused)?);
                         return Ok(ReplyAttentionResponse {
                             message_id: None,
                             event_ids: vec![event],
@@ -355,7 +354,7 @@ pub(crate) async fn reply(
                     }
                     let (message_id, event_ids) = mail(
                         w,
-                        run.harnesses(),
+                        agents.harnesses(),
                         &item,
                         &req.body,
                         AttentionClosedReason::Replied,
@@ -371,14 +370,14 @@ pub(crate) async fn reply(
                     (Some((item, entry)), Err(_)) => approvals.put_back(item, entry),
                     (None, _) => {}
                 }
-                Ok::<_, Refusal>((response?, queued))
+                let response = response?;
+                // Committed: handed over here, so a caller gone before the answer leaves none
+                // of its mail behind.
+                agents.hand(queued);
+                Ok::<_, Refusal>(response)
             })
             .await
-            .map_err(|err| Refusal::Internal(err.to_string()))??;
-        for queued in queued {
-            deliver(&shared, queued).await;
-        }
-        Ok(response)
+            .map_err(|err| Refusal::Internal(err.to_string()))?
     };
     respond(replied.await)
 }
@@ -394,9 +393,8 @@ pub(crate) async fn resend(
         let req =
             edge::<ResendAttentionRequest>(&body).map_err(|refused| Refusal::Invalid(refused.0))?;
         let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
-        let run = Arc::clone(&agents);
         let approvals = Arc::clone(&shared.hooks.approvals);
-        let (response, queued) = shared
+        shared
             .store
             .run(move |store| {
                 let mut queued = Vec::new();
@@ -416,7 +414,7 @@ pub(crate) async fn resend(
                         .body;
                     let (message_id, event_ids) = mail(
                         w,
-                        run.harnesses(),
+                        agents.harnesses(),
                         &item,
                         &text,
                         AttentionClosedReason::Resent,
@@ -427,14 +425,12 @@ pub(crate) async fn resend(
                         event_ids,
                     })
                 })?;
-                Ok::<_, Refusal>((response, queued))
+                // Committed: handed over here, as `reply` hands its mail over.
+                agents.hand(queued);
+                Ok::<_, Refusal>(response)
             })
             .await
-            .map_err(|err| Refusal::Internal(err.to_string()))??;
-        for queued in queued {
-            deliver(&shared, queued).await;
-        }
-        Ok(response)
+            .map_err(|err| Refusal::Internal(err.to_string()))?
     };
     respond(resent.await)
 }

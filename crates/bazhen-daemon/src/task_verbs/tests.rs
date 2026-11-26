@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
 use super::*;
-use crate::mail::tests::{Fixture, fixture, pull, taking};
+use crate::mail::tests::{Fixture, fixture, left_before_it_committed, pull, taking};
 use crate::testing::stub_harness::StubHarness;
 
 /// A task the human made, with `brief`.
@@ -267,29 +267,6 @@ fn hands_an_assignments_mail_over_only_once_its_write_commits() {
         (answer.0, granted(&f), bodies(&f).len(), f.hand_over().len()),
         (500, 0, 0, 0)
     );
-}
-
-/// Polls `route` once, so it queues its write behind a job that holds the writer, then drops it,
-/// as a client that hangs up does, and lets the writer go on: whether the route had answered.
-fn left_before_it_committed(f: &Fixture, route: impl Future<Output = Response>) -> bool {
-    f.runtime.block_on(async {
-        let (go, waits) = std::sync::mpsc::channel::<()>();
-        f.shared
-            .store
-            .queue(move |_| {
-                let _ = waits.recv();
-            })
-            .unwrap();
-        let mut route = Box::pin(route);
-        let answered = route
-            .as_mut()
-            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
-            .is_ready();
-        drop(route);
-        drop(go);
-        f.shared.store.run(|_| ()).await.unwrap();
-        answered
-    })
 }
 
 #[test]

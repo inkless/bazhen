@@ -120,6 +120,25 @@ impl Reads<'_> {
         Ok(found)
     }
 
+    /// The agents with at least one queued message. A recipient whose id isn't an agent's is
+    /// passed over, so it keeps no other agent from its mail.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agents_with_queued_mail(self) -> rusqlite::Result<Vec<AgentId>> {
+        let mut rows = self
+            .0
+            .prepare("SELECT DISTINCT agent_session_id FROM mailbox WHERE state = 'queued'")?;
+        let mut agents = Vec::new();
+        for agent in rows.query_map([], |row| row.get::<_, String>(0))? {
+            if let Some(agent) = AgentId::parse(&agent?) {
+                agents.push(agent);
+            }
+        }
+        Ok(agents)
+    }
+
     /// `agent_id`'s messages in any of `states`, oldest first.
     ///
     /// # Errors
@@ -391,6 +410,37 @@ mod tests {
                     ),
                 ]
             )
+        );
+    }
+
+    #[test]
+    fn reads_each_agent_with_queued_mail_once_passing_over_a_recipient_that_isnt_an_agent() {
+        let dir = TempDir::new("queued-agents");
+        let mut store = store(&dir);
+        queued(&mut store, None);
+        queued(&mut store, None);
+        let sent = store
+            .write(|w| w.queue_mail(&id(PEER), "hi", None))
+            .unwrap()
+            .0;
+        store
+            .write(|w| w.mail_step(&sent, MailChange::Accepted(MailAccepted { offline: false })))
+            .unwrap();
+        store
+            .db
+            .execute_batch(&format!(
+                "INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                   created_event_id, updated_event_id)
+                   VALUES ('not-an-agent', '{ENV}', 'claude-code', 'p', '/w', 'running', 1, 1);
+                 INSERT INTO mailbox (id, agent_session_id, body, state, created_event_id,
+                   updated_event_id)
+                   VALUES ('msg_01900000000070008000000000000009', 'not-an-agent', 'hi', 'queued',
+                   1, 1);"
+            ))
+            .unwrap();
+        assert_eq!(
+            store.reads().agents_with_queued_mail().unwrap(),
+            [id(AGENT)]
         );
     }
 

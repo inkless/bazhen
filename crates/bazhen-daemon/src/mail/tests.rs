@@ -159,6 +159,12 @@ impl Fixture {
     /// Delivers what the agents' writes have handed over so far, and waits for the pushes that
     /// starts; answers what it delivered.
     pub(crate) fn hand_over(&self) -> Vec<Queued> {
+        let handed = self.deliver_handed();
+        self.settle();
+        handed
+    }
+
+    fn deliver_handed(&self) -> Vec<Queued> {
         let mut handed = Vec::new();
         while let Ok(queued) = self.handed.lock().unwrap().try_recv() {
             handed.push(queued);
@@ -168,8 +174,23 @@ impl Fixture {
                 deliver(&self.shared, queued).await;
             }
         });
-        self.settle();
         handed
+    }
+
+    /// Commits mail without handing it over, as if the daemon stopped after the write.
+    pub(crate) fn queue_only(&self, agent: &AgentId, body: &'static str) -> Queued {
+        let agent = agent.clone();
+        let agents = Arc::clone(self.shared.agents.as_ref().unwrap());
+        self.runtime
+            .block_on(self.shared.store.run(move |store| {
+                store.write(|w| {
+                    let mut fresh = Vec::new();
+                    queue(w, agents.harnesses(), &agent, body, None, &mut fresh)?;
+                    Ok::<_, Sending>(fresh.pop().unwrap())
+                })
+            }))
+            .unwrap()
+            .unwrap()
     }
 
     /// Waits for every push under way.
@@ -191,6 +212,7 @@ impl Fixture {
             Some(caller),
             Bytes::from(request),
         ));
+        self.deliver_handed();
         let status = response.status().as_u16();
         let bytes = self
             .runtime
@@ -240,6 +262,53 @@ impl Fixture {
     }
 }
 
+/// Polls `route` once, so it queues its write behind a job that holds the writer, then drops it,
+/// as a client that hangs up does, and lets the writer go on: whether the route had answered.
+pub(crate) fn left_before_it_committed(f: &Fixture, route: impl Future<Output = Response>) -> bool {
+    f.runtime.block_on(async {
+        let (go, waits) = std::sync::mpsc::channel::<()>();
+        f.shared
+            .store
+            .queue(move |_| {
+                let _ = waits.recv();
+            })
+            .unwrap();
+        let mut route = Box::pin(route);
+        let answered = route
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+            .is_ready();
+        drop(route);
+        drop(go);
+        f.shared.store.run(|_| ()).await.unwrap();
+        answered
+    })
+}
+
+impl Fixture {
+    /// Fails each write at its last step, the key it keeps the answer under, after it queued
+    /// its mail.
+    pub(crate) fn fail_the_last_step(&self) {
+        self.runtime
+            .block_on(self.shared.store.run(|store| {
+                store.write(|w| {
+                    w.connection().execute_batch(
+                        "CREATE TEMP TRIGGER later AFTER INSERT ON main.idempotency_keys \
+                         BEGIN SELECT RAISE(ABORT, 'a later step fails'); END",
+                    )?;
+                    Ok::<_, AppendError>(())
+                })
+            }))
+            .unwrap()
+            .unwrap();
+    }
+
+    /// The status `route` answers, the writes it hands over left undelivered.
+    pub(crate) fn status(&self, route: impl Future<Output = Response>) -> u16 {
+        self.runtime.block_on(route).status().as_u16()
+    }
+}
+
 pub(crate) fn pull() -> StubHarness {
     StubHarness::new(taking(Delivery::Pull))
 }
@@ -257,6 +326,40 @@ fn queues_the_humans_mail_once_per_key_and_refuses_the_key_for_another_message()
         (200, true, 409, vec![f.queued("hello")])
     );
     assert!(first.1["messageId"].as_str().unwrap().starts_with("msg_"));
+}
+
+#[test]
+fn hands_over_human_and_agent_mail_even_if_the_sender_leaves_before_commit() {
+    let f = fixture(pull());
+    let handed = [(None, "human"), (Some(f.peer.clone()), "agent")].map(|(caller, key)| {
+        let body = json!({ "idempotencyKey": key, "body": "hello" });
+        let route = send(
+            State(f.shared.clone()),
+            Path(f.to.to_string()),
+            Some(axum::Extension(Caller(caller))),
+            Bytes::from(body.to_string()),
+        );
+        let answered = left_before_it_committed(&f, route);
+        (answered, f.hand_over().len())
+    });
+    assert_eq!(handed, [(false, 1), (false, 1)]);
+}
+
+#[test]
+fn hands_human_and_agent_mail_over_only_once_its_write_commits() {
+    let f = fixture(pull());
+    f.fail_the_last_step();
+    let handed = [(None, "human"), (Some(f.peer.clone()), "agent")].map(|(caller, key)| {
+        let body = json!({ "idempotencyKey": key, "body": "hello" });
+        let status = f.status(send(
+            State(f.shared.clone()),
+            Path(f.to.to_string()),
+            Some(axum::Extension(Caller(caller))),
+            Bytes::from(body.to_string()),
+        ));
+        (status, f.hand_over().len())
+    });
+    assert_eq!((handed, f.mail()), ([(500, 0), (500, 0)], vec![]));
 }
 
 #[test]
@@ -455,99 +558,49 @@ fn leaves_pushed_mail_queued_for_an_agent_that_starts_again_while_its_push_is_un
 }
 
 #[test]
-fn delivers_what_a_write_hands_over_in_the_order_handed_until_the_daemon_stops() {
+fn delivers_each_message_a_write_hands_over_until_the_daemon_stops() {
     let accepted = Pushed::Accepted { offline: false };
     let f = fixture(push([accepted.clone(), accepted]));
-    let (to, agents) = (f.to.clone(), Arc::clone(f.shared.agents.as_ref().unwrap()));
-    let run = Arc::clone(&agents);
-    let queued = f
-        .runtime
-        .block_on(f.shared.store.run(move |store| {
-            store.write(|w| {
-                let mut fresh = Vec::new();
-                for body in ["one", "two"] {
-                    queue(w, run.harnesses(), &to, body, None, &mut fresh)?;
-                }
-                Ok::<_, Sending>(fresh)
-            })
-        }))
-        .unwrap()
-        .unwrap();
     let (handing, handed) = mpsc::unbounded_channel();
-    for queued in queued {
-        handing.send(queued).unwrap();
-    }
     let stop = CancellationToken::new();
-    let drain = f
-        .runtime
-        .spawn(hand_over(f.shared.clone(), handed, stop.clone()));
-    let pushed = || f.stub.pushes.lock().unwrap().len();
-    f.runtime.block_on(async {
-        let waited = tokio::time::Instant::now();
-        while pushed() < 2 && waited.elapsed() < DEADLINE {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        stop.cancel();
-        drain.await.unwrap();
-    });
-    let bodies: Vec<String> = f
-        .stub
-        .pushes
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|p| p.body.clone())
-        .collect();
-    assert_eq!(bodies, ["one", "two"]);
+    let mut drain = Box::pin(hand_over(f.shared.clone(), handed, stop.clone()));
+    // Commit each message after the previous push finishes so only its own handover can deliver it.
+    for body in ["one", "two"] {
+        handing.send(f.queue_only(&f.to, body)).unwrap();
+        f.runtime.block_on(async {
+            assert!(
+                drain
+                    .as_mut()
+                    .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                    .is_pending()
+            );
+        });
+        f.settle();
+    }
+    stop.cancel();
+    f.runtime.block_on(drain);
+    assert_eq!(f.pushed(), ["one", "two"]);
 }
 
 #[test]
 fn delivers_what_was_handed_over_before_the_daemon_stopped() {
     let accepted = Pushed::Accepted { offline: false };
     let f = fixture(push([accepted.clone(), accepted]));
-    let (to, agents) = (f.to.clone(), Arc::clone(f.shared.agents.as_ref().unwrap()));
-    let run = Arc::clone(&agents);
-    let queued = f
-        .runtime
-        .block_on(f.shared.store.run(move |store| {
-            store.write(|w| {
-                let mut fresh = Vec::new();
-                for body in ["one", "two"] {
-                    queue(w, run.harnesses(), &to, body, None, &mut fresh)?;
-                }
-                Ok::<_, Sending>(fresh)
-            })
-        }))
-        .unwrap()
-        .unwrap();
     let (handing, handed) = mpsc::unbounded_channel();
-    for queued in queued {
-        handing.send(queued).unwrap();
+    for body in ["one", "two"] {
+        handing.send(f.queue_only(&f.to, body)).unwrap();
     }
     let stop = CancellationToken::new();
     stop.cancel();
-    let pushed = || f.stub.pushes.lock().unwrap().len();
-    f.runtime.block_on(async {
-        hand_over(f.shared.clone(), handed, stop).await;
-        let waited = tokio::time::Instant::now();
-        while pushed() < 2 && waited.elapsed() < DEADLINE {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    });
-    let bodies: Vec<String> = f
-        .stub
-        .pushes
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|p| p.body.clone())
-        .collect();
-    assert_eq!(bodies, ["one", "two"]);
+    f.runtime
+        .block_on(hand_over(f.shared.clone(), handed, stop));
+    f.settle();
+    assert_eq!(f.pushed(), ["one", "two"]);
 }
 
 impl Fixture {
     /// The bodies of the mail handed to the stub to push, in order.
-    fn pushed(&self) -> Vec<String> {
+    pub(crate) fn pushed(&self) -> Vec<String> {
         self.stub
             .pushes
             .lock()
