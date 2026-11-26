@@ -146,6 +146,13 @@ impl Shared {
         }
     }
 
+    /// The same, holding waits on at most half of each listener's connections: the socket's
+    /// `socket` and HTTP's `http`.
+    pub(crate) fn with_waits(mut self, socket: usize, http: usize) -> Self {
+        self.waits = crate::waits::Waits::new(socket, http);
+        self
+    }
+
     /// The same, reading the user's role files from `dir`.
     pub(crate) fn with_roles(mut self, dir: std::path::PathBuf) -> Self {
         self.roles = Arc::new(Roles::new(Some(dir)));

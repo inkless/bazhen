@@ -219,13 +219,12 @@ impl Drop for Daemon {
     }
 }
 
-fn daemon(waits: Waits) -> Daemon {
+fn daemon(socket: usize, http: usize) -> Daemon {
     let dir = TempDir::new("waits");
     let path = dir.path().join("bazhen.db");
     let (store, thread) =
         crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
-    let mut shared = Shared::new(&"f".repeat(64), Stop::default(), store);
-    shared.waits = waits;
+    let shared = Shared::new(&"f".repeat(64), Stop::default(), store).with_waits(socket, http);
     let daemon = Daemon {
         shared,
         thread: Some(thread),
@@ -316,7 +315,7 @@ fn states(answer: &Value) -> Vec<&str> {
 
 #[test]
 fn answers_once_every_message_is_settled_with_each_in_the_order_asked() {
-    let d = daemon(Waits::new(crate::accept::SOCKET_MAX, 128));
+    let d = daemon(crate::accept::SOCKET_MAX, 128);
     let ids = d.queued(&["one", "two"]);
     let asked = json!({ "messageIds": [ids[1], ids[0]], "timeoutMs": 60_000 });
     crate::testing::runtime().block_on(async {
@@ -345,7 +344,7 @@ fn answers_once_every_message_is_settled_with_each_in_the_order_asked() {
 
 #[test]
 fn answers_a_wait_of_no_time_and_refuses_a_message_never_queued_with_its_callers_cap_full() {
-    let d = daemon(Waits::new(8, 8));
+    let d = daemon(8, 8);
     let ids = d.queued(&["one"]);
     let _full = d.shared.waits.enter(On::Socket, Waiter::Owner).unwrap();
     crate::testing::runtime().block_on(async {
@@ -438,19 +437,20 @@ fn multi() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-/// Waits, a few seconds at most, until `waits` holds `held` on HTTP.
-async fn holding(waits: &Waits, held_on_http: usize) {
+/// Waits until `waits` holds `want`, as [`held`] counts it, failing after 5 s.
+async fn holding(waits: &Waits, want: (usize, usize, usize)) {
     for _ in 0..500 {
-        if held(waits).1 == held_on_http {
+        if held(waits) == want {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    assert_eq!(held(waits), want, "still holding after 5 s");
 }
 
 #[test]
 fn refuses_a_wait_over_http_past_half_its_connections_and_still_answers_there() {
-    let d = daemon(Waits::new(crate::accept::SOCKET_MAX, 8));
+    let d = daemon(crate::accept::SOCKET_MAX, 8);
     let ids = d.queued(&["one"]);
     multi().block_on(async {
         let limits = Limits {
@@ -463,7 +463,7 @@ fn refuses_a_wait_over_http_past_half_its_connections_and_still_answers_there() 
         for _ in 0..4 {
             waiting.push(sent(server.address, "/v1/messages/wait", Some(&long)).await);
         }
-        holding(&d.shared.waits, 4).await;
+        holding(&d.shared.waits, (0, 4, 1)).await;
         let short = json!({ "messageIds": [ids[0]], "timeoutMs": 2000 });
         let fifth = sent(server.address, "/v1/messages/wait", Some(&short)).await;
         assert_eq!(status(fifth, Duration::from_secs(5)).await, Some(429));
@@ -502,7 +502,7 @@ async fn served_http(d: &Daemon, limits: Limits) -> Served {
 
 #[test]
 fn drops_a_wait_at_a_stop_rather_than_waiting_out_its_time() {
-    let d = daemon(Waits::new(crate::accept::SOCKET_MAX, 128));
+    let d = daemon(crate::accept::SOCKET_MAX, 128);
     let ids = d.queued(&["one"]);
     multi().block_on(async {
         let router = crate::testing::without_the_callers_socket(crate::routes::socket_router(
@@ -511,13 +511,7 @@ fn drops_a_wait_at_a_stop_rather_than_waiting_out_its_time() {
         let server = served(router, crate::accept::SOCKET).await;
         let long = json!({ "messageIds": [ids[0]], "timeoutMs": 60_000 });
         let waiting = sent(server.address, "/v1/messages/wait", Some(&long)).await;
-        for _ in 0..500 {
-            if held(&d.shared.waits).0 == 1 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(held(&d.shared.waits).0, 1);
+        holding(&d.shared.waits, (1, 0, 1)).await;
         server.tracker.close();
         server.stop.cancel();
         let drained = tokio::time::timeout(Duration::from_secs(2), server.tracker.wait()).await;
@@ -526,4 +520,55 @@ fn drops_a_wait_at_a_stop_rather_than_waiting_out_its_time() {
         assert_eq!(status(waiting, Duration::from_secs(1)).await, None);
         assert_eq!(held(&d.shared.waits), (0, 0, 0));
     });
+}
+
+#[test]
+fn gives_back_the_places_of_waits_whose_clients_hang_up() {
+    let d = daemon(crate::accept::SOCKET_MAX, 8);
+    let ids = d.queued(&["one"]);
+    multi().block_on(async {
+        let limits = Limits {
+            connections: 8,
+            ..crate::accept::HTTP
+        };
+        let server = served_http(&d, limits).await;
+        let long = json!({ "messageIds": [ids[0]], "timeoutMs": 60_000 });
+        let mut waiting = Vec::new();
+        for _ in 0..4 {
+            waiting.push(sent(server.address, "/v1/messages/wait", Some(&long)).await);
+        }
+        holding(&d.shared.waits, (0, 4, 1)).await;
+        drop(waiting);
+        holding(&d.shared.waits, (0, 0, 0)).await;
+        let _fifth = sent(server.address, "/v1/messages/wait", Some(&long)).await;
+        holding(&d.shared.waits, (0, 1, 1)).await;
+        server.stop.cancel();
+    });
+}
+
+#[test]
+fn judges_a_wait_for_mail_while_the_writer_is_busy() {
+    let d = daemon(crate::accept::SOCKET_MAX, 128);
+    let ids = d.queued(&["one"]);
+    let (free, freed) = std::sync::mpsc::channel::<()>();
+    let (busy, writing) = std::sync::mpsc::channel();
+    let store = d.shared.store.clone();
+    let writer = std::thread::spawn(move || {
+        crate::testing::runtime().block_on(store.run(move |_| {
+            busy.send(()).unwrap();
+            freed.recv().ok();
+        }))
+    });
+    writing.recv().unwrap();
+    let judged = crate::testing::runtime().block_on(async {
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            d.wait(json!({ "messageIds": [ids[0]], "timeoutMs": 0 })),
+        )
+        .await
+    });
+    free.send(()).unwrap();
+    writer.join().unwrap().unwrap();
+    let (status, answer) = judged.expect("judged behind the writer's work");
+    assert_eq!((status, states(&answer)), (200, vec!["queued"]));
 }

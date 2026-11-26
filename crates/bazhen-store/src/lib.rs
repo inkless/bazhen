@@ -59,7 +59,7 @@ pub use events::{
 pub use hooks::{AgentBinding, MAX_TRANSCRIPT_PATH};
 pub use mail::IN_FLIGHT;
 pub use mail_events::{AttentionChange, MailChange};
-pub use mailbox::{Mail, Message, ObservedSend, Sender};
+pub use mailbox::{Mail, Message, MessageState, ObservedSend, Sender};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use readiness::{STARTS, Waiting};
 pub use snapshot::{SnapshotError, SnapshotView};

@@ -565,8 +565,8 @@ async fn listen(
         store.clone(),
     )
     .with_external_origins(startup.external_origins.clone())
-    .with_roles(Path::new(&startup.paths.config).join("roles"));
-    shared.waits = crate::waits::Waits::new(serving.socket.connections, serving.http.connections);
+    .with_roles(Path::new(&startup.paths.config).join("roles"))
+    .with_waits(serving.socket.connections, serving.http.connections);
     // Made before the shells, whose commands run on it, so the drain waits for them as well.
     let tracker = TaskTracker::new();
     let (mut watching, mut commands) = (None, None);

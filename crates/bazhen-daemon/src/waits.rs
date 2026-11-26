@@ -2,7 +2,7 @@
 //! may hold at once, and the loop each runs, judged now and again after each commit until the
 //! answer can't change or its time is up.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -55,7 +55,8 @@ impl Waiter {
     }
 }
 
-/// The waits held open, counted against each listener's cap and each caller's.
+/// The waits held open, counted against each listener's cap and each caller's, with the messages
+/// they wait on.
 #[derive(Debug, Clone)]
 pub(crate) struct Waits(Arc<Registry>);
 
@@ -65,6 +66,18 @@ struct Registry {
     http: usize,
     caller: usize,
     held: Mutex<Tally>,
+    /// Each message an open wait is on, with how many are on it.
+    watched: Mutex<HashMap<MessageId, usize>>,
+    latest: tokio::sync::Mutex<Latest>,
+}
+
+/// The watched messages' states as last read, on a read-only connection: never on the writer,
+/// whose queue every hook, send and launch waits in.
+#[derive(Debug, Default)]
+struct Latest {
+    /// The commit they were read at, or after.
+    at: Option<u64>,
+    states: HashMap<MessageId, Message>,
 }
 
 #[derive(Debug, Default)]
@@ -102,7 +115,95 @@ impl Waits {
             http: http / 2,
             caller: PER_CALLER.min(socket / 4),
             held: Mutex::default(),
+            watched: Mutex::default(),
+            latest: tokio::sync::Mutex::default(),
         }))
+    }
+
+    /// Marks `ids` as waited on until the guard is dropped, so each commit's read takes them in.
+    fn watch(&self, ids: &Arc<[MessageId]>) -> Watched {
+        let mut watched = self
+            .0
+            .watched
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for id in ids.iter() {
+            *watched.entry(id.clone()).or_insert(0) += 1;
+        }
+        Watched {
+            waits: Arc::clone(&self.0),
+            ids: Arc::clone(ids),
+        }
+    }
+
+    /// Where each of `ids` stands, as of `store`'s latest commit or later, in the order asked.
+    /// One read of a commit serves every wait on it: the first wait judged after a commit reads
+    /// every watched message's state with its own, and the others answer from that. Bodies are
+    /// never read.
+    async fn states(&self, store: &Writer, ids: &[MessageId]) -> Result<Vec<Message>, Unread> {
+        let mut latest = self.0.latest.lock().await;
+        let at = *store.committed().borrow();
+        if latest.at != Some(at) {
+            latest.at = Some(at);
+            latest.states.clear();
+        }
+        let mut asked: HashSet<MessageId> = ids
+            .iter()
+            .filter(|id| !latest.states.contains_key(*id))
+            .cloned()
+            .collect();
+        let mut fresh = HashMap::new();
+        if !asked.is_empty() {
+            let watched: HashSet<MessageId> = self
+                .0
+                .watched
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .keys()
+                .cloned()
+                .collect();
+            if latest.states.is_empty() {
+                asked.extend(watched.iter().cloned());
+            }
+            let store = store.clone();
+            let found = tokio::task::spawn_blocking(move || {
+                let asked: Vec<&str> = asked.iter().map(MessageId::as_str).collect();
+                store.reader()?.reads().message_states(&asked)
+            })
+            .await
+            .map_err(|err| Unread::Store(err.to_string()))?
+            .map_err(|err| Unread::Store(err.to_string()))?;
+            for found in found {
+                let (Some(id), Some(agent_id)) =
+                    (MessageId::parse(&found.id), AgentId::parse(&found.agent))
+                else {
+                    return Err(Unread::Store(format!(
+                        "message {} names no agent id",
+                        found.id
+                    )));
+                };
+                let message = Message {
+                    id: id.clone(),
+                    agent_id,
+                    state: found.state,
+                };
+                // Only what a wait is on is kept: the rest is answered once and read again
+                // when asked again.
+                if watched.contains(&id) {
+                    latest.states.insert(id.clone(), message.clone());
+                }
+                fresh.insert(id, message);
+            }
+        }
+        ids.iter()
+            .map(|id| {
+                fresh
+                    .get(id)
+                    .or_else(|| latest.states.get(id))
+                    .cloned()
+                    .ok_or_else(|| Unread::Unknown(id.clone()))
+            })
+            .collect()
     }
 
     /// A place for one more of `holder`'s waits on the listener `on`, held until the slot is
@@ -159,6 +260,31 @@ impl Drop for Slot {
             *held = held.saturating_sub(1);
             if *held == 0 {
                 count.callers.remove(&self.holder);
+            }
+        }
+    }
+}
+
+/// The messages one wait is on, given back when it ends.
+#[derive(Debug)]
+struct Watched {
+    waits: Arc<Registry>,
+    ids: Arc<[MessageId]>,
+}
+
+impl Drop for Watched {
+    fn drop(&mut self) {
+        let mut watched = self
+            .waits
+            .watched
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for id in self.ids.iter() {
+            if let Some(on) = watched.get_mut(id) {
+                *on = on.saturating_sub(1);
+                if *on == 0 {
+                    watched.remove(id);
+                }
             }
         }
     }
@@ -255,31 +381,11 @@ impl Unread {
 
 /// Where the messages `ids` stand, in the order asked: done once each is settled.
 async fn mail(
+    waits: Waits,
     store: Writer,
     ids: Arc<[MessageId]>,
 ) -> Result<Judged<WaitMessagesResponse>, Unread> {
-    let read = store
-        .run(move |store| {
-            let reads = store.reads();
-            let mut messages = Vec::with_capacity(ids.len());
-            for id in ids.iter() {
-                let found = reads
-                    .message(id.as_str())
-                    .map_err(|err| Unread::Store(err.to_string()))?
-                    .ok_or_else(|| Unread::Unknown(id.clone()))?;
-                let agent_id = AgentId::parse(&found.agent).ok_or_else(|| {
-                    Unread::Store(format!("message {} names no agent id", id.as_str()))
-                })?;
-                messages.push(Message {
-                    id: id.clone(),
-                    agent_id,
-                    state: found.state,
-                });
-            }
-            Ok(messages)
-        })
-        .await
-        .map_err(|err| Unread::Store(err.to_string()))??;
+    let read = waits.states(&store, &ids).await?;
     Ok(Judged {
         done: read.iter().all(|message| message.state.settled()),
         value: WaitMessagesResponse { messages: read },
@@ -307,7 +413,7 @@ pub(crate) async fn messages(
         }
     };
     let ids: Arc<[MessageId]> = req.message_ids.into();
-    let judge = || mail(shared.store.clone(), Arc::clone(&ids));
+    let judge = || mail(shared.waits.clone(), shared.store.clone(), Arc::clone(&ids));
     let timeout = Duration::from_millis(req.timeout_ms);
     let (first, watching) = match Watching::first(shared.store.committed(), timeout, judge).await {
         Ok(first) => first,
@@ -330,6 +436,7 @@ pub(crate) async fn messages(
             );
         }
     };
+    let _watched = shared.waits.watch(&ids);
     // A stop drops the wait unanswered, so its client asks the next daemon.
     let _holding = holdable.as_ref().map(|Extension(holdable)| holdable.hold());
     match watching.until(first, judge).await {
