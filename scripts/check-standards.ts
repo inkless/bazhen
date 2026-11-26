@@ -2874,17 +2874,6 @@ function unreadImplLines(code: string): number[] {
   return lines;
 }
 
-/** `code` with each item matched by `head` blanked to its end, newlines kept. */
-function blankItems(code: string, head: RegExp): string {
-  return blankSpans(
-    code,
-    [...code.matchAll(head)].map((m) => ({
-      start: m.index,
-      end: itemEnd(code, m.index + m[0].length),
-    })),
-  );
-}
-
 /** `code` with each of `spans`, in the order they start, blanked, newlines kept. */
 function blankSpans(code: string, spans: { start: number; end: number }[]): string {
   let out = "";
@@ -2898,8 +2887,50 @@ function blankSpans(code: string, spans: { start: number; end: number }[]): stri
   return out + code.slice(at);
 }
 
-/** The code of a Rust file with every `#[cfg(test)]` item blanked out, newlines kept. */
-const withoutTests = (code: string) => blankItems(code, /#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/g);
+/**
+ * What a field starts with, after any more attributes: `name:` in a struct or a struct literal, or
+ * a shorthand `name` in a literal. An item or a statement starts otherwise.
+ */
+const FIELD_NEXT =
+  /^(?:\s*#\s*\[[^\]]*\])*\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:r#)?\w+\s*(?::(?!:)|,|\})/;
+
+/**
+ * Where a field that starts at `start` ends: after its `,`, or before the brace that closes what
+ * holds it, as the last field has no `,`. Brackets are counted, and a type's angle brackets, so
+ * the `,` in `HashMap<K, V>` or `from([(0, 1)])` isn't taken for its own.
+ */
+function fieldEnd(code: string, start: number): number {
+  let nest = 0;
+  let angle = 0;
+  for (let i = start; i < code.length; i++) {
+    const c = code[i];
+    if (c === "(" || c === "[" || c === "{") nest++;
+    else if (c === ")" || c === "]" || c === "}") {
+      if (nest === 0) return i;
+      nest--;
+    } else if (c === "<") angle++;
+    else if (c === ">" && angle > 0 && code[i - 1] !== "-" && code[i - 1] !== "=") angle--;
+    else if (nest === 0 && (c === ";" || (c === "," && angle === 0))) return i + 1;
+  }
+  return code.length;
+}
+
+const CFG_TEST = /#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/g;
+
+/**
+ * The code of a Rust file with everything under `#[cfg(test)]` blanked out, newlines kept: an
+ * item to its end, and a field, of a struct or a struct literal, to its own. A field has no end
+ * of its own as an item has, so `itemEnd` would run on through the next item's body.
+ */
+const withoutTests = (code: string) =>
+  blankSpans(
+    code,
+    [...code.matchAll(CFG_TEST)].map((m) => {
+      const after = m.index + m[0].length;
+      const field = FIELD_NEXT.test(code.slice(after, after + 400));
+      return { start: m.index, end: field ? fieldEnd(code, after) : itemEnd(code, after) };
+    }),
+  );
 
 /**
  * Where an item's signature ends (its first `{` or `;` outside brackets), and what a function

@@ -2127,6 +2127,41 @@ describe("decoderFailures", () => {
     );
   });
 
+  it("blanks a test-only field or initialiser to its own end, and reads on past it", () => {
+    const testOnly = {
+      ...repo,
+      "crates/p/src/counted.rs": [
+        "pub struct Waits {",
+        "    n: u32,",
+        "    #[cfg(test)]",
+        "    pub seen: Vec<u8>,",
+        "    #[cfg(test)]",
+        "    reads: HashMap<u8, u32>,",
+        "}",
+        "impl Waits {",
+        "    pub fn new() -> Self {",
+        "        Self {",
+        "            n: 0,",
+        "            #[cfg(test)]",
+        "            seen: Vec::new(),",
+        "            #[cfg(test)]",
+        "            reads: HashMap::from([(0, 1)]),",
+        "        }",
+        "    }",
+        "    pub fn count(&self) -> u32 { self.n }",
+        "}",
+        "pub fn send(b: &[u8]) {}",
+        "pub fn sum(b: &[u8]) {}",
+      ].join("\n"),
+    };
+    const listed = {
+      ...exempt,
+      "crates/p/src/counted.rs::send": "an encoder",
+      "crates/p/src/counted.rs::sum": "a checksum",
+    };
+    expect(failures(fuzzed, listed, testOnly)).toEqual([]);
+  });
+
   it("takes a type of ours holding bytes for a byte type, and its methods for decoders", () => {
     const reader = {
       ...repo,
