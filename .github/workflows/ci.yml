@@ -70,28 +70,6 @@ jobs:
       # find, but not after a setup step has, which would only add red steps that aren't test failures.
       - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-holder
-      # Temporary investigation for #540, immediately before the existing :test-rust-all step.
-      - name: Exercise the event close and socket caller fixtures during the full Rust suite
-        if: ${{ !cancelled() && steps.moon.outcome == 'success' && matrix.node == 'pinned' }}
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          cases = {
-              "events": "answers_a_client_that_closes_while_a_page_is_still_queued_for_it",
-              "accept": "gives_each_request_its_connections_socket_to_read_the_caller_of_over_unix_and_tcp",
-          }
-          for module, test in cases.items():
-              source = Path(f"crates/bazhen-daemon/src/{module}.rs")
-              original = source.read_text()
-              marker = f"    #[test]\n    fn {test}() {{"
-              assert original.count(marker) == 1
-              # 100 independent nextest processes per fixture, interleaved with the full suite.
-              repeats = "\n".join(
-                  f"    #[test]\n    fn {test}_trial_{i:03}() {{ {test}(); }}"
-                  for i in range(1, 100)
-              )
-              source.write_text(original.replace(marker, repeats + "\n\n" + marker))
-          PY
       - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-rust-all
 
