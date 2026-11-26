@@ -31,6 +31,7 @@ fn schema() -> Value {
                 "MAX_ROWS": bazhen_holder_proto::body::MAX_ROWS,
                 "HOLDER_MAX_HISTORY_LINES": bazhen_holder_proto::body::MAX_HISTORY_LINES,
                 "AGENT_NAME_MAX": bazhen_protocol::names::AGENT_NAME_MAX,
+                "MESSAGE_WAIT_MAX_MESSAGES": bazhen_protocol::mail::MESSAGE_WAIT_MAX_MESSAGES,
                 "BUILTIN_ROLES": bazhen_protocol::roles::BUILTIN_ROLES,
                 "TERMINAL_COLOURS": terminal_colours(),
             },

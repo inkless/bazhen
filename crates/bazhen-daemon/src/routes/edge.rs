@@ -94,6 +94,7 @@ const ROUTES: &[(&str, &str, bool)] = &[
         "/v1/attention/attn_1/resend",
         false,
     ),
+    ("WaitMessagesRequest", "/v1/messages/wait", false),
     ("PairRequest", "/v1/pairing", true),
 ];
 

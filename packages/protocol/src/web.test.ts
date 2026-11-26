@@ -22,6 +22,10 @@ describe("the web's protocol", () => {
       BUILTIN_ROLES: [generated.BUILTIN_ROLES, hand.BUILTIN_ROLES],
       TERMINAL_COLOURS: [generated.TERMINAL_COLOURS, hand.TERMINAL_COLOURS],
       HISTORY_LINES: [generated.HISTORY_LINES, hand.HISTORY_LINES],
+      MESSAGE_WAIT_MAX_MESSAGES: [
+        generated.MESSAGE_WAIT_MAX_MESSAGES,
+        hand.MESSAGE_WAIT_MAX_MESSAGES,
+      ],
     };
     for (const [name, [emitted, written]] of Object.entries(pairs)) {
       expect({ [name]: emitted }).toEqual({ [name]: written });

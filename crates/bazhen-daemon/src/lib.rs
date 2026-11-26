@@ -56,6 +56,7 @@ mod terminals;
 mod testing;
 mod tokens;
 mod turns;
+mod waits;
 mod web;
 mod writer;
 

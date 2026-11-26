@@ -410,7 +410,10 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
         "UnlinkShellRequest",
         round_trips_at_edge::<UnlinkShellRequest>,
     ),
-    ("WaitMessagesRequest", round_trips::<WaitMessagesRequest>),
+    (
+        "WaitMessagesRequest",
+        round_trips_at_edge::<WaitMessagesRequest>,
+    ),
     ("WaitMessagesResponse", round_trips::<WaitMessagesResponse>),
     ("WaitRequest", round_trips::<WaitRequest>),
     ("WaitResponse", round_trips::<WaitResponse>),

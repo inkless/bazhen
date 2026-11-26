@@ -588,6 +588,7 @@ pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, Stri
         "SignalAgentRequest" => given(edge::<SignalAgentRequest>(body)),
         "UnassignTaskRequest" => given(edge::<UnassignTaskRequest>(body)),
         "UnlinkShellRequest" => given(edge::<UnlinkShellRequest>(body)),
+        "WaitMessagesRequest" => given(edge::<WaitMessagesRequest>(body)),
         _ => return None,
     })
 }

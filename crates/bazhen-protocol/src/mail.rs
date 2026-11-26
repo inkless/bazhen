@@ -44,6 +44,9 @@ impl MailboxState {
 /// The longest a sender may wait on its messages, in milliseconds.
 pub const MESSAGE_WAIT_MAX_MS: u64 = 600_000;
 
+/// The most messages one wait is on.
+pub const MESSAGE_WAIT_MAX_MESSAGES: usize = 100;
+
 /// The largest hook reply body a hook client takes; it fails open on a larger one.
 pub const HOOK_REPLY_MAX_BYTES: usize = 1 << 20;
 
@@ -546,8 +549,12 @@ pub struct ResendAttentionResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WaitMessagesRequest {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 100)))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(min = 1, max = crate::mail::MESSAGE_WAIT_MAX_MESSAGES))
+    )]
     pub message_ids: Vec<MessageId>,
+    #[serde(deserialize_with = "crate::js_number::whole")]
     #[cfg_attr(feature = "schema", schemars(range(max = crate::mail::MESSAGE_WAIT_MAX_MS)))]
     pub timeout_ms: u64,
 }

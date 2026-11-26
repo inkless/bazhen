@@ -483,8 +483,12 @@ mod tests {
             slow.write_all(b"POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 10\r\n\r\nabc")
                 .await
                 .unwrap();
+            let started = Instant::now();
             let said = read_for(&mut slow, Duration::from_secs(5)).await;
+            let waited = started.elapsed();
             assert!(said.starts_with("HTTP/1.1 408"), "{said}");
+            // Closed once answered, not left open until the client gives up.
+            assert!(waited < Duration::from_secs(2), "{waited:?}");
         });
     }
 

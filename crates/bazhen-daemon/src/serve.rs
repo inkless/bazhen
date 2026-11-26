@@ -105,7 +105,8 @@ pub(crate) enum Refused {
 
 /// Runs the daemon until it is stopped.
 pub(crate) fn serve(startup: &Startup) -> ExitCode {
-    // Before any descriptor is opened, so none is ever refused for a limit raised too late.
+    // First, so the store, the listeners and each holder started later open their descriptors
+    // under the raised limit, and each holder inherits it.
     let serving = Serving::with(crate::descriptors::raise());
     // Before any child starts, so the kernel keeps each one exited until it is waited for, and its
     // pid stays its own: a SIGCHLD ignored by whatever started the daemon would reap it at once.
@@ -565,6 +566,7 @@ async fn listen(
     )
     .with_external_origins(startup.external_origins.clone())
     .with_roles(Path::new(&startup.paths.config).join("roles"));
+    shared.waits = crate::waits::Waits::new(serving.socket.connections, serving.http.connections);
     // Made before the shells, whose commands run on it, so the drain waits for them as well.
     let tracker = TaskTracker::new();
     let (mut watching, mut commands) = (None, None);

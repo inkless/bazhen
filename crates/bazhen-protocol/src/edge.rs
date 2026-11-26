@@ -14,8 +14,9 @@ use crate::agents::{
 };
 use crate::ids::{AssignmentId, TaskId};
 use crate::mail::{
-    AnswerAttentionRequest, DismissAttentionRequest, HookAck, HookRequest, ReplyAttentionRequest,
-    ResendAttentionRequest, SendMessageRequest,
+    AnswerAttentionRequest, DismissAttentionRequest, HookAck, HookRequest,
+    MESSAGE_WAIT_MAX_MESSAGES, MESSAGE_WAIT_MAX_MS, ReplyAttentionRequest, ResendAttentionRequest,
+    SendMessageRequest, WaitMessagesRequest,
 };
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
 use crate::shells::{
@@ -312,6 +313,23 @@ impl EdgeCheck for SendMessageRequest {
     }
 }
 
+/// The rule the messages a wait is on hold to, as a refusal names it.
+pub const WAIT_MESSAGES_RULE: &str = "messageIds names 1 to 100 messages";
+
+/// The rule a wait's timeout holds to, as a refusal names it.
+pub const WAIT_TIMEOUT_RULE: &str = "timeoutMs is at most 600000";
+
+impl EdgeCheck for WaitMessagesRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        holds(
+            (1..=MESSAGE_WAIT_MAX_MESSAGES).contains(&self.message_ids.len()),
+            WAIT_MESSAGES_RULE,
+        )?;
+        holds(self.timeout_ms <= MESSAGE_WAIT_MAX_MS, WAIT_TIMEOUT_RULE)?;
+        Ok(self)
+    }
+}
+
 impl EdgeCheck for AnswerAttentionRequest {
     fn checked(self) -> Result<Self, Refused> {
         keyed(&self.idempotency_key)?;
@@ -574,6 +592,30 @@ mod tests {
                 refused::<ResendAttentionRequest>(&keyed("")),
             ],
             [true; 12]
+        );
+    }
+
+    #[test]
+    fn a_wait_for_mail_is_taken_on_1_to_100_messages_for_at_most_ten_minutes() {
+        let id = |n: usize| format!("msg_0190000000007000800000000000{n:04}");
+        let wait = |count: usize, timeout: Value| {
+            let ids: Vec<String> = (0..count).map(id).collect();
+            json!({ "messageIds": ids, "timeoutMs": timeout })
+        };
+        assert_eq!(
+            [
+                verdict::<WaitMessagesRequest>(&wait(1, json!(0))).is_ok(),
+                verdict::<WaitMessagesRequest>(&wait(100, json!(600_000))).is_ok(),
+                verdict::<WaitMessagesRequest>(&wait(1, json!(6e4))).is_ok(),
+                refused::<WaitMessagesRequest>(&wait(0, json!(1000))),
+                refused::<WaitMessagesRequest>(&wait(101, json!(1000))),
+                refused::<WaitMessagesRequest>(&wait(1, json!(600_001))),
+            ],
+            [true; 6]
+        );
+        assert_eq!(
+            verdict::<WaitMessagesRequest>(&wait(1, json!(600_001))),
+            Err(WAIT_TIMEOUT_RULE.to_owned())
         );
     }
 
