@@ -111,6 +111,8 @@ pub(crate) struct Shared {
     /// What a harness that takes mail by push is handed it through; with none, its mail stays
     /// queued. No harness this daemon serves takes mail by push yet.
     pub(crate) push: Option<crate::mail::PushTo>,
+    /// The waits held open, under each listener's cap and each caller's.
+    pub(crate) waits: crate::waits::Waits,
 }
 
 impl Shared {
@@ -137,7 +139,18 @@ impl Shared {
             roles: Arc::new(Roles::new(None)),
             hooks: Arc::new(crate::hooks::Hooks::default()),
             push: None,
+            waits: crate::waits::Waits::new(
+                crate::accept::SOCKET_MAX,
+                crate::accept::HTTP.connections,
+            ),
         }
+    }
+
+    /// The same, holding waits on at most half of each listener's connections: the socket's
+    /// `socket` and HTTP's `http`.
+    pub(crate) fn with_waits(mut self, socket: usize, http: usize) -> Self {
+        self.waits = crate::waits::Waits::new(socket, http);
+        self
     }
 
     /// The same, reading the user's role files from `dir`.
@@ -438,6 +451,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/v1/agents/{id}/relaunch", post(agent_routes::relaunch))
         .route("/v1/agents/{id}/messages", post(crate::mail::send))
+        .route("/v1/messages/wait", post(crate::waits::messages))
         .route("/v1/attention/{id}/answer", post(crate::attention::answer))
         .route("/v1/attention/{id}/reply", post(crate::attention::reply))
         .route(
@@ -480,6 +494,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .fallback(unrouted)
         .method_not_allowed_fallback(unrouted)
         .with_state(shared.clone())
+        .layer(Extension(crate::waits::On::Socket))
         .layer(middleware::from_fn_with_state(shared, callers::guard))
 }
 
@@ -516,6 +531,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/agents/{id}/relaunch", post(agent_routes::relaunch))
         .route("/agents/{id}/messages", post(crate::mail::send))
+        .route("/messages/wait", post(crate::waits::messages))
         .route("/attention/{id}/answer", post(crate::attention::answer))
         .route("/attention/{id}/reply", post(crate::attention::reply))
         .route("/attention/{id}/dismiss", post(crate::attention::dismiss))
@@ -529,6 +545,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .fallback(unrouted)
         .method_not_allowed_fallback(unrouted)
         .with_state(shared.clone())
+        .layer(Extension(crate::waits::On::Http))
         // Past the pairing gate, the caller's process: an agent is refused as on the socket.
         .layer(middleware::from_fn_with_state(
             shared.clone(),

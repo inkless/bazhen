@@ -18,6 +18,23 @@ pub struct Message {
     pub state: MailboxState,
 }
 
+/// Where one message stands, without its body: whose it is and its state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageState {
+    pub id: String,
+    pub agent: String,
+    pub state: MailboxState,
+}
+
+/// How many ids one statement reads, well under `SQLite`'s limit on a statement's parameters.
+const IDS_A_READ: usize = 500;
+
+/// A stored state, as the protocol names it; one it doesn't is a failure to read column `at`.
+fn state_at(at: usize, state: String) -> rusqlite::Result<MailboxState> {
+    serde_json::from_value(serde_json::Value::String(state))
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(at, Type::Text, Box::new(err)))
+}
+
 /// What an observed send records, as shown: its summary and text already cut and cleaned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObservedSend<'a> {
@@ -67,13 +84,40 @@ impl Reads<'_> {
             )
             .optional()?;
         row.map(|(agent, body, state)| {
-            let state =
-                serde_json::from_value(serde_json::Value::String(state)).map_err(|err| {
-                    rusqlite::Error::FromSqlConversionFailure(2, Type::Text, Box::new(err))
-                })?;
-            Ok(Message { agent, body, state })
+            Ok(Message {
+                agent,
+                body,
+                state: state_at(2, state)?,
+            })
         })
         .transpose()
+    }
+
+    /// Where each of the messages `ids` the store knows stands, in no order, its body unread:
+    /// one the store doesn't know is left out.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a stored state the protocol doesn't name, as a failure to read its column.
+    pub fn message_states(self, ids: &[&str]) -> rusqlite::Result<Vec<MessageState>> {
+        let mut found = Vec::new();
+        for some in ids.chunks(IDS_A_READ) {
+            let marks = vec!["?"; some.len()].join(", ");
+            let mut rows = self.0.prepare(&format!(
+                "SELECT id, agent_session_id, state FROM mailbox WHERE id IN ({marks})"
+            ))?;
+            let read = rows.query_map(rusqlite::params_from_iter(some), |row| {
+                Ok(MessageState {
+                    id: row.get(0)?,
+                    agent: row.get(1)?,
+                    state: state_at(2, row.get(2)?)?,
+                })
+            })?;
+            for state in read {
+                found.push(state?);
+            }
+        }
+        Ok(found)
     }
 
     /// `agent_id`'s messages in any of `states`, oldest first.
@@ -269,7 +313,7 @@ mod tests {
     use rusqlite::OptionalExtension as _;
     use rusqlite::types::Type;
 
-    use super::{Mail, Message, ObservedSend, Sender};
+    use super::{IDS_A_READ, Mail, Message, MessageState, ObservedSend, Sender};
     use crate::testing::TempDir;
     use crate::{MailChange, Store};
 
@@ -348,6 +392,41 @@ mod tests {
                 ]
             )
         );
+    }
+
+    #[test]
+    fn reads_the_state_of_each_message_it_knows_however_many_are_asked() {
+        let dir = TempDir::new("states");
+        let mut store = store(&dir);
+        let (first, last) = (queued(&mut store, None), queued(&mut store, None));
+        store
+            .write(|w| {
+                w.mail_step(
+                    &last,
+                    MailChange::Undeliverable(MailUndeliverable {
+                        reason: UndeliverableReason::AgentClosed,
+                    }),
+                )
+            })
+            .unwrap();
+        let never = |n: usize| format!("msg_0190000000007000800000000000{n:04}");
+        let mut asked: Vec<String> = (0..IDS_A_READ * 2).map(never).collect();
+        asked.insert(1, first.as_str().to_owned());
+        asked.push(last.as_str().to_owned());
+        let asked: Vec<&str> = asked.iter().map(String::as_str).collect();
+        let mut read = store.reads().message_states(&asked).unwrap();
+        read.sort_by(|a, b| a.id.cmp(&b.id));
+        let state = |id: &MessageId, state| MessageState {
+            id: id.as_str().to_owned(),
+            agent: AGENT.to_owned(),
+            state,
+        };
+        let mut want = vec![
+            state(&first, MailboxState::Queued),
+            state(&last, MailboxState::Undeliverable),
+        ];
+        want.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(read, want);
     }
 
     #[test]

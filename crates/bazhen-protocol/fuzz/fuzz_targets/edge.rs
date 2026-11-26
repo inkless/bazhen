@@ -6,7 +6,7 @@ use bazhen_protocol::agents::{
 use bazhen_protocol::edge::{EdgeCheck, MAX_SAFE_INTEGER, edge, is_object, object};
 use bazhen_protocol::mail::{
     AnswerAttentionRequest, DismissAttentionRequest, HookAck, HookRequest, ReplyAttentionRequest,
-    ResendAttentionRequest, SendMessageRequest,
+    ResendAttentionRequest, SendMessageRequest, WaitMessagesRequest,
 };
 use bazhen_protocol::notices::{DismissNoticeRequest, PairRequest};
 use bazhen_protocol::shells::{
@@ -70,6 +70,7 @@ fuzz_target!(|body: &[u8]| {
     settled::<ReplyAttentionRequest>(body);
     settled::<DismissAttentionRequest>(body);
     settled::<ResendAttentionRequest>(body);
+    settled::<WaitMessagesRequest>(body);
     settled::<AssignTaskRequest>(body);
     settled::<UnassignTaskRequest>(body);
     settled::<FinishTaskRequest>(body);

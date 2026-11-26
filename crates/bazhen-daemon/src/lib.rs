@@ -57,6 +57,7 @@ mod testing;
 mod titles;
 mod tokens;
 mod turns;
+mod waits;
 mod web;
 mod writer;
 

@@ -13,6 +13,8 @@ export const HOLDER_MAX_HISTORY_LINES = 100000;
 
 export const MAX_ROWS = 1000;
 
+export const MESSAGE_WAIT_MAX_MESSAGES = 100;
+
 export const STREAM_FRAME_MAX_BYTES = 1048576;
 
 export const TERMINAL_COLOURS = {"dark":{"background":"#0f0f10","text":"#eaebee"},"light":{"background":"#fdfdfd","text":"#202225"}} as const;
