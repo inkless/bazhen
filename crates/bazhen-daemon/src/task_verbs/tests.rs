@@ -296,6 +296,7 @@ fn left_before_it_committed(f: &Fixture, route: impl Future<Output = Response>) 
 fn hands_over_the_mail_of_an_assignment_whose_caller_left_before_it_committed() {
     let f = fixture(pull());
     let task = made(&f, "c", "b");
+    let made_task = task.clone();
     let body = json!({ "idempotencyKey": "a", "agentId": f.to.as_str(), "role": "worker" });
     let before = bodies(&f).len();
     let assigned = left_before_it_committed(
@@ -313,16 +314,33 @@ fn hands_over_the_mail_of_an_assignment_whose_caller_left_before_it_committed() 
     let before = bodies(&f).len();
     let created = left_before_it_committed(&f, create(f.shared.clone(), asked, grant));
     let (create_queued, create_handed) = (bodies(&f).len() - before, f.hand_over().len());
+    let assignment = assignments(&f)[0].0.clone();
+    let body = json!({ "idempotencyKey": "u", "assignmentId": assignment });
+    let before = bodies(&f).len();
+    let unassigned = left_before_it_committed(
+        &f,
+        unassign(
+            State(f.shared.clone()),
+            Some(Extension(Caller(None))),
+            Path(made_task),
+            Bytes::from(body.to_string()),
+        ),
+    );
+    let (unassign_queued, unassign_handed) = (bodies(&f).len() - before, f.hand_over().len());
     assert_eq!(
         (
             (assigned, assign_queued > 0, assign_handed),
             (created, create_queued > 0, create_handed),
-            granted(&f)
+            (unassigned, unassign_queued > 0, unassign_handed),
+            granted(&f),
+            assignments(&f)[0].1.clone()
         ),
         (
             (false, true, assign_queued),
             (false, true, create_queued),
-            2
+            (false, true, unassign_queued),
+            2,
+            "ended".to_owned()
         )
     );
 }

@@ -380,13 +380,13 @@ pub(crate) async fn unassign(
     let unassigned = async {
         let req =
             edge::<UnassignTaskRequest>(&body).map_err(|refused| Sending::Invalid(refused.0))?;
-        let agents = shared.agents.clone().ok_or(Sending::Unavailable)?;
+        let run = shared.agents.clone().ok_or(Sending::Unavailable)?;
         let task = TaskId::parse(&id).ok_or_else(|| Granting::NoTask(id.clone()))?;
         let assignment = AssignmentId::parse(&req.assignment_id)
             .ok_or_else(|| Sending::Invalid(format!("no assignment {}", req.assignment_id)))?;
         let caller = caller_of(caller);
-        let run = std::sync::Arc::clone(&agents);
-        let (response, queued) = shared
+        // Committed: handed over here, as `assign` hands its mail over.
+        let response = shared
             .store
             .run(move |store| {
                 let kept = serde_json::to_string(&KeptUnassign {
@@ -403,11 +403,11 @@ pub(crate) async fn unassign(
                     };
                     taking.record(w, run.harnesses(), &mut queued)
                 })?;
-                Ok::<_, Granting>((response, queued))
+                run.hand(queued);
+                Ok::<_, Granting>(response)
             })
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
-        agents.hand(queued);
         Ok::<_, Granting>(response)
     };
     match unassigned.await {
