@@ -23,12 +23,12 @@ use crate::pairing::{random_bytes, same};
 const AHEAD_MICROS: u64 = 60_000_000;
 
 /// How many reports wait for the keeper at most. The shells' report routes are served on the
-/// socket alone, which serves this many connections at once, each one request at a time, so it
-/// is every report that can be waiting while its hook waits too. A hook that hangs up frees its
+/// socket alone, which serves no more connections at once than this, each one request at a time,
+/// so it is every report that can be waiting while its hook waits too. A hook that hangs up frees its
 /// connection for another while its report still waits, so more can come behind a slow store:
 /// those wait for room, and no more work than this is held. Nothing caps the rate on a
 /// connection, so this is the bound.
-const WAITING_AT_MOST: usize = crate::accept::SOCKET.connections;
+const WAITING_AT_MOST: usize = crate::accept::SOCKET_MAX;
 
 /// What a shell's integration reported, as its log names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -47,12 +47,26 @@ struct Serving {
     tick: Duration,
 }
 
-const SERVING: Serving = Serving {
-    http: accept::HTTP,
-    socket: accept::SOCKET,
-    drain: DRAIN,
-    tick: TICK,
-};
+impl Serving {
+    /// How the daemon serves with the soft limit on open files at `soft`, `None` for infinite.
+    fn with(soft: Option<u64>) -> Self {
+        let socket = accept::socket(soft);
+        if socket.connections < accept::SOCKET_MAX {
+            tracing::warn!(
+                "bazhen serves {} connections at once on its socket, as its open-file limit is {}: \
+                 raise it for more",
+                socket.connections,
+                soft.unwrap_or_default()
+            );
+        }
+        Self {
+            http: accept::HTTP,
+            socket,
+            drain: DRAIN,
+            tick: TICK,
+        }
+    }
+}
 
 /// What serving needs from the settings.
 #[derive(Debug, Clone)]
@@ -91,13 +105,15 @@ pub(crate) enum Refused {
 
 /// Runs the daemon until it is stopped.
 pub(crate) fn serve(startup: &Startup) -> ExitCode {
+    // Before any descriptor is opened, so none is ever refused for a limit raised too late.
+    let serving = Serving::with(crate::descriptors::raise());
     // Before any child starts, so the kernel keeps each one exited until it is waited for, and its
     // pid stays its own: a SIGCHLD ignored by whatever started the daemon would reap it at once.
     let served = bazhen_host_guard::keep_exited_children()
         .map_err(|e| Refused::Said(format!("bazhen can't keep its exited children: {e}")))
         .and_then(|()| prepare(startup, LOCK_WAIT))
         .and_then(|(lock, store)| {
-            let reason = run(startup, store);
+            let reason = run(startup, serving, store);
             drop(lock);
             reason
         });
@@ -190,7 +206,11 @@ fn errno_name(err: &std::io::Error) -> &'static str {
 }
 
 /// Serves until a stop, then lets the listeners drain, and says why it stopped.
-fn run(startup: &Startup, (store, writer): (Writer, writer::Thread)) -> Result<Reason, Refused> {
+fn run(
+    startup: &Startup,
+    serving: Serving,
+    (store, writer): (Writer, writer::Thread),
+) -> Result<Reason, Refused> {
     let served = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -198,7 +218,7 @@ fn run(startup: &Startup, (store, writer): (Writer, writer::Thread)) -> Result<R
         .and_then(|runtime| {
             runtime.block_on(async {
                 let runner = runner::holders(startup).await?;
-                listen(startup, SERVING, store, Some(runner)).await
+                listen(startup, serving, store, Some(runner)).await
             })
         });
     writer.finish();
@@ -832,8 +852,10 @@ mod tests {
     }
 
     const QUICK: Serving = Serving {
+        http: accept::HTTP,
+        socket: accept::SOCKET,
         drain: Duration::from_millis(400),
-        ..SERVING
+        tick: TICK,
     };
 
     /// A connection to the daemon on `socket`, once it is listening.

@@ -3,14 +3,18 @@
 //! daemon: axum's own `serve` has no timer at all.
 
 use std::convert::Infallible;
+use std::future::Future as _;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::Router;
 use axum::http::{HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::serve::Listener;
-use hyper::body::Incoming;
+use hyper::body::{Body, Bytes, Frame, Incoming, SizeHint};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
@@ -28,9 +32,9 @@ pub(crate) struct Limits {
     /// Node's `headersTimeout`: how long a request's head may take to arrive, timed from when
     /// the connection is ready for one, so an idle connection is closed after it too.
     pub(crate) head: Duration,
-    /// Node's `requestTimeout`: how long a request may take to be answered, its body read
-    /// included, before it is answered 408. `None` for none, as the TypeScript daemon's socket
-    /// sets it to 0.
+    /// Node's `requestTimeout`: how long a request's body may take to arrive, timed from when its
+    /// head has, before it is answered 408; its answer may take longer. `None` for none, as the
+    /// TypeScript daemon's socket sets it to 0.
     pub(crate) request: Option<Duration>,
     /// Node's `maxHeaderSize`: a request whose head, its start line included, is longer is
     /// answered 431.
@@ -48,7 +52,41 @@ pub(crate) const HTTP: Limits = Limits {
     connections: 128,
 };
 
-/// The socket's limits: HTTP's, with no request timeout, as `main.ts` sets for its socket.
+/// The fewest connections the socket serves at once, however few descriptors the daemon has.
+const SOCKET_MIN: usize = 64;
+
+/// The most connections the socket serves at once, however many descriptors the daemon has.
+pub(crate) const SOCKET_MAX: usize = 1024;
+
+/// The descriptors kept for all but connections: the store's readers, the holders' and the
+/// channels' sockets, and the daemon's own files.
+const RESERVED: usize = 256;
+
+/// The socket's limits: HTTP's, with no request timeout, as `main.ts` sets for its socket, and as
+/// many connections as [`socket_connections`] says the soft limit `soft` leaves room for.
+pub(crate) fn socket(soft: Option<u64>) -> Limits {
+    Limits {
+        request: None,
+        connections: socket_connections(soft),
+        ..HTTP
+    }
+}
+
+/// The connections the socket serves at once, with the soft limit on open files at `soft`, `None`
+/// for infinite: half what is left once HTTP's connections and [`RESERVED`] are, as each of its
+/// connections may hold a descriptor of the daemon's besides its own, within
+/// [`SOCKET_MIN`]..=[`SOCKET_MAX`].
+fn socket_connections(soft: Option<u64>) -> usize {
+    let Some(soft) = soft else {
+        return SOCKET_MAX;
+    };
+    let soft = usize::try_from(soft).unwrap_or(usize::MAX);
+    let spare = soft.saturating_sub(HTTP.connections + RESERVED) / 2;
+    spare.clamp(SOCKET_MIN, SOCKET_MAX)
+}
+
+/// The socket's limits with HTTP's connections, for tests that need no more.
+#[cfg(test)]
 pub(crate) const SOCKET: Limits = Limits {
     request: None,
     ..HTTP
@@ -175,20 +213,73 @@ pub(crate) async fn serve_on<L>(
     drop(listener);
 }
 
-/// `request`'s answer from `router`, or 408 if it isn't answered within `limit`.
+/// `request`'s answer from `router`, or 408 if its body isn't received within `limit`, as Node's
+/// `requestTimeout` times receiving the request, not answering it: a wait may be answered later.
 async fn answer(
     router: Router,
     limit: Option<Duration>,
     request: Request<Incoming>,
 ) -> Result<Response, Infallible> {
-    let answered = router.oneshot(request);
     let Some(limit) = limit else {
-        return answered.await;
+        return router.oneshot(request).await;
     };
-    Ok(tokio::time::timeout(limit, answered)
-        .await
-        .unwrap_or_else(|_| Ok(timed_out()))
-        .unwrap_or_else(|never: Infallible| match never {}))
+    let late = Arc::new(AtomicBool::new(false));
+    let by = Box::pin(tokio::time::sleep(limit));
+    let request = request.map(|body| {
+        axum::body::Body::new(Received {
+            body,
+            by,
+            late: Arc::clone(&late),
+        })
+    });
+    let answered = router.oneshot(request).await?;
+    // Whatever the route made of a body cut short, it wasn't received in time.
+    Ok(if late.load(Ordering::Relaxed) {
+        timed_out()
+    } else {
+        answered
+    })
+}
+
+/// A request's body, cut short once its deadline passes before all of it is received. What has
+/// arrived by then is still read, however late.
+struct Received {
+    body: Incoming,
+    by: Pin<Box<tokio::time::Sleep>>,
+    late: Arc<AtomicBool>,
+}
+
+/// What reading a body past its deadline fails with.
+#[derive(Debug, thiserror::Error)]
+#[error("the request's body wasn't received in time")]
+struct Late;
+
+impl Body for Received {
+    type Data = Bytes;
+    type Error = axum::BoxError;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, Self::Error>>> {
+        let this = self.get_mut();
+        if let Poll::Ready(frame) = Pin::new(&mut this.body).poll_frame(cx) {
+            return Poll::Ready(frame.map(|frame| frame.map_err(Into::into)));
+        }
+        if this.by.as_mut().poll(cx).is_pending() {
+            return Poll::Pending;
+        }
+        this.late.store(true, Ordering::Relaxed);
+        Poll::Ready(Some(Err(Late.into())))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
+    }
 }
 
 /// Node's answer to a request that took too long: 408, and the connection closed.
@@ -213,6 +304,32 @@ mod tests {
 
     use super::*;
 
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(4096))]
+
+        /// Whatever the soft limit, the socket serves within its bounds, and never fewer for a
+        /// higher one; most of the limits drawn are the low ones where its count moves.
+        #[test]
+        fn serves_between_its_least_and_most_on_the_socket_more_as_the_limit_rises(
+            soft in proptest::prop_oneof![0..4096_u64, proptest::prelude::any::<u64>()],
+            more in proptest::prop_oneof![0..4096_u64, proptest::prelude::any::<u64>()],
+        ) {
+            let served = socket_connections(Some(soft));
+            proptest::prop_assert!((SOCKET_MIN..=SOCKET_MAX).contains(&served), "{served}");
+            let higher = socket_connections(Some(soft.saturating_add(more)));
+            proptest::prop_assert!(higher >= served, "{soft}: {served}, then {higher}");
+            proptest::prop_assert!(socket_connections(None) >= higher);
+        }
+    }
+
+    #[test]
+    fn serves_its_least_on_the_socket_at_a_low_limit_and_its_most_at_a_high_one() {
+        let counts = [0, 255, 256, 384, 512, 1024, 2432, 8192, u64::MAX]
+            .map(|soft| socket_connections(Some(soft)));
+        assert_eq!(counts, [64, 64, 64, 64, 64, 320, 1024, 1024, 1024]);
+        assert_eq!(socket_connections(None), SOCKET_MAX);
+    }
+
     const SHORT: Limits = Limits {
         head: Duration::from_millis(300),
         request: Some(Duration::from_millis(300)),
@@ -235,6 +352,8 @@ mod tests {
         let router = Router::new()
             .route("/", get(|| async { "ok" }))
             .route("/echo", post(|body: Bytes| async move { body }))
+            .route("/held", post(held))
+            .route("/later", post(read_later))
             .route("/ws", get(held_open));
         let stop = CancellationToken::new();
         let tracker = TaskTracker::new();
@@ -247,6 +366,23 @@ mod tests {
             || {},
         ));
         (address, stop, tracker)
+    }
+
+    /// Longer than [`SHORT`]'s request limit.
+    const PAST_THE_LIMIT: Duration = Duration::from_millis(600);
+
+    /// The body, read at once and answered once past the request limit.
+    async fn held(body: Bytes) -> Bytes {
+        tokio::time::sleep(PAST_THE_LIMIT).await;
+        body
+    }
+
+    /// The body, read only once past the request limit.
+    async fn read_later(request: axum::extract::Request) -> Bytes {
+        tokio::time::sleep(PAST_THE_LIMIT).await;
+        axum::body::to_bytes(request.into_body(), 1024)
+            .await
+            .unwrap()
     }
 
     /// A WebSocket that holds its connection's place until the client closes it.
@@ -349,6 +485,23 @@ mod tests {
                 .unwrap();
             let said = read_for(&mut slow, Duration::from_secs(5)).await;
             assert!(said.starts_with("HTTP/1.1 408"), "{said}");
+        });
+    }
+
+    #[test]
+    fn answers_a_request_received_in_time_however_long_its_answer_takes() {
+        runtime().block_on(async {
+            let (address, _stop, _tracker) = serving(SHORT).await;
+            for route in ["held", "later"] {
+                let mut stream = TcpStream::connect(address).await.unwrap();
+                let request = format!(
+                    "POST /{route} HTTP/1.1\r\nhost: x\r\nconnection: close\r\ncontent-length: 3\r\n\r\nabc"
+                );
+                stream.write_all(request.as_bytes()).await.unwrap();
+                let said = read_for(&mut stream, Duration::from_secs(5)).await;
+                assert!(said.starts_with("HTTP/1.1 200 OK"), "{route}: {said}");
+                assert!(said.ends_with("abc"), "{route}: {said}");
+            }
         });
     }
 
