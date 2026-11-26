@@ -5,10 +5,10 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 
 use bazhen_protocol::events::{
-    AttachmentEnded, AttachmentStarted, DevicePaired, DeviceRevoked, EnvironmentRegistered,
-    LeaseGranted, NoticeClosed, NoticeOpened, ResetReason, TaskCreated, TerminalClosed,
-    TerminalFailed, TerminalForegroundChanged, TerminalIncarnation, TerminalNeedsRestart,
-    TerminalNoted, TerminalOpened, TerminalRenamed, event_kind,
+    AttachmentEnded, AttachmentStarted, DevicePaired, DeviceRevoked, EnvironmentHarnessVersion,
+    EnvironmentRegistered, LeaseGranted, NoticeClosed, NoticeOpened, ResetReason, TaskCreated,
+    TerminalClosed, TerminalFailed, TerminalForegroundChanged, TerminalIncarnation,
+    TerminalNeedsRestart, TerminalNoted, TerminalOpened, TerminalRenamed, event_kind,
 };
 use bazhen_protocol::ids::{
     AgentId, AssignmentId, AttachmentId, AttentionId, DeviceId, EnvironmentId, MessageId, NoticeId,
@@ -56,6 +56,12 @@ pub enum NewEvent {
     EnvironmentRegistered {
         environment: EnvironmentId,
         payload: EnvironmentRegistered,
+    },
+    /// A harness's own server answered in an environment on a version other than the last one
+    /// recorded there, which the `system` records.
+    HarnessVersion {
+        environment: EnvironmentId,
+        payload: EnvironmentHarnessVersion,
     },
     /// A change to a terminal, from the human or from the `system`.
     Terminal {
@@ -195,6 +201,7 @@ impl NewEvent {
             Self::NoticeOpened { .. } => "notice.opened",
             Self::NoticeClosed { .. } => "notice.closed",
             Self::EnvironmentRegistered { .. } => "environment.registered",
+            Self::HarnessVersion { .. } => "environment.harness_version",
             Self::Terminal { change, .. } => change.name(),
             Self::AttachmentStarted { .. } => "attachment.started",
             Self::AttachmentEnded { .. } => "attachment.ended",
@@ -215,7 +222,8 @@ impl NewEvent {
             Self::NoticeOpened { notice, .. } | Self::NoticeClosed { notice, .. } => {
                 notice.as_str()
             }
-            Self::EnvironmentRegistered { environment, .. } => environment.as_str(),
+            Self::EnvironmentRegistered { environment, .. }
+            | Self::HarnessVersion { environment, .. } => environment.as_str(),
             Self::Terminal { terminal, .. } | Self::LeaseGranted { terminal, .. } => {
                 terminal.as_str()
             }
@@ -243,6 +251,7 @@ impl NewEvent {
             }
             Self::NoticeOpened { .. }
             | Self::EnvironmentRegistered { .. }
+            | Self::HarnessVersion { .. }
             | Self::AttachmentStarted { .. }
             | Self::AttachmentEnded { .. }
             | Self::LeaseGranted { .. } => "system",
@@ -258,6 +267,7 @@ impl NewEvent {
             Self::NoticeOpened { payload, .. } => serde_json::to_string(payload),
             Self::NoticeClosed { payload, .. } => serde_json::to_string(payload),
             Self::EnvironmentRegistered { payload, .. } => serde_json::to_string(payload),
+            Self::HarnessVersion { payload, .. } => serde_json::to_string(payload),
             Self::Terminal { change, .. } => change.payload(),
             Self::AttachmentStarted { payload, .. } => serde_json::to_string(payload),
             Self::AttachmentEnded { payload, .. } => serde_json::to_string(payload),

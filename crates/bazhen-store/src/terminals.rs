@@ -3,8 +3,10 @@
 //! reads back of a shell, as `store.ts` keeps them.
 
 use bazhen_holder_proto::{PROTOCOL_VERSION, negotiate};
-use bazhen_protocol::agents::{AgentState, Environment, EnvironmentKind};
-use bazhen_protocol::events::{EnvironmentRegistered, RuntimeRefPayload};
+use bazhen_protocol::agents::{AgentState, Environment, EnvironmentKind, HarnessId};
+use bazhen_protocol::events::{
+    EnvironmentHarnessVersion, EnvironmentRegistered, RuntimeRefPayload,
+};
 use bazhen_protocol::ids::{AgentId, EnvironmentId, Id, TerminalId};
 use bazhen_protocol::shells::{
     Foreground, NeedsRestart, Shell, TerminalState, TuiTheme, shell_command_line, shell_commands,
@@ -829,6 +831,25 @@ impl Reads<'_> {
             )
             .optional()
     }
+
+    /// The version `harness`'s own server last answered on in `environment`.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn harness_version(
+        self,
+        environment: &str,
+        harness: HarnessId,
+    ) -> rusqlite::Result<Option<String>> {
+        self.0
+            .query_row(
+                "SELECT version FROM harness_versions WHERE environment_id = ? AND harness = ?",
+                (environment, harness.as_str()),
+                |row| row.get(0),
+            )
+            .optional()
+    }
 }
 
 impl Writer<'_> {
@@ -942,6 +963,34 @@ impl Writer<'_> {
             },
         })?;
         Ok(environment)
+    }
+
+    /// Records the version `harness`'s own server answered on in the local environment when it
+    /// differs from the last one recorded there, as after a self-update, so a server that answers
+    /// again on the same one records nothing. The event's id, when one was appended.
+    ///
+    /// # Errors
+    ///
+    /// [`AppendError`].
+    pub fn record_harness_version(
+        &self,
+        harness: HarnessId,
+        version: &str,
+    ) -> Result<Option<u64>, AppendError> {
+        let environment = self.local_environment()?;
+        let previous = Reads(self.connection()).harness_version(environment.as_str(), harness)?;
+        if previous.as_deref() == Some(version) {
+            return Ok(None);
+        }
+        let event = NewEvent::HarnessVersion {
+            environment,
+            payload: EnvironmentHarnessVersion {
+                harness,
+                version: version.to_owned(),
+                previous,
+            },
+        };
+        self.append(&event).map(Some)
     }
 }
 
@@ -1940,6 +1989,45 @@ mod tests {
                 retypeable(&crate::testing::view())
             ),
             (false, vec![true, false], vec![false, false])
+        );
+    }
+
+    #[test]
+    fn records_a_harness_version_only_when_it_differs_from_the_last_recorded() {
+        let dir = TempDir::new("versions");
+        let mut store = Store::open(&dir.db("versions.db")).unwrap();
+        let environment = environment(&mut store);
+        let mut record = |version: &str| {
+            store
+                .write(|w| w.record_harness_version(HarnessId::Codex, version))
+                .unwrap()
+                .map(|id| payload(&store, id))
+        };
+        let first = record("0.172.0");
+        let again = record("0.172.0");
+        let updated = record("0.173.0");
+        let line = |version: &str, previous: &str| {
+            Some((
+                "environment.harness_version".to_owned(),
+                "system".to_owned(),
+                format!(r#"{{"harness":"codex","version":"{version}","previous":{previous}}}"#),
+            ))
+        };
+        assert_eq!(
+            (first, again, updated),
+            (
+                line("0.172.0", "null"),
+                None,
+                line("0.173.0", r#""0.172.0""#)
+            )
+        );
+        let reads = store.reads();
+        assert_eq!(
+            (
+                reads.harness_version(environment.as_str(), HarnessId::Codex),
+                reads.harness_version(environment.as_str(), HarnessId::ClaudeCode),
+            ),
+            (Ok(Some("0.173.0".to_owned())), Ok(None))
         );
     }
 }
