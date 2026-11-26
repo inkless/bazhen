@@ -500,18 +500,23 @@ impl Events for HolderTold {
                     // missed while behind still names its process. Any other event missed is
                     // seen again by what reads the terminal next: a close finds what is left of
                     // it.
-                    Err(broadcast::error::RecvError::Lagged(_)) => match (self.reread.0)().await {
-                        Ok(found) => self.respawned().extend(
-                            found
-                                .into_iter()
-                                .map(|terminal| (terminal.terminal_id.clone(), terminal)),
-                        ),
-                        Err(err) => tracing::warn!(
-                            "bazhen: holder events were missed, and what runs each terminal couldn't be read again: {err}"
-                        ),
-                    },
-                    // A title isn't followed yet.
-                    Ok(RuntimeEvent::Title { .. }) => {}
+                    // A title missed is told as missed, for whoever follows titles to read again.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        match (self.reread.0)().await {
+                            Ok(found) => self.respawned().extend(
+                                found
+                                    .into_iter()
+                                    .map(|terminal| (terminal.terminal_id.clone(), terminal)),
+                            ),
+                            Err(err) => tracing::warn!(
+                                "bazhen: holder events were missed, and what runs each terminal couldn't be read again: {err}"
+                            ),
+                        }
+                        return Some(Event::TitlesMissed);
+                    }
+                    Ok(RuntimeEvent::Title { terminal_id }) => {
+                        return Some(Event::Title(terminal_id));
+                    }
                     Err(broadcast::error::RecvError::Closed) => return None,
                 }
             }
@@ -714,6 +719,21 @@ impl Terminals for Holder {
                 Ok(terminal) => self.runtime.gone(&terminal).await,
                 Err(_) => false,
             }
+        })
+    }
+
+    fn title<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+    ) -> Answer<'a, Result<(u64, String), TerminalError>> {
+        Box::pin(async move {
+            let terminal = holder_ref(terminal)?;
+            let (generation, title) = self
+                .runtime
+                .title(&terminal)
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok((generation.get(), title))
         })
     }
 
@@ -1214,6 +1234,22 @@ mod tests {
     }
 
     #[test]
+    fn tells_the_terminal_whose_title_was_set_and_that_titles_were_missed_once_behind() {
+        let (tx, rx) = broadcast::channel(1);
+        let told = told_of(rx, Vec::new());
+        let title = |n| RuntimeEvent::Title {
+            terminal_id: holder_at(n).terminal_id,
+        };
+        tx.send(title(1)).unwrap();
+        tx.send(title(2)).unwrap();
+        drop(tx);
+        assert_eq!(
+            told_all(told),
+            [Event::TitlesMissed, Event::Title(holder_at(2).terminal_id)]
+        );
+    }
+
+    #[test]
     fn names_the_process_an_exit_ended_where_it_fell_behind_the_respawn_that_started_it() {
         let (tx, rx) = broadcast::channel(1);
         let told = told_of(rx, vec![holder_at(1)]);
@@ -1225,12 +1261,15 @@ mod tests {
         drop(tx);
         assert_eq!(
             told_all(told),
-            [Event::Exited(Exit {
-                terminal_id: holder_at(0).terminal_id,
-                generation: 1,
-                status: bazhen_holder_proto::body::ExitStatus::Unknown,
-                found: recorded_of(&holder_at(1)),
-            })]
+            [
+                Event::TitlesMissed,
+                Event::Exited(Exit {
+                    terminal_id: holder_at(0).terminal_id,
+                    generation: 1,
+                    status: bazhen_holder_proto::body::ExitStatus::Unknown,
+                    found: recorded_of(&holder_at(1)),
+                })
+            ]
         );
     }
 

@@ -106,6 +106,7 @@ pub struct Capabilities {
     /// Whether its permission requests can be answered from the inbox.
     pub approvals: bool,
     pub activity: ActivitySource,
+    pub ready: ReadySource,
 }
 
 /// How mail reaches an agent.
@@ -128,6 +129,16 @@ pub enum ActivitySource {
     Hooks,
     /// The harness's server, which says it again on each connect.
     Channel,
+}
+
+/// Where an agent's TUI says what it shows, which is where the daemon looks for the sign that it
+/// is up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadySource {
+    /// Its hooks, which it runs itself.
+    Hooks,
+    /// Its terminal's title, which the daemon reads ([`Report::TerminalTitle`]).
+    Title,
 }
 
 /// What the daemon holds of a running agent, for whether mail reaches it.

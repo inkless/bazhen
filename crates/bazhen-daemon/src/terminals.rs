@@ -160,6 +160,11 @@ pub(crate) enum Event {
     Respawned(Recorded),
     /// What ran the terminal has gone, or its socket has: this names the incarnation it ran.
     Lost(Recorded),
+    /// The terminal's title may have changed: [`Terminals::title`] reads it. The title itself
+    /// isn't told, as one told could be read after a respawn it predates.
+    Title(TerminalId),
+    /// Events were missed, a title among them maybe: whoever follows titles reads them again.
+    TitlesMissed,
 }
 
 /// The events a runtime tells, from when it was asked for them.
@@ -275,6 +280,12 @@ pub(crate) trait Terminals: Send + Sync + std::fmt::Debug {
     /// Nothing answers for the terminal, and what ran it provably runs no more.
     fn gone<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, bool>;
 
+    /// The terminal's title, with the generation of the process that set it.
+    fn title<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+    ) -> Answer<'a, Result<(u64, String), TerminalError>>;
+
     /// Nothing answers for a terminal whose start recorded nothing to prove it gone by, and
     /// nothing will: `since` is a moment after which nothing could start it, long enough ago
     /// that what started before then would answer by now.
@@ -359,6 +370,8 @@ pub(crate) mod fake {
         pub(crate) gone: bool,
         /// The generation of the process it runs.
         pub(crate) generation: u64,
+        /// The title its process set: none until it sets one.
+        pub(crate) title: String,
     }
 
     /// A create's refusal, as the fake refuses one it is set to.
@@ -384,6 +397,8 @@ pub(crate) mod fake {
         /// What each close fails with, where it fails as no unreachable runtime does.
         pub(crate) closes_refused: Option<TerminalError>,
         pub(crate) fail_holders: bool,
+        /// What the next title reads fail with, one read each, before any answers.
+        pub(crate) titles_refused: std::collections::VecDeque<TerminalError>,
         /// What each read of what the runtime holds fails with, where it can't be read: no
         /// inventory, foreground or compatibility.
         pub(crate) reads_refused: Option<TerminalError>,
@@ -418,6 +433,8 @@ pub(crate) mod fake {
         pub(crate) exit_as_created: bool,
         /// Each paste asked for, in order: the terminal, the text and whether it was marked.
         pub(crate) pasted: Vec<(String, String, bool)>,
+        /// The terminals whose title was read, in order.
+        pub(crate) titles_read: Vec<String>,
         /// What each paste fails with, where it types nothing, as one into a shell whose input
         /// was typed ahead.
         pub(crate) pastes_refused: Option<TerminalError>,
@@ -582,6 +599,19 @@ pub(crate) mod fake {
             self.change(terminal_id, |running| running.gone = true);
         }
 
+        /// Its process sets its title to `title`, which is told to every listener.
+        pub(crate) fn title(&self, terminal_id: &str, title: &str) {
+            let mut state = self.state.lock().unwrap();
+            state.running.get_mut(terminal_id).unwrap().title = title.to_owned();
+            state.tell(&Event::Title(TerminalId::parse(terminal_id).unwrap()));
+        }
+
+        /// Its process sets its title to `title`, told to no one, as one set while events were
+        /// missed.
+        pub(crate) fn title_unseen(&self, terminal_id: &str, title: &str) {
+            self.change(terminal_id, |running| running.title = title.to_owned());
+        }
+
         /// What ran it ends, and its loss is told to every listener.
         pub(crate) fn lose(&self, terminal_id: &str) {
             let mut state = self.state.lock().unwrap();
@@ -620,6 +650,7 @@ pub(crate) mod fake {
                     exited: false,
                     gone: false,
                     generation,
+                    title: String::new(),
                 },
             );
         }
@@ -648,6 +679,7 @@ pub(crate) mod fake {
             self.change(terminal_id, |running| {
                 running.exited = false;
                 running.generation += 1;
+                running.title.clear();
                 generation = running.generation;
             });
             generation
@@ -699,6 +731,7 @@ pub(crate) mod fake {
                             exited: false,
                             gone: false,
                             generation,
+                            title: String::new(),
                         },
                     );
                     if state.answers_unknown {
@@ -911,6 +944,27 @@ pub(crate) mod fake {
             })
         }
 
+        fn title<'a>(
+            &'a self,
+            terminal: &'a Recorded,
+        ) -> Answer<'a, Result<(u64, String), TerminalError>> {
+            Box::pin(async move {
+                let mut state = self.state.lock().unwrap();
+                let id = terminal.terminal_id.as_str();
+                state.titles_read.push(id.to_owned());
+                if let Some(refused) = state.titles_refused.pop_front() {
+                    return Err(refused);
+                }
+                match state.running.get(id) {
+                    Some(running) if running.gone => {
+                        Err(TerminalError::Gone("its holder is gone".to_owned()))
+                    }
+                    Some(running) => Ok((running.generation, running.title.clone())),
+                    None => Err(TerminalError::Stale("no such terminal".to_owned())),
+                }
+            })
+        }
+
         fn gone<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, bool> {
             Box::pin(async move {
                 let state = self.state.lock().unwrap();
@@ -993,6 +1047,7 @@ pub(crate) mod fake {
                     Some(running) => {
                         running.exited = false;
                         running.generation = generation;
+                        running.title.clear();
                     }
                 }
                 state.respawned.push((id.clone(), restart));

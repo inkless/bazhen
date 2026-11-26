@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use bazhen_harness::{
     ActivitySource, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery, Evidence,
     Harness, HarnessDeps, HarnessDoctor, Harnesses, IngestContext, Ingested, LaunchError,
-    LaunchRequest, LaunchSpec, Listen, MailRefusal, Outgoing, Pending, PushPort, Pushed, Report,
-    Resolution, RunPort, Session, SessionRef, production,
+    LaunchRequest, LaunchSpec, Listen, MailRefusal, Outgoing, Pending, PushPort, Pushed,
+    ReadySource, Report, Resolution, RunPort, Session, SessionRef, production,
 };
 use bazhen_protocol::agents::{ExternalRef, ExternalRefKind, HarnessId};
 use bazhen_protocol::shells::TuiTheme;
@@ -138,6 +138,7 @@ pub(crate) fn pull() -> Capabilities {
         delivery: Delivery::Pull,
         approvals: true,
         activity: ActivitySource::Hooks,
+        ready: ReadySource::Hooks,
     }
 }
 

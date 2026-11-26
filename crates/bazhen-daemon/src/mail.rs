@@ -3,7 +3,9 @@
 //! takes by push is handed to it (`codex/mail.ts`'s `deliver`). A harness that takes none refuses
 //! the send, as does one that takes none for the agent now.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use axum::body::Bytes;
@@ -195,7 +197,7 @@ pub(crate) async fn send(
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
         for queued in sent.queued {
-            deliver(&shared, &agents, queued).await;
+            deliver(&shared, queued).await;
         }
         Ok(sent.response)
     };
@@ -205,15 +207,14 @@ pub(crate) async fn send(
     }
 }
 
-/// Hands a message just queued over as `queued` says: pushed, or offered to the agent's waiter.
-pub(crate) async fn deliver(shared: &Shared, agents: &Arc<Agents>, queued: Queued) {
+/// Hands a message just queued over as `queued` says: pushed, with the agent's mail queued before
+/// it, or offered to the agent's waiter.
+pub(crate) async fn deliver(shared: &Shared, queued: Queued) {
     let Queued {
-        agent,
-        message,
-        delivery,
+        agent, delivery, ..
     } = queued;
     match delivery {
-        Delivery::Push => pushing(shared, agents, message, agent),
+        Delivery::Push => push_queued(shared, &agent),
         Delivery::Pull => {
             // Queued, the message waits for the next waiter or tool call when this fails.
             if let Err(err) = shared.hooks.mailbox.offer(shared, &agent).await {
@@ -229,7 +230,6 @@ pub(crate) async fn deliver(shared: &Shared, agents: &Arc<Agents>, queued: Queue
 /// committed, and is owed its push or offer.
 pub(crate) async fn hand_over(
     shared: Shared,
-    agents: Arc<Agents>,
     mut handed: mpsc::UnboundedReceiver<Queued>,
     stop: CancellationToken,
 ) {
@@ -242,10 +242,10 @@ pub(crate) async fn hand_over(
         let Some(queued) = queued else {
             return;
         };
-        deliver(&shared, &agents, queued).await;
+        deliver(&shared, queued).await;
     }
     while let Ok(queued) = handed.try_recv() {
-        deliver(&shared, &agents, queued).await;
+        deliver(&shared, queued).await;
     }
 }
 
@@ -401,18 +401,153 @@ fn peer_mail(from: &AgentId, sender: &bazhen_store::Sender, text: &str) -> Strin
     )
 }
 
-/// Pushes the message, on the agents' tracker, through the daemon's push port; with none, it
-/// stays queued.
-fn pushing(shared: &Shared, agents: &Arc<Agents>, message: MessageId, agent: AgentId) {
-    let Some(PushTo(port)) = shared.push.clone() else {
+/// The agents whose queued mail a pusher pushes, each marked once its queue is to be read again.
+/// One pusher at a time pushes an agent's mail, oldest first, so none is pushed twice, nor ahead
+/// of mail queued before it.
+#[derive(Debug, Default)]
+pub(crate) struct Pushers(StdMutex<HashMap<AgentId, bool>>);
+
+impl Pushers {
+    fn pushing(&self) -> MutexGuard<'_, HashMap<AgentId, bool>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether a pusher is to start for `agent`, as none runs; one that runs is marked to read
+    /// its queue again.
+    fn wake(&self, agent: &AgentId) -> bool {
+        match self.pushing().entry(agent.clone()) {
+            Entry::Occupied(mut running) => {
+                *running.get_mut() = true;
+                false
+            }
+            Entry::Vacant(none) => {
+                none.insert(false);
+                true
+            }
+        }
+    }
+
+    /// The pusher reads `agent`'s queue: a wake from here on reads it again.
+    fn reading(&self, agent: &AgentId) {
+        if let Some(marked) = self.pushing().get_mut(agent) {
+            *marked = false;
+        }
+    }
+
+    /// Whether `agent`'s pusher ends, as no wake came since it read the queue; under the lock a
+    /// wake takes, so a wake after this starts a pusher of its own.
+    fn done(&self, agent: &AgentId) -> bool {
+        let mut pushing = self.pushing();
+        if pushing.get(agent).copied() == Some(true) {
+            return false;
+        }
+        pushing.remove(agent);
+        true
+    }
+}
+
+/// An agent's pusher, which ends its run however its task ends: one cut short by a failed read,
+/// or a panic, leaves none marked running with nothing running.
+struct Pusher {
+    pushers: Arc<Pushers>,
+    agent: AgentId,
+    done: bool,
+}
+
+impl Drop for Pusher {
+    fn drop(&mut self) {
+        if !self.done {
+            self.pushers.pushing().remove(&self.agent);
+        }
+    }
+}
+
+impl Pusher {
+    /// Pushes the agent's queued mail, oldest first, until none is left that a wake since the
+    /// last read asks for. A harness that can't take it now holds what is left for the next wake.
+    async fn run(
+        &mut self,
+        store: &crate::writer::Writer,
+        agents: &Agents,
+        port: &dyn PushPort,
+    ) -> Result<(), String> {
+        loop {
+            self.pushers.reading(&self.agent);
+            for message in queued(store, agents, &self.agent).await? {
+                if push(store, agents, port, &message, &self.agent).await? == Push::NotNow {
+                    break;
+                }
+            }
+            if self.pushers.done(&self.agent) {
+                self.done = true;
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Pushes `agent`'s queued mail, on the agents' tracker, through the daemon's push port, where
+/// its harness takes mail by push; with no port, it stays queued. A pusher already running for
+/// the agent reads its queue again instead.
+pub(crate) fn push_queued(shared: &Shared, agent: &AgentId) {
+    let (Some(PushTo(port)), Some(agents)) = (shared.push.clone(), shared.agents.clone()) else {
         return;
     };
-    let (store, run) = (shared.store.clone(), Arc::clone(agents));
+    let pushers = Arc::clone(&shared.hooks.pushers);
+    if !pushers.wake(agent) {
+        return;
+    }
+    let store = shared.store.clone();
+    let mut pusher = Pusher {
+        pushers,
+        agent: agent.clone(),
+        done: false,
+    };
+    let run = Arc::clone(&agents);
     agents.spawn(async move {
-        if let Err(err) = push(&store, &run, port.as_ref(), &message, &agent).await {
-            tracing::warn!("bazhen: couldn't push {message} to {agent}: {err}");
+        if let Err(err) = pusher.run(&store, &run, port.as_ref()).await {
+            tracing::warn!("bazhen: couldn't push mail to {}: {err}", pusher.agent);
         }
     });
+}
+
+/// `agent`'s queued messages, oldest first, where its harness takes mail by push.
+async fn queued(
+    store: &crate::writer::Writer,
+    agents: &Agents,
+    agent: &AgentId,
+) -> Result<Vec<MessageId>, String> {
+    let id = agent.clone();
+    let (binding, mail) = store
+        .run(move |store| {
+            let reads = store.reads();
+            Ok::<_, rusqlite::Error>((
+                reads.agent_binding(id.as_str())?,
+                reads.mail(id.as_str(), &[MailboxState::Queued])?,
+            ))
+        })
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(|err| err.to_string())?;
+    let pushes = binding
+        .and_then(|b| harness_of(agents.harnesses(), &b.harness))
+        .is_some_and(|h| h.capabilities().delivery == Delivery::Push);
+    if !pushes {
+        return Ok(Vec::new());
+    }
+    Ok(mail
+        .into_iter()
+        .filter_map(|m| MessageId::parse(&m.id))
+        .collect())
+}
+
+/// What came of a push.
+#[derive(Debug, PartialEq, Eq)]
+enum Push {
+    /// It was handed over, given up, or isn't the agent's to push any more.
+    Went,
+    /// The harness can't take mail for the agent now.
+    NotNow,
 }
 
 /// What a push reads before each attempt: the message's body while it is still queued for
@@ -424,23 +559,34 @@ struct Pushable {
     session: Option<SessionRef>,
 }
 
+/// Where a queued message stands now.
+enum Standing {
+    /// It is no longer queued for its agent: taken, or settled.
+    Gone,
+    /// Its agent is starting, so its harness can't take it now.
+    Starting,
+    Pushable(Pushable),
+}
+
 /// Hands a queued message to its agent's harness, trying again with backoff, and gives it up as
 /// undeliverable after the last attempt. One no longer queued is left alone, as is one for an
-/// agent still starting.
+/// agent still starting, which the harness can't take now.
 async fn push(
     store: &crate::writer::Writer,
     agents: &Agents,
     port: &dyn PushPort,
     message: &MessageId,
     agent: &AgentId,
-) -> Result<(), String> {
+) -> Result<Push, String> {
     let mut wait = PUSH_RETRY;
     for attempt in 1..=PUSH_ATTEMPTS {
-        let Some(now) = pushable(store, message, agent).await? else {
-            return Ok(());
+        let now = match pushable(store, message, agent).await? {
+            Standing::Gone => return Ok(Push::Went),
+            Standing::Starting => return Ok(Push::NotNow),
+            Standing::Pushable(now) => now,
         };
         let Some(harness) = harness_of(agents.harnesses(), &now.harness) else {
-            return Ok(());
+            return Ok(Push::Went);
         };
         let pushed = harness
             .push(
@@ -454,7 +600,7 @@ async fn push(
             .await;
         let change = match pushed {
             Pushed::Accepted { offline } => MailChange::Accepted(MailAccepted { offline }),
-            Pushed::NotNow => return Ok(()),
+            Pushed::NotNow => return Ok(Push::NotNow),
             Pushed::Failed { detail } if attempt < PUSH_ATTEMPTS => {
                 tracing::warn!("bazhen: pushing {message} to {agent} failed: {detail}");
                 tokio::time::sleep(wait).await;
@@ -469,31 +615,36 @@ async fn push(
             }
         };
         let (message, agent) = (message.clone(), agent.clone());
-        store
+        return store
             .run(move |store| {
                 store.write(|w| {
                     // A turn carrying it may have taken it before the push returned, or the agent
-                    // started again: read in the transaction that records it, neither can come
-                    // between the reading and the record.
-                    if pushable_in(w.reads(), &message, &agent)?.is_some() {
-                        w.mail_step(&message, change)?;
+                    // started again, its TUI maybe held at a dialog: read in the transaction that
+                    // records it, neither can come between the reading and the record.
+                    match pushable_in(w.reads(), &message, &agent)? {
+                        Standing::Gone => Ok(Push::Went),
+                        Standing::Starting => Ok(Push::NotNow),
+                        Standing::Pushable(_) => {
+                            w.mail_step(&message, change)?;
+                            Ok::<_, AppendError>(Push::Went)
+                        }
                     }
-                    Ok::<_, AppendError>(())
                 })
             })
             .await
             .map_err(|err| err.to_string())?
-            .map_err(|err| err.to_string())?;
-        return Ok(());
+            .map_err(|err| err.to_string());
     }
-    Ok(())
+    Ok(Push::Went)
 }
 
+/// Where the message stands for `agent`: what it is pushed as while it is still queued for an
+/// agent that isn't starting.
 async fn pushable(
     store: &crate::writer::Writer,
     message: &MessageId,
     agent: &AgentId,
-) -> Result<Option<Pushable>, String> {
+) -> Result<Standing, String> {
     let (message, agent) = (message.clone(), agent.clone());
     store
         .run(move |store| pushable_in(store.reads(), &message, &agent))
@@ -507,18 +658,23 @@ fn pushable_in(
     reads: bazhen_store::Reads<'_>,
     message: &MessageId,
     agent: &AgentId,
-) -> rusqlite::Result<Option<Pushable>> {
+) -> rusqlite::Result<Standing> {
     let queued = reads
         .message(message.as_str())?
         .filter(|m| m.agent == agent.as_str() && m.state == MailboxState::Queued);
     let Some(queued) = queued else {
-        return Ok(None);
+        return Ok(Standing::Gone);
     };
-    let binding = reads.agent_binding(agent.as_str())?;
-    Ok(binding.filter(|b| b.state != "starting").map(|b| Pushable {
+    let Some(binding) = reads.agent_binding(agent.as_str())? else {
+        return Ok(Standing::Gone);
+    };
+    if binding.state == "starting" {
+        return Ok(Standing::Starting);
+    }
+    Ok(Standing::Pushable(Pushable {
         body: queued.body,
-        harness: b.harness,
-        session: b.session.map(|s| SessionRef {
+        harness: binding.harness,
+        session: binding.session.map(|s| SessionRef {
             kind: s.kind,
             id: s.id,
         }),

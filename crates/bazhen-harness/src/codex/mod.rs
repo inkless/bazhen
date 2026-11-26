@@ -17,8 +17,8 @@ use crate::{
     ActivitySource, AgentId, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery,
     Evidence, Gate, Harness, HarnessActivity, HarnessDeps, HarnessDoctor, Held, IngestContext,
     Ingested, Key, Keyed, LaunchError, LaunchRequest, LaunchSpec, LimitStop, Listen, MailRefusal,
-    Observed, Outgoing, Pending, PushPort, Pushed, Reply, Report, Resolution, RunPort, Session,
-    SessionKey, Settled, ToolKey,
+    Observed, Outgoing, Pending, PushPort, Pushed, ReadySource, Reply, Report, Resolution, RunPort,
+    Session, SessionKey, Settled, ToolKey,
 };
 use bazhen_protocol::agent_events::{CompactedSign, ReadySign};
 use bazhen_protocol::agents::{ActivityValue, ExternalRef};
@@ -406,6 +406,7 @@ impl Harness for Codex {
             delivery: Delivery::Push,
             approvals: true,
             activity: ActivitySource::Channel,
+            ready: ReadySource::Title,
         }
     }
 

@@ -33,7 +33,7 @@ use crate::routes::{self, Gate, Reason, Shared, Stop};
 use crate::runner::{self, Runner};
 use crate::shells::integration::{Integration, install_shell_integration};
 use crate::shells::{ShellError, Shells, ShellsDeps};
-use crate::terminals::Events;
+use crate::terminals::{Event, Events};
 use crate::tokens::{self, AgentTokens};
 use crate::web::State;
 
@@ -335,6 +335,7 @@ async fn shells(
         watched: Watched {
             shells: Arc::new(shells),
             agents,
+            titles: Arc::clone(&shared.hooks.titles),
             events,
         },
         doctor: Settled {
@@ -383,16 +384,18 @@ async fn unread_shells(startup: &Startup, store: &Writer, err: &ShellError) -> R
 struct Watched {
     shells: Arc<Shells>,
     agents: Arc<Agents>,
+    titles: Arc<crate::titles::Titles>,
     events: Box<dyn Events>,
 }
 
 /// Runs the shells' tick every `tick`, and follows what the runtime tells of its terminals, until
 /// `stop`: each event goes to the shells and to the agents, each on `tracker`, and each takes only
-/// its own terminals' events.
+/// its own terminals' events; a title goes to the starts watching titles.
 async fn follow(
     Watched {
         shells,
         agents,
+        titles,
         mut events,
     }: Watched,
     tick: Duration,
@@ -402,8 +405,14 @@ async fn follow(
     tracker.spawn(every_tick(Arc::clone(&shells), tick, stop.clone()));
     tracker.spawn(agents_tick(Arc::clone(&agents), tick, stop.clone()));
     while let Some(Some(event)) = stop.run_until_cancelled(events.next()).await {
-        agents.heard(event.clone(), &tracker);
-        shells.heard(event, &tracker, &stop);
+        match event {
+            Event::Title(terminal) => titles.told(&terminal),
+            Event::TitlesMissed => titles.missed(),
+            event => {
+                agents.heard(event.clone(), &tracker);
+                shells.heard(event, &tracker, &stop);
+            }
+        }
     }
 }
 
@@ -517,12 +526,7 @@ async fn run_on(
         .with_agents(Arc::clone(&watched.agents))
         .with_web(bundle);
     shared.streams = crate::stream::on_holders(store, streaming, &watched.shells, tracker, stop);
-    tracker.spawn(crate::mail::hand_over(
-        shared.clone(),
-        Arc::clone(&watched.agents),
-        handed,
-        stop.clone(),
-    ));
+    tracker.spawn(crate::mail::hand_over(shared.clone(), handed, stop.clone()));
     Ok((shared, watched, commands))
 }
 
@@ -646,6 +650,10 @@ async fn let_go(
         shared.clone(),
         crate::readiness::StoreSource::new(store.clone()),
         Duration::from_millis(startup.settings.config.start_deadline_ms),
+        shared.stop.token().clone(),
+    ));
+    tracker.spawn(crate::titles::follow(
+        shared.clone(),
         shared.stop.token().clone(),
     ));
     if let Some(commands) = commands {
@@ -776,6 +784,7 @@ mod tests {
                 Watched {
                     shells: f.shells(),
                     agents: Arc::clone(&f.agents),
+                    titles: Arc::default(),
                     events: f.fake().events(),
                 },
                 Duration::from_secs(3600),

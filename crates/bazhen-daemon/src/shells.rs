@@ -1218,6 +1218,8 @@ impl Shells {
             Event::Exited(exit) => tracker.spawn(async move { shells.exited(exit, &stop).await }),
             Event::Respawned(at) => tracker.spawn(async move { shells.respawned(&at).await }),
             Event::Lost(at) => tracker.spawn(async move { shells.lost(&at).await }),
+            // A title is the readiness follower's.
+            Event::Title(_) | Event::TitlesMissed => return,
         };
     }
 

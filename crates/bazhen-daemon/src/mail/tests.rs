@@ -1,7 +1,7 @@
 use std::sync::Mutex as StdMutex;
 
 use bazhen_harness::{
-    ActivitySource, BoxFuture, Capabilities, ChannelPort, Output, RunError, RunPort,
+    ActivitySource, BoxFuture, Capabilities, ChannelPort, Output, ReadySource, RunError, RunPort,
 };
 use bazhen_protocol::agents::LaunchAgentRequest;
 use serde_json::{Value, json};
@@ -48,6 +48,7 @@ pub(crate) fn taking(delivery: Delivery) -> Capabilities {
         delivery,
         approvals: true,
         activity: ActivitySource::Hooks,
+        ready: ReadySource::Hooks,
     }
 }
 
@@ -162,10 +163,9 @@ impl Fixture {
         while let Ok(queued) = self.handed.lock().unwrap().try_recv() {
             handed.push(queued);
         }
-        let agents = Arc::clone(self.shared.agents.as_ref().unwrap());
         self.runtime.block_on(async {
             for queued in handed.clone() {
-                deliver(&self.shared, &agents, queued).await;
+                deliver(&self.shared, queued).await;
             }
         });
         self.settle();
@@ -480,7 +480,7 @@ fn delivers_what_a_write_hands_over_in_the_order_handed_until_the_daemon_stops()
     let stop = CancellationToken::new();
     let drain = f
         .runtime
-        .spawn(hand_over(f.shared.clone(), agents, handed, stop.clone()));
+        .spawn(hand_over(f.shared.clone(), handed, stop.clone()));
     let pushed = || f.stub.pushes.lock().unwrap().len();
     f.runtime.block_on(async {
         let waited = tokio::time::Instant::now();
@@ -528,7 +528,7 @@ fn delivers_what_was_handed_over_before_the_daemon_stopped() {
     stop.cancel();
     let pushed = || f.stub.pushes.lock().unwrap().len();
     f.runtime.block_on(async {
-        hand_over(f.shared.clone(), agents, handed, stop).await;
+        hand_over(f.shared.clone(), handed, stop).await;
         let waited = tokio::time::Instant::now();
         while pushed() < 2 && waited.elapsed() < DEADLINE {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -543,4 +543,77 @@ fn delivers_what_was_handed_over_before_the_daemon_stopped() {
         .map(|p| p.body.clone())
         .collect();
     assert_eq!(bodies, ["one", "two"]);
+}
+
+impl Fixture {
+    /// The bodies of the mail handed to the stub to push, in order.
+    fn pushed(&self) -> Vec<String> {
+        self.stub
+            .pushes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|p| p.body.clone())
+            .collect()
+    }
+}
+
+#[test]
+fn pushes_an_agents_queued_mail_oldest_first_once_it_is_asked_to() {
+    let accepted = || Pushed::Accepted { offline: false };
+    let f = fixture(push([accepted(), accepted()]));
+    f.set_state(&f.to.clone(), "starting");
+    f.send(None, &f.to, "k-1", "first");
+    f.send(None, &f.to, "k-2", "second");
+    let before = f.pushed();
+    f.set_state(&f.to.clone(), "running");
+    f.runtime.block_on(async { push_queued(&f.shared, &f.to) });
+    f.settle();
+    assert_eq!(
+        (before, f.pushed()),
+        (
+            Vec::<String>::new(),
+            vec!["first".to_owned(), "second".to_owned()]
+        )
+    );
+}
+
+#[test]
+fn pushes_mail_sent_while_its_agents_mail_is_pushed_once_each_in_the_order_sent() {
+    let accepted = || Pushed::Accepted { offline: false };
+    let f = fixture(push([accepted(), accepted(), accepted()]));
+    let open = f.stub.holding_push();
+    f.send_to(None, f.to.as_str(), "k-1", "first");
+    // The paused clock stands still while this yields, so the deadline is the wall clock's.
+    let since = std::time::Instant::now();
+    let started = || !f.stub.pushes.lock().unwrap().is_empty();
+    f.runtime.block_on(async {
+        while !started() && since.elapsed() < DEADLINE {
+            tokio::task::yield_now().await;
+        }
+    });
+    assert!(started(), "the push never started");
+    f.send_to(None, f.to.as_str(), "k-2", "second");
+    f.send_to(None, f.to.as_str(), "k-3", "third");
+    open.send(()).unwrap();
+    f.settle();
+    assert_eq!(f.pushed(), ["first", "second", "third"].map(str::to_owned));
+}
+
+#[test]
+fn pushes_none_of_an_agents_later_mail_once_its_harness_cant_take_mail_now() {
+    let f = fixture(push([Pushed::NotNow]));
+    f.set_state(&f.to.clone(), "starting");
+    f.send(None, &f.to, "k-1", "first");
+    f.send(None, &f.to, "k-2", "second");
+    f.set_state(&f.to.clone(), "running");
+    f.runtime.block_on(async { push_queued(&f.shared, &f.to) });
+    f.settle();
+    assert_eq!(
+        (f.pushed(), f.mail()),
+        (
+            vec!["first".to_owned()],
+            vec![f.queued("first"), f.queued("second")]
+        )
+    );
 }

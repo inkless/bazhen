@@ -844,6 +844,7 @@ fn codex_takes_mail_by_push_and_says_what_it_does_over_its_server() {
             delivery: Delivery::Push,
             approvals: true,
             activity: ActivitySource::Channel,
+            ready: ReadySource::Title,
         }
     );
     assert_eq!(codex.themes(), &[TuiTheme::Light, TuiTheme::Dark]);

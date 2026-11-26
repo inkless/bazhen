@@ -11,8 +11,8 @@ use crate::js::Js;
 use crate::{
     ActivitySource, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery, Evidence,
     Harness, HarnessDeps, HarnessDoctor, IngestContext, Ingested, LaunchError, LaunchRequest,
-    LaunchSpec, Listen, MailRefusal, Outgoing, Pending, PushPort, Pushed, Report, Resolution,
-    RunPort, Session, SessionRef, Waiting,
+    LaunchSpec, Listen, MailRefusal, Outgoing, Pending, PushPort, Pushed, ReadySource, Report,
+    Resolution, RunPort, Session, SessionRef, Waiting,
 };
 use bazhen_protocol::agents::{ActivityValue, ExternalRef, ExternalRefKind};
 use bazhen_protocol::shells::TuiTheme;
@@ -369,6 +369,7 @@ impl Harness for ClaudeCode {
             delivery: Delivery::Pull,
             approvals: true,
             activity: ActivitySource::Hooks,
+            ready: ReadySource::Hooks,
         }
     }
 

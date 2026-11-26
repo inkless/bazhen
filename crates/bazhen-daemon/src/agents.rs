@@ -451,6 +451,10 @@ impl Agents {
         self.deps.handing.is_closed()
     }
 
+    pub(crate) fn terminals(&self) -> &Arc<dyn Terminals> {
+        &self.deps.terminals
+    }
+
     /// Launches one agent. A repeat of the key while the launch is in flight gets the answer so
     /// far.
     pub(crate) async fn launch(
