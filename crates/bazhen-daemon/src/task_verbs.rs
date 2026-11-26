@@ -1,8 +1,6 @@
 //! The task verbs' routes (`http/app.ts`'s `taskRoute`s): each body held to the protocol at the
 //! edge, then the verb run once per key in the store, which checks the caller may.
 
-use std::sync::Arc;
-
 use axum::Extension;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -225,12 +223,11 @@ pub(crate) async fn assign(
     let assigned = async {
         let req =
             edge::<AssignTaskRequest>(&body).map_err(|refused| Sending::Invalid(refused.0))?;
-        let agents = shared.agents.clone().ok_or(Sending::Unavailable)?;
+        let run = shared.agents.clone().ok_or(Sending::Unavailable)?;
         let task = TaskId::parse(&id).ok_or_else(|| Granting::NoTask(id.clone()))?;
         let caller = caller_of(caller);
         let roles = shared.roles.current();
-        let run = Arc::clone(&agents);
-        let (response, queued) = shared
+        let response = shared
             .store
             .run(move |store| {
                 let reference = req.agent_id.as_str();
@@ -261,11 +258,13 @@ pub(crate) async fn assign(
                     };
                     grant.record(w, run.harnesses(), &mut queued)
                 })?;
-                Ok::<_, Granting>((response, queued))
+                // Committed: handed over here, so a caller gone before the answer leaves none
+                // of its mail behind.
+                run.hand(queued);
+                Ok::<_, Granting>(response)
             })
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
-        agents.hand(queued);
         Ok::<_, Granting>(response)
     };
     match assigned.await {
@@ -280,13 +279,12 @@ pub(crate) async fn assign(
 /// it was delegated from.
 pub(crate) async fn create(shared: Shared, task: NewTask, assign: Option<TaskGrant>) -> Response {
     let made = async {
-        let agents = match assign {
+        let run = match assign {
             Some(_) => Some(shared.agents.clone().ok_or(Sending::Unavailable)?),
             None => None,
         };
         let roles = shared.roles.current();
-        let run = agents.clone();
-        let (response, queued) = shared
+        let response = shared
             .store
             .run(move |store| {
                 let agent = match &assign {
@@ -340,13 +338,14 @@ pub(crate) async fn create(shared: Shared, task: NewTask, assign: Option<TaskGra
                         event_ids,
                     })
                 })?;
-                Ok::<_, Granting>((response, queued))
+                // Committed: handed over here, as `assign` hands its mail over.
+                if let Some(run) = &run {
+                    run.hand(queued);
+                }
+                Ok::<_, Granting>(response)
             })
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
-        if let Some(agents) = agents {
-            agents.hand(queued);
-        }
         Ok::<_, Granting>(response)
     };
     match made.await {
