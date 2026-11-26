@@ -1249,7 +1249,34 @@ function rustOnMain(names: string[], extra: Record<string, string> = {}): void {
 }
 
 const repairedLibrary = (field: string, suffix: string) =>
-  `fn fixture(){ let _ = S { ${field}, // broken\n }; }\n${suffix}\n`;
+  `fn fixture(){ consume(S { ${field}, // broken\n }); }\n${suffix}\n`;
+
+function runRepair({
+  old = "",
+  next = "",
+  files = {},
+  edits = {},
+  executable = false,
+}: {
+  old?: string;
+  next?: string;
+  files?: Record<string, string>;
+  edits?: Record<string, string>;
+  executable?: boolean;
+} = {}) {
+  rustOnMain(["tests::kept"], {
+    ...files,
+    [LIB]: repairedLibrary("harnesses", old),
+    "rust-toolchain.toml": readFileSync(new URL("../rust-toolchain.toml", import.meta.url), "utf8"),
+  });
+  git(fx.linked, "checkout", fx.base, "--", SOURCE, TEST);
+  write(fx.linked, LIB, repairedLibrary("harnesses: Arc::new(harnesses)", next));
+  for (const [path, contents] of Object.entries(edits)) write(fx.linked, path, contents);
+  git(fx.linked, "add", LIB, ...Object.keys(edits));
+  if (executable) git(fx.linked, "update-index", "--chmod=+x", LIB);
+  git(fx.linked, "commit", "--quiet", "-m", "repair fixture");
+  return againstBase();
+}
 
 describe("falsify on a branch of a tree that already has Rust", () => {
   it("lists nothing for a branch that changes no Rust", () => {
@@ -1276,43 +1303,133 @@ describe("falsify on a branch of a tree that already has Rust", () => {
   });
 
   const refused = "changes more than a simple field initializer";
-  const brokenBaseCases: [string, string, string, Record<string, string>, number, string][] = [
-    ["field repair", "", "", {}, 0, "only Rust field initializers changed"],
-    ["test declaration", "", "#[test] fn added() {}", {}, 1, refused],
-    ["cfg argument", "#[cfg(\nany()\n)] fn f() {}", "#[cfg(\nall()\n)] fn f() {}", {}, 1, refused],
-    ["macro input", "make!(S { x });", "make!(S { x: wrap(x) });", {}, 1, refused],
-    ["annotated function", "#[make] fn f(){S{x}}", "#[make] fn f(){S{x: wrap(x)}}", {}, 1, refused],
-    ["build script", "", "", { "crates/x/build.rs": "fn main() {}" }, 1, "can generate tests"],
-    [
-      "custom harness",
-      "",
-      "",
-      { "crates/x/Cargo.toml": "[[test]]\nharness = false\n" },
-      1,
-      "custom harness",
-    ],
-    ["broken HEAD", "", "", { "nextest-fails": "" }, 1, "nextest list` failed at HEAD"],
-  ];
-  it.each(brokenBaseCases)(
-    "checks the whole broken-base change: %s",
-    (_name, old, next, files, status, diagnostic) => {
-      rustOnMain(["tests::kept"], {
-        ...files,
-        [LIB]: repairedLibrary("harnesses", old),
-        "rust-toolchain.toml": readFileSync(
-          new URL("../rust-toolchain.toml", import.meta.url),
-          "utf8",
-        ),
-      });
-      git(fx.linked, "checkout", fx.base, "--", SOURCE, TEST);
-      write(fx.linked, LIB, repairedLibrary("harnesses: Arc::new(harnesses)", next));
-      git(fx.linked, "add", LIB);
-      git(fx.linked, "commit", "--quiet", "-m", "repair fixture");
-      const result = againstBase();
-      expect(result.output).toContain(diagnostic);
-      expect(result.status).toBe(status);
-    },
-  );
+  it("broken base accepts a field wrapper inside a call", () => {
+    expect(runRepair()).toEqual({
+      status: 0,
+      output: expect.stringContaining("only Rust field initializers changed"),
+    });
+  });
+  it("broken base refuses an added test declaration", () => {
+    expect(runRepair({ next: "#[test] fn added() {}" })).toEqual({
+      status: 1,
+      output: expect.stringContaining(refused),
+    });
+  });
+  it("broken base refuses a multiline cfg edit", () => {
+    expect(
+      runRepair({
+        old: "#[cfg(\nany()\n)] fn f() {}",
+        next: "#[cfg(\nall()\n)] fn f() {}",
+      }),
+    ).toEqual({ status: 1, output: expect.stringContaining(refused) });
+  });
+  it("broken base refuses an edit inside macro input", () => {
+    expect(runRepair({ old: "make!(S{x});", next: "make!(S{x: wrap(x)});" })).toEqual({
+      status: 1,
+      output: expect.stringContaining(refused),
+    });
+  });
+  it("broken base refuses an annotated function", () => {
+    expect(
+      runRepair({ old: "#[make] fn f(){S{x}}", next: "#[make] fn f(){S{x: wrap(x)}}" }),
+    ).toEqual({ status: 1, output: expect.stringContaining(refused) });
+  });
+  it("broken base refuses an inline module", () => {
+    expect(
+      runRepair({ old: "mod m {fn f(){S{x}}}", next: "mod m {fn f(){S{x: wrap(x)}}}" }),
+    ).toEqual({ status: 1, output: expect.stringContaining(refused) });
+  });
+  it("broken base refuses an impl method", () => {
+    expect(
+      runRepair({ old: "impl T {fn f(){S{x}}}", next: "impl T {fn f(){S{x: wrap(x)}}}" }),
+    ).toEqual({ status: 1, output: expect.stringContaining(refused) });
+  });
+  it("broken base refuses an annotated statement", () => {
+    expect(
+      runRepair({
+        old: "fn f(){#[a] let _ = S{x};}",
+        next: "fn f(){#[a] let _ = S{x: wrap(x)};}",
+      }),
+    ).toEqual({ status: 1, output: expect.stringContaining(refused) });
+  });
+  it("broken base refuses a closure body", () => {
+    expect(
+      runRepair({
+        old: "fn f(){let _ = || S{x};}",
+        next: "fn f(){let _ = || S{x: wrap(x)};}",
+      }),
+    ).toEqual({ status: 1, output: expect.stringContaining(refused) });
+  });
+  it("broken base refuses a wrapper around a different binding", () => {
+    expect(runRepair({ old: "fn f(){S{x}}", next: "fn f(){S{x: wrap(y)}}" })).toEqual({
+      status: 1,
+      output: expect.stringContaining(refused),
+    });
+  });
+  it("broken base refuses an added Rust file", () => {
+    expect(runRepair({ edits: { "crates/x/src/z.rs": "fn f() {}" } })).toEqual({
+      status: 1,
+      output: expect.stringContaining("outside a Rust field repair"),
+    });
+  });
+  it("broken base checks the second changed source", () => {
+    expect(
+      runRepair({
+        files: { "crates/x/src/z.rs": "" },
+        edits: { "crates/x/src/z.rs": "fn f() {}" },
+      }),
+    ).toEqual({ status: 1, output: expect.stringContaining("crates/x/src/z.rs:1 (FN_KW)") });
+  });
+  it("broken base refuses a workspace build script", () => {
+    expect(runRepair({ files: { "crates/x/build.rs": "fn main() {}" } })).toEqual({
+      status: 1,
+      output: expect.stringContaining("can generate tests"),
+    });
+  });
+  it("broken base refuses custom harnesses", () => {
+    expect(
+      runRepair({
+        files: { "crates/x/Cargo.toml": "[[test]]\nharness = false" },
+      }),
+    ).toEqual({ status: 1, output: expect.stringContaining("custom harness") });
+  });
+  it("broken base refuses procedural macro crates", () => {
+    expect(runRepair({ files: { "crates/x/Cargo.toml": "[lib]\nproc-macro = true" } })).toEqual({
+      status: 1,
+      output: expect.stringContaining("custom harness"),
+    });
+  });
+  it("broken base refuses explicit build scripts", () => {
+    expect(
+      runRepair({
+        files: { "crates/x/Cargo.toml": '[package]\nbuild = "generate.rs"' },
+      }),
+    ).toEqual({ status: 1, output: expect.stringContaining("custom harness") });
+  });
+  it("broken base requires HEAD to list", () => {
+    expect(runRepair({ files: { "nextest-fails": "" } })).toEqual({
+      status: 1,
+      output: expect.stringContaining("nextest list` failed at HEAD"),
+    });
+  });
+  it("broken base refuses a changed file mode", () => {
+    expect(runRepair({ executable: true })).toEqual({
+      status: 1,
+      output: expect.stringContaining("expected a regular source file"),
+    });
+  });
+  it("broken base refuses a syntax error", () => {
+    expect(runRepair({ next: "}" })).toEqual({
+      status: 1,
+      output: expect.stringContaining("ERROR node"),
+    });
+  });
+  it("broken base refuses lossy text", () => {
+    expect(runRepair({ next: "// \ufffd" })).toEqual({
+      status: 1,
+      output: expect.stringContaining("incomplete Rust syntax tree"),
+    });
+  });
 
   it("fails, and leaves nothing behind, when the base's tests can't be listed", () => {
     rustOnMain(["tests::kept"], { "nextest-fails": "" });
