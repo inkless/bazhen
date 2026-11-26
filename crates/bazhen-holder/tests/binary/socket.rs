@@ -1149,8 +1149,8 @@ const MAX_READ_PER_TURN: u64 = 256 << 10;
 /// A flooding holder answers a `hello` within about two chunks of its output, however long its
 /// engine takes over them: of hellos asked back to back, the closest pair is less than one turn's
 /// byte budget apart. The client's own delays only widen a gap, so the closest pair measures the
-/// holder. The hellos are asked once the flood has begun, and each has to find it moved on from
-/// the one before, or a holder whose flood had stopped would pass.
+/// holder. Output must advance before and after the measured hellos: a stopped flood could
+/// otherwise pass, but a child can temporarily leave the pty empty between two hellos.
 ///
 /// It tells the fix from the base only with a debug engine, which the test binary runs: slow
 /// enough that every turn of the base reads its whole byte budget, while a turn bounded by time
@@ -1167,15 +1167,17 @@ fn a_flooding_holder_answers_a_hello_within_a_turn_of_its_output() {
     // trickle the holder keeps up with, so two hellos could find the same offset.
     let script = "yes | head -c 268435456 | cat";
     let (mut holder, socket) = serving_with(&home, &["sh", "-c", script], &FLOOD).unwrap();
-    let offset =
-        |socket: &Path| -> Result<u64> { Ok(Client::connect(socket)?.hello(false)?.offset.get()) };
-    // A hello answered before the child has written anything finds the flood not yet begun.
-    let flowing = Instant::now() + DEADLINE;
-    let started = std::iter::repeat_with(|| offset(&socket))
-        .find(|offset| !matches!(offset, Ok(0)) || Instant::now() >= flowing)
-        .and_then(Result::ok);
+    let offset = || -> Result<u64> { Ok(Client::connect(&socket)?.hello(false)?.offset.get()) };
+    let advances_past = |previous| {
+        let deadline = Instant::now() + DEADLINE;
+        std::iter::repeat_with(offset)
+            .find(|next| !matches!(next, Ok(n) if *n <= previous) || Instant::now() >= deadline)
+            .and_then(Result::ok)
+            .is_some_and(|next| next > previous)
+    };
+    let begun = advances_past(0);
     let offsets = (0..5)
-        .map(|_| offset(&socket))
+        .map(|_| offset())
         .collect::<Result<Vec<_>>>()
         .unwrap_or_else(|error| panic!("{error}; {}", why(&mut holder, &socket)));
     let gaps: Vec<u64> = offsets
@@ -1185,12 +1187,12 @@ fn a_flooding_holder_answers_a_hello_within_a_turn_of_its_output() {
     let closest = gaps.iter().min().copied().unwrap_or(u64::MAX);
     assert_eq!(
         (
-            started.is_some_and(|offset| offset > 0),
-            gaps.iter().all(|&gap| gap > 0),
+            begun,
+            advances_past(*offsets.last().unwrap()),
             closest < MAX_READ_PER_TURN
         ),
         (true, true, true),
-        "the flood begun, moving on between hellos, and the closest pair under a turn's budget: \
+        "the flood begun, still advancing after the hellos, and the closest pair under a turn's budget: \
          {gaps:?}"
     );
 }
