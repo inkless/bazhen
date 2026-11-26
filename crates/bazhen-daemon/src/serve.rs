@@ -486,9 +486,8 @@ fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, &State)>) {
     }
 }
 
-/// `shared`, serving the shells and agents on `runner`'s terminals, their views' streams, and a
-/// channel to each harness's server that has one, all on `tracker` until `stop`; and what is
-/// watched of them.
+/// `shared`, serving the shells and agents on `runner`'s terminals and their views' streams, all on
+/// `tracker` until `stop`; what is watched of them; and what runs their harnesses' commands.
 async fn run_on(
     startup: &Startup,
     store: &Writer,
@@ -496,7 +495,7 @@ async fn run_on(
     tracker: &TaskTracker,
     stop: &CancellationToken,
     shared: Shared,
-) -> Result<(Shared, Watched), Refused> {
+) -> Result<(Shared, Watched, Arc<Commands>), Refused> {
     let streaming = runner.streams.clone();
     let Running {
         watched,
@@ -508,9 +507,8 @@ async fn run_on(
         .with_shells(Arc::clone(&watched.shells), doctor)
         .with_agents(Arc::clone(&watched.agents))
         .with_web(bundle);
-    crate::channels::start(&shared, &commands, tracker, stop);
     shared.streams = crate::stream::on_holders(store, streaming, &watched.shells, tracker, stop);
-    Ok((shared, watched))
+    Ok((shared, watched, commands))
 }
 
 /// Serves the socket and loopback HTTP until a stop, then drains them, and says why it stopped.
@@ -534,14 +532,14 @@ async fn listen(
     .with_roles(Path::new(&startup.paths.config).join("roles"));
     // Made before the shells, whose commands run on it, so the drain waits for them as well.
     let tracker = TaskTracker::new();
-    let mut watching = None;
+    let (mut watching, mut commands) = (None, None);
     if let Some(runner) = runner {
-        let (served, watched) =
+        let (served, watched, runs) =
             run_on(startup, &store, runner, &tracker, stop.token(), shared).await?;
         shared = served;
-        watching = Some(watched);
+        (watching, commands) = (Some(watched), Some(runs));
     }
-    let_go(&shared, &tracker, startup).await;
+    let_go(&shared, &tracker, startup, commands.as_ref()).await;
     let gate = Gate {
         allow: guard::allowlists(
             startup.port,
@@ -617,8 +615,15 @@ async fn listen(
 }
 
 /// Lets go of what the daemon before this one held, which went with its sockets, then times each
-/// start that waits on its harness, those it left waiting on from their own starts.
-async fn let_go(shared: &Shared, tracker: &TaskTracker, startup: &Startup) {
+/// start that waits on its harness, those it left waiting on from their own starts. Only then,
+/// with `commands` where agents are served, does it hear each harness's server, so nothing it
+/// asks again is closed as abandoned, nor a message it says was taken queued again.
+async fn let_go(
+    shared: &Shared,
+    tracker: &TaskTracker,
+    startup: &Startup,
+    commands: Option<&Arc<Commands>>,
+) {
     let store = &shared.store;
     crate::hooks::mailbox::requeue_in_flight(store).await;
     crate::attention::close_abandoned(store).await;
@@ -628,6 +633,9 @@ async fn let_go(shared: &Shared, tracker: &TaskTracker, startup: &Startup) {
         Duration::from_millis(startup.settings.config.start_deadline_ms),
         shared.stop.token().clone(),
     ));
+    if let Some(commands) = commands {
+        crate::channels::start(shared, commands, tracker, shared.stop.token());
+    }
 }
 
 /// Closes the terminals' streams, a parked one without waiting out its linger, then the runtime's

@@ -42,8 +42,7 @@ impl RunPort for Commands {
             command.args(rest).env_clear().envs(&self.env);
             let ran = run_kept(command, timeout).await.map_err(|err| {
                 refused(format!(
-                    "{program} ran past its {}s, and its group couldn't be ended: {err}",
-                    timeout.as_secs()
+                    "{program} ran past its {timeout:?}, and its group couldn't be ended: {err}"
                 ))
             })?;
             let (stdout, stderr) = ran.text();
@@ -53,10 +52,7 @@ impl RunPort for Commands {
                     stdout,
                     stderr,
                 }),
-                Ended::TimedOut => Err(refused(format!(
-                    "{program} didn't end within {}s",
-                    timeout.as_secs()
-                ))),
+                Ended::TimedOut => Err(refused(format!("{program} didn't end within {timeout:?}"))),
                 Ended::Unstarted(err) => Err(refused(format!("{program} couldn't start: {err}"))),
                 Ended::Unwaited(err) => {
                     Err(refused(format!("{program} couldn't be waited for: {err}")))
@@ -125,6 +121,9 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let run = commands(&[("PATH", "/usr/bin:/bin")]);
         let ran = runtime().block_on(run.run(&argv(&["sleep", "30"]), Duration::from_millis(200)));
-        assert_eq!(ran, Err(refused("sleep didn't end within 0s".to_owned())));
+        assert_eq!(
+            ran,
+            Err(refused("sleep didn't end within 200ms".to_owned()))
+        );
     }
 }

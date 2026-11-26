@@ -138,14 +138,19 @@ fn fixture() -> Fixture {
 
 impl Fixture {
     fn set_running(&self) {
-        let agent = self.agent.clone();
+        self.set("state = 'running'");
+    }
+
+    /// Sets the agent's row as `assignment` says, as an older daemon may have left it.
+    fn set(&self, assignment: &str) {
+        let (agent, sql) = (
+            self.agent.clone(),
+            format!("UPDATE agent_sessions SET {assignment} WHERE id = ?"),
+        );
         runtime()
             .block_on(self.shared.store.run(move |store| {
                 store.write(|w| {
-                    w.connection().execute(
-                        "UPDATE agent_sessions SET state = 'running' WHERE id = ?",
-                        [agent.as_str()],
-                    )?;
+                    w.connection().execute(&sql, [agent.as_str()])?;
                     Ok::<_, AppendError>(())
                 })
             }))
@@ -397,4 +402,13 @@ fn picks_up_each_served_agent_on_its_session_with_what_its_launch_set() {
         read_bound(&f.shared.store, HarnessId::ClaudeCode).unwrap(),
         []
     );
+}
+
+#[test]
+fn picks_up_an_agent_stored_with_an_empty_name_as_one_with_none() {
+    let f = fixture();
+    f.set("name = ''");
+    let bound = read_bound(&f.shared.store, HarnessId::Codex).unwrap();
+    let names: Vec<_> = bound.into_iter().map(|b| b.launch.name).collect();
+    assert_eq!(names, [None]);
 }
