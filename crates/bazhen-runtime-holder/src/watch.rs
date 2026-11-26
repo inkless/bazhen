@@ -72,7 +72,7 @@ pub enum RuntimeEvent {
 }
 
 /// Whether the holder a watch records still runs, as the host shows it: the runtime's
-/// `Host::runs`, asked while that holder won't answer.
+/// `Host::may_run`, asked while that holder won't answer.
 #[derive(Clone)]
 pub(crate) struct Running(Arc<dyn Fn(HolderProcess) -> bool + Send + Sync>);
 
@@ -519,6 +519,8 @@ mod tests {
 
     use super::*;
     use crate::fake_holder::FakeHolder;
+    use crate::fake_host::FakeHost;
+    use crate::host::Host as _;
     use crate::locator::HolderLocator;
     use crate::test_support::{TempDir, block_on};
 
@@ -772,13 +774,27 @@ mod tests {
     fn resumes_on_its_holder_after_a_refused_or_timed_out_hello_while_it_runs() {
         let dir = TempDir::new();
         let socket = dir.path().join("t.sock");
-        let seen: Vec<_> = [false, true]
+        let cases = [
+            (false, Some(true)),
+            (true, Some(true)),
+            (false, None),
+            (true, None),
+        ];
+        let seen: Vec<_> = cases
             .into_iter()
-            .map(|times_out| {
+            .map(|(times_out, running)| {
                 block_on(async {
                     let hello = Duration::from_millis(300);
+                    let host = FakeHost {
+                        running,
+                        ..FakeHost::default()
+                    };
+                    let watches = Arc::new(Watches::new(
+                        hello,
+                        Running::new(move |holder| host.may_run(holder)),
+                    ));
                     let (watches, mut told, holder, _) =
-                        watching_with(watches(hello, &running()), &socket, |_| {}).await;
+                        watching_with(watches, &socket, |_| {}).await;
                     assert_eq!(next(&mut told).await, Some(titled()));
                     let listener = listen_again(&socket);
                     drop(holder);
@@ -805,7 +821,7 @@ mod tests {
                 })
             })
             .collect();
-        assert_eq!(seen, [Some(told_exit(0)), Some(told_exit(0))]);
+        assert_eq!(seen, vec![Some(told_exit(0)); 4]);
     }
 
     #[test]

@@ -8,13 +8,13 @@ use std::time::{Duration, Instant};
 
 use bazhen_holder::ring::RING_BYTES;
 use bazhen_holder_proto::body::{Count, ExitStatus, Generation, HistoryLines, Signal, Size};
+use bazhen_host_guard::holder::is_vouchable;
 use bazhen_host_guard::scope::{Containment, TerminalCaps, in_terminal_scope, probe_containment};
 use bazhen_protocol::ids::TerminalId;
 use tokio::sync::broadcast;
 
 use crate::client::{ClientOptions, EVENTS_QUEUED, HolderClient, connect};
 use crate::fake_holder::fake_hello;
-use crate::host::{Host as _, System};
 use crate::locator::{HolderLocator, HolderRef, os_pid};
 use crate::runtime::{
     ForegroundProcess, HELLO, HolderRuntime, Needs, ProcessLaunch, REQUEST, RuntimeError,
@@ -109,7 +109,7 @@ fn end(terminal: &HolderRef) -> Result<(), String> {
     };
     let pid = i64::from(holder.pid.as_raw_pid());
     match bazhen_test_signal::signal_if(pid, bazhen_test_signal::Signal::KILL, || {
-        System.runs(holder)
+        is_vouchable(holder)
     }) {
         Ok(_) | Err(bazhen_test_signal::Refused::Failed(_, rustix::io::Errno::SRCH)) => Ok(()),
         Err(refused) => Err(format!("holder {pid}: {refused}")),
@@ -211,7 +211,7 @@ fn kill_holder(terminal: &HolderRef) {
     let sent = bazhen_test_signal::signal_if(
         holder.pid.as_raw_pid(),
         bazhen_test_signal::Signal::KILL,
-        || System.runs(holder),
+        || is_vouchable(holder),
     );
     assert_eq!(sent, Ok(true));
 }
@@ -225,7 +225,7 @@ fn creates_a_terminal_its_inventory_finds_and_closes_it_by_protocol() {
     let holders = Holders::default();
     block_on(async {
         let made = holders.keep(runtime.create(spec(&id(1), "/")).await.unwrap());
-        assert!(System.runs(made.holder().unwrap()));
+        assert!(is_vouchable(made.holder().unwrap()));
         let encoded = made.locator.encode().unwrap();
         assert_eq!(HolderLocator::decode(&encoded).unwrap(), made.locator);
         let found = runtime.inventory().await.unwrap();

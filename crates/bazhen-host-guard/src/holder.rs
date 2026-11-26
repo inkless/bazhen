@@ -218,6 +218,16 @@ fn vouchable_by(holder: HolderProcess, read: impl FnOnce(Pid) -> Reading) -> boo
     reading_of(holder, read).is_some_and(|reading| is_holder(&reading, holder))
 }
 
+/// Whether this pid still belongs to the recorded holder. An unreadable process may still be
+/// the holder; init, an empty pid or one now held by another process cannot be.
+pub fn holder_running(holder: HolderProcess) -> Option<bool> {
+    running_by(holder, read_process)
+}
+
+fn running_by(holder: HolderProcess, read: impl FnOnce(Pid) -> Reading) -> Option<bool> {
+    reading_of(holder, read).map_or(Some(false), |reading| shown(holder, &reading).ok())
+}
+
 /// A proof `kill_holder` or `rebind_holder` takes, as `made_for` says, if the kernel shows
 /// `holder.pid` as a `bazhen-holder` that started within `START_SKEW_S` of `holder.start`;
 /// `None` for init or below, a pid with no process, an unreadable one, or one that is something
@@ -1447,6 +1457,15 @@ mod tests {
     fn vouches_for_a_bazhen_holder_that_started_when_the_ledger_says() {
         let proof = vouched(holder(), HolderUse::Kill, &holder_at(START + 2)).unwrap();
         assert_eq!(proof.holder(), holder());
+    }
+
+    #[test]
+    fn distinguishes_an_unreadable_holder_from_one_that_is_gone() {
+        let readings = [holder_at(START), Reading::Absent, unreadable(), stranger()];
+        assert_eq!(
+            readings.map(|reading| super::running_by(holder(), |_| reading)),
+            [Some(true), Some(false), None, Some(false)]
+        );
     }
 
     #[test]

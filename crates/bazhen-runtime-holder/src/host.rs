@@ -9,7 +9,7 @@ use std::pin::Pin;
 
 use bazhen_holder::{process, start_time};
 use bazhen_host_guard::holder::{
-    HolderProcess, Recorded, StartError, StartHolderOptions, StartedHolder, is_vouchable,
+    HolderProcess, Recorded, StartError, StartHolderOptions, StartedHolder, holder_running,
     rebind_holder_socket, start_holder,
 };
 use bazhen_host_guard::scope::{
@@ -39,9 +39,12 @@ pub(crate) trait Host: Send + Sync + fmt::Debug {
     fn probe(&self, caps: TerminalCaps) -> Boxed<Result<Containment, CapsRefused>>;
     /// SIGUSR1 to a holder whose socket is gone, through host-guard's check of it.
     fn rebind(&self, holder: HolderProcess) -> Boxed<Result<bool, bazhen_host_guard::Error>>;
-    /// host-guard's `is_vouchable`: whether `vouch` would vouch for `holder` now, making no proof.
-    /// This and the reads below are a few `/proc` or `libproc` reads, made inline.
-    fn runs(&self, holder: HolderProcess) -> bool;
+    /// Whether the pid still belongs to the holder. A failed read leaves it unknown.
+    fn running(&self, holder: HolderProcess) -> Option<bool>;
+    /// Keep an unreadable holder until the host can show that it is gone.
+    fn may_run(&self, holder: HolderProcess) -> bool {
+        self.running(holder).unwrap_or(true)
+    }
     fn leader(&self, pid: Pid) -> Option<Leader>;
     fn in_scope(&self, pid: Pid) -> Option<bool>;
     /// When `pid` started, and its arguments.
@@ -76,8 +79,8 @@ impl Host for System {
         Box::pin(rebind_holder_socket(holder))
     }
 
-    fn runs(&self, holder: HolderProcess) -> bool {
-        is_vouchable(holder)
+    fn running(&self, holder: HolderProcess) -> Option<bool> {
+        holder_running(holder)
     }
 
     fn leader(&self, pid: Pid) -> Option<Leader> {
