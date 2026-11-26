@@ -327,20 +327,45 @@ fn hands_over_the_mail_of_an_assignment_whose_caller_left_before_it_committed() 
         ),
     );
     let (unassign_queued, unassign_handed) = (bodies(&f).len() - before, f.hand_over().len());
+    let created_task: String = sql(&f, |db| {
+        db.query_row(
+            "SELECT task_id FROM assignments ORDER BY created_event_id DESC LIMIT 1",
+            (),
+            |row| row.get(0),
+        )
+    });
+    let body = json!({ "idempotencyKey": "d", "outcome": "done" });
+    let before = bodies(&f).len();
+    let finished = left_before_it_committed(
+        &f,
+        finish(
+            State(f.shared.clone()),
+            Some(Extension(Caller(None))),
+            Path(created_task),
+            Bytes::from(body.to_string()),
+        ),
+    );
+    let (finish_queued, finish_handed) = (bodies(&f).len() - before, f.hand_over().len());
+    let states: Vec<String> = assignments(&f)
+        .into_iter()
+        .map(|(_, state, _)| state)
+        .collect();
     assert_eq!(
         (
             (assigned, assign_queued > 0, assign_handed),
             (created, create_queued > 0, create_handed),
             (unassigned, unassign_queued > 0, unassign_handed),
+            (finished, finish_queued > 0, finish_handed),
             granted(&f),
-            assignments(&f)[0].1.clone()
+            states
         ),
         (
             (false, true, assign_queued),
             (false, true, create_queued),
             (false, true, unassign_queued),
+            (false, true, finish_queued),
             2,
-            "ended".to_owned()
+            vec!["ended".to_owned(), "ended".to_owned()]
         )
     );
 }

@@ -511,12 +511,11 @@ pub(crate) async fn finish(
     let finished = async {
         let req =
             edge::<FinishTaskRequest>(&body).map_err(|refused| Sending::Invalid(refused.0))?;
-        let agents = shared.agents.clone().ok_or(Sending::Unavailable)?;
+        let run = shared.agents.clone().ok_or(Sending::Unavailable)?;
         let task = TaskId::parse(&id).ok_or_else(|| Granting::NoTask(id.clone()))?;
         let caller = caller_of(caller);
         let roles = shared.roles.current();
-        let run = std::sync::Arc::clone(&agents);
-        let (response, queued) = shared
+        let response = shared
             .store
             .run(move |store| {
                 let cascade = req.cascade == Some(true);
@@ -543,11 +542,12 @@ pub(crate) async fn finish(
                     };
                     finishing.record(w, run.harnesses(), &mut queued)
                 })?;
-                Ok::<_, Granting>((response, queued))
+                // Committed: handed over here, as `assign` hands its mail over.
+                run.hand(queued);
+                Ok::<_, Granting>(response)
             })
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
-        agents.hand(queued);
         Ok::<_, Granting>(response)
     };
     match finished.await {
