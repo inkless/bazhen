@@ -127,14 +127,23 @@ impl Reads<'_> {
     ///
     /// `SQLite`'s.
     pub fn served_on(self, harness: HarnessId, session: &str) -> rusqlite::Result<Option<String>> {
+        let ids = self.served_by(harness, session)?;
+        Ok(<[String; 1]>::try_from(ids).ok().map(|[id]| id))
+    }
+
+    /// Every agent of `harness` its server serves on the session `session` names, by id: none,
+    /// one, or more than one, which [`Self::served_on`] can't tell apart.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn served_by(self, harness: HarnessId, session: &str) -> rusqlite::Result<Vec<String>> {
         let mut rows = self.0.prepare(
             "SELECT id FROM agent_sessions WHERE harness = ? AND state IN ('starting', 'running')
-               AND json_extract(external_ref, '$.id') = ? LIMIT 2",
+               AND json_extract(external_ref, '$.id') = ? ORDER BY id",
         )?;
-        let ids = rows
-            .query_map((harness.as_str(), session), |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(<[String; 1]>::try_from(ids).ok().map(|[id]| id))
+        rows.query_map((harness.as_str(), session), |row| row.get(0))?
+            .collect()
     }
 
     /// The agents that hold the harness session `session` names, by id: each bound to it that
@@ -825,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn serves_a_harness_s_live_agents_on_a_session_and_finds_one_by_it_where_it_is_alone() {
+    fn serves_a_harness_s_live_agents_on_a_session_and_finds_one_by_it_where_it_is_alone_or_all() {
         let dir = TempDir::new("served");
         let store = store(&dir);
         let on = |id, harness, state, session: Option<&'static str>| Agent {
@@ -891,6 +900,17 @@ mod tests {
                 None,
                 None,
                 None
+            ]
+        );
+        assert_eq!(
+            ["t-1", "t-3", "t-5", "t-6", "t-9"]
+                .map(|t| reads.served_by(HarnessId::Codex, t).unwrap()),
+            [
+                vec!["agent_01".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["agent_06".to_owned(), "agent_07".to_owned()],
+                Vec::new()
             ]
         );
     }

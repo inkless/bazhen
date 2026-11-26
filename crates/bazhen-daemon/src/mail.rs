@@ -416,10 +416,6 @@ async fn push(
                 port,
             )
             .await;
-        // A turn carrying it may have taken it before the push returned.
-        if pushable(store, message, agent).await?.is_none() {
-            return Ok(());
-        }
         let change = match pushed {
             Pushed::Accepted { offline } => MailChange::Accepted(MailAccepted { offline }),
             Pushed::NotNow => return Ok(()),
@@ -436,9 +432,19 @@ async fn push(
                 })
             }
         };
-        let message = message.clone();
+        let (message, agent) = (message.clone(), agent.clone());
         store
-            .run(move |store| store.write(|w| w.mail_step(&message, change)))
+            .run(move |store| {
+                store.write(|w| {
+                    // A turn carrying it may have taken it before the push returned, or the agent
+                    // started again: read in the transaction that records it, neither can come
+                    // between the reading and the record.
+                    if pushable_in(w.reads(), &message, &agent)?.is_some() {
+                        w.mail_step(&message, change)?;
+                    }
+                    Ok::<_, AppendError>(())
+                })
+            })
             .await
             .map_err(|err| err.to_string())?
             .map_err(|err| err.to_string())?;
@@ -454,27 +460,33 @@ async fn pushable(
 ) -> Result<Option<Pushable>, String> {
     let (message, agent) = (message.clone(), agent.clone());
     store
-        .run(move |store| {
-            let reads = store.reads();
-            let queued = reads
-                .message(message.as_str())?
-                .filter(|m| m.agent == agent.as_str() && m.state == MailboxState::Queued);
-            let Some(queued) = queued else {
-                return Ok(None);
-            };
-            let binding = reads.agent_binding(agent.as_str())?;
-            Ok(binding.filter(|b| b.state != "starting").map(|b| Pushable {
-                body: queued.body,
-                harness: b.harness,
-                session: b.session.map(|s| SessionRef {
-                    kind: s.kind,
-                    id: s.id,
-                }),
-            }))
-        })
+        .run(move |store| pushable_in(store.reads(), &message, &agent))
         .await
         .map_err(|err| err.to_string())?
         .map_err(|err: rusqlite::Error| err.to_string())
+}
+
+/// The same, as `reads` sees it.
+fn pushable_in(
+    reads: bazhen_store::Reads<'_>,
+    message: &MessageId,
+    agent: &AgentId,
+) -> rusqlite::Result<Option<Pushable>> {
+    let queued = reads
+        .message(message.as_str())?
+        .filter(|m| m.agent == agent.as_str() && m.state == MailboxState::Queued);
+    let Some(queued) = queued else {
+        return Ok(None);
+    };
+    let binding = reads.agent_binding(agent.as_str())?;
+    Ok(binding.filter(|b| b.state != "starting").map(|b| Pushable {
+        body: queued.body,
+        harness: b.harness,
+        session: b.session.map(|s| SessionRef {
+            kind: s.kind,
+            id: s.id,
+        }),
+    }))
 }
 
 /// The protocol's error for a send that queued nothing, with `Tasks.send`'s and
