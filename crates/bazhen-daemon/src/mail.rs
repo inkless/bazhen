@@ -75,6 +75,42 @@ pub(crate) enum Sending {
     Internal(String),
 }
 
+/// What a refusal says, as the answer words it.
+impl std::fmt::Display for Sending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) | Self::NoAgent(message) | Self::Internal(message) => {
+                f.write_str(message)
+            }
+            Self::Unnamed(reference) if AgentId::parse(reference).is_some() => {
+                write!(f, "no agent {reference}")
+            }
+            Self::Unnamed(reference) => write!(f, "no agent {reference} by that name"),
+            Self::Gone { agent, state } => write!(f, "agent {agent} is {state} and takes no mail"),
+            Self::ToSelf => f.write_str("you can't send to yourself"),
+            Self::TooLong(length) => write!(
+                f,
+                "the message to the agent would be {length} characters, over the {MAIL_LIMIT} a \
+                 message may be: shorten what you wrote"
+            ),
+            Self::Once(OnceError::Conflict(key)) => {
+                write!(
+                    f,
+                    "idempotency key {key} was first used for a different request"
+                )
+            }
+            Self::Once(err) => write!(f, "{err}"),
+            Self::Unavailable => f.write_str("this daemon runs no terminals"),
+        }
+    }
+}
+
+impl From<bazhen_store::TaskReadError> for Sending {
+    fn from(err: bazhen_store::TaskReadError) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
 impl From<OnceError> for Sending {
     fn from(err: OnceError) -> Self {
         Self::Once(err)
@@ -165,7 +201,7 @@ pub(crate) async fn send(
     };
     match sent.await {
         Ok(response) => axum::Json(response).into_response(),
-        Err(err) => refusal(err),
+        Err(err) => refusal(&err),
     }
 }
 
@@ -491,51 +527,20 @@ fn pushable_in(
 
 /// The protocol's error for a send that queued nothing, with `Tasks.send`'s and
 /// `Mailbox.send`'s words.
-pub(crate) fn refusal(err: Sending) -> Response {
-    match err {
-        Sending::Invalid(message) => {
-            fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &message)
+pub(crate) fn refusal(err: &Sending) -> Response {
+    let (status, code) = match err {
+        Sending::Invalid(_) | Sending::TooLong(_) => {
+            (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest)
         }
-        Sending::Unnamed(reference) => {
-            let message = if AgentId::parse(&reference).is_some() {
-                format!("no agent {reference}")
-            } else {
-                format!("no agent {reference} by that name")
-            };
-            fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &message)
+        Sending::Unnamed(_) | Sending::NoAgent(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Sending::Gone { .. } | Sending::Once(OnceError::Conflict(_)) => {
+            (StatusCode::CONFLICT, ErrorCode::Conflict)
         }
-        Sending::NoAgent(message) => fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &message),
-        Sending::Gone { agent, state } => fail(
-            StatusCode::CONFLICT,
-            ErrorCode::Conflict,
-            &format!("agent {agent} is {state} and takes no mail"),
-        ),
-        Sending::ToSelf => fail(
-            StatusCode::FORBIDDEN,
-            ErrorCode::Forbidden,
-            "you can't send to yourself",
-        ),
-        Sending::TooLong(length) => fail(
-            StatusCode::BAD_REQUEST,
-            ErrorCode::InvalidRequest,
-            &format!(
-                "the message to the agent would be {length} characters, over the {MAIL_LIMIT} a \
-                 message may be: shorten what you wrote"
-            ),
-        ),
-        Sending::Once(OnceError::Conflict(key)) => fail(
-            StatusCode::CONFLICT,
-            ErrorCode::Conflict,
-            &format!("idempotency key {key} was first used for a different request"),
-        ),
-        Sending::Once(err) => internal(&err),
-        Sending::Unavailable => fail(
-            StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCode::Unavailable,
-            "this daemon runs no terminals",
-        ),
-        Sending::Internal(err) => internal(&err),
-    }
+        Sending::ToSelf => (StatusCode::FORBIDDEN, ErrorCode::Forbidden),
+        Sending::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
+        Sending::Once(_) | Sending::Internal(_) => return internal(err),
+    };
+    fail(status, code, &err.to_string())
 }
 
 #[cfg(test)]

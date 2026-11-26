@@ -48,12 +48,20 @@ pub enum TaskReadError {
 
 /// A subtask whose owner no longer holds it, with the owner it moves up to: its parent's, and
 /// what made that one the parent's owner.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stranded {
     pub task_id: TaskId,
     pub owner_agent_id: Option<AgentId>,
     pub delegated_from: Option<AssignmentId>,
+}
+
+/// A stranded row as stored, its parent's `delegated_from` not yet read as an assignment's id.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StrandedRow {
+    task_id: TaskId,
+    owner_agent_id: Option<AgentId>,
+    delegated_from: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -167,7 +175,7 @@ impl Reads<'_> {
     ///
     /// [`TaskReadError`] when a row doesn't read as the protocol's, or `SQLite` fails.
     pub fn stranded(self) -> Result<Vec<Stranded>, TaskReadError> {
-        rows(
+        let stranded: Vec<StrandedRow> = rows(
             self.0,
             &format!(
                 "SELECT t.id AS taskId, p.owner_agent_id AS ownerAgentId,
@@ -176,7 +184,44 @@ impl Reads<'_> {
                  ORDER BY t.created_event_id"
             ),
             (),
+        )?;
+        // A `delegated_from` that names no assignment moves up as none, as `isId("asgn", ..)`
+        // keeps it, rather than leaving every subtask stranded behind one row.
+        Ok(stranded
+            .into_iter()
+            .map(|row| Stranded {
+                task_id: row.task_id,
+                owner_agent_id: row.owner_agent_id,
+                delegated_from: row.delegated_from.as_deref().and_then(AssignmentId::parse),
+            })
+            .collect())
+    }
+
+    /// Task `task`, as mail names it; `None` for no such task.
+    ///
+    /// # Errors
+    ///
+    /// [`TaskReadError`] when its row doesn't read as the protocol's, or `SQLite` fails.
+    pub fn task(self, task: &TaskId) -> Result<Option<Task>, TaskReadError> {
+        Ok(
+            rows(self.0, &format!("{TASK} WHERE id = ?"), [task.as_str()])?
+                .into_iter()
+                .next(),
         )
+    }
+
+    /// How many tasks are open, which bounds how many levels a subtask can move up.
+    ///
+    /// # Errors
+    ///
+    /// When `SQLite` fails.
+    pub fn open_task_count(self) -> rusqlite::Result<u64> {
+        let count: i64 = self.0.query_row(
+            "SELECT count(*) FROM tasks WHERE state = 'open'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(u64::try_from(count).unwrap_or(0))
     }
 
     /// The agents with standing on a task or any task above it: each one's owner, coordinator

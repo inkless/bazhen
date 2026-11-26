@@ -7,16 +7,19 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bazhen_core::roles::RoleBook;
-use bazhen_core::task::{Refusal, TaskRefused, TasksHeld, check_delegate, check_grant};
+use bazhen_core::task::{
+    Refusal, TaskRefused, TasksHeld, check_delegate, check_grant, check_unassign,
+};
 use bazhen_harness::Harnesses;
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
-use bazhen_protocol::ids::{AgentId, TaskId};
+use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
 use bazhen_protocol::names::Role;
 use bazhen_protocol::roles::RoleDefinition;
+use bazhen_protocol::task_events::AssignmentEndedReason;
 use bazhen_protocol::tasks::{
     AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse, CreateTaskResponse,
-    Grant as TaskGrant,
+    Grant as TaskGrant, TaskCommandResponse, UnassignTaskRequest,
 };
 use bazhen_store::{
     AppendError, Assigning, CreateTaskError, NewGrant, NewNote, NewTask, OnceError, Reads,
@@ -25,9 +28,12 @@ use bazhen_store::{
 use serde::Serialize;
 
 use crate::callers::{Caller, caller_of};
-use crate::mail::{CLOSED_CALLER, GONE, MAIL_LIMIT, Queued, Sending, refusal, send_under};
+use crate::mail::{CLOSED_CALLER, GONE, MAIL_LIMIT, Queued, Sending, queue, refusal, send_under};
 use crate::routes::{Shared, fail, internal};
-use crate::task_mail::{Agent, Handoff, assigned_mail, length, role_mail};
+use crate::task_lift::lift_stranded;
+use crate::task_mail::{
+    Agent, Handoff, assigned_mail, length, line_ended_mail, role_mail, unassigned_mail,
+};
 
 /// What a verb answers when the store did nothing: the status the TypeScript daemon gives each.
 fn refused(err: &TaskVerbError) -> Response {
@@ -196,9 +202,9 @@ fn granting(err: Granting) -> Response {
         Granting::Create(err @ CreateTaskError::ParentClosed(_)) => {
             fail(StatusCode::CONFLICT, ErrorCode::Conflict, &err.to_string())
         }
-        Granting::Create(CreateTaskError::Once(err)) => refusal(Sending::Once(err)),
-        Granting::Create(err) => refusal(Sending::Internal(err.to_string())),
-        Granting::Send(err) => refusal(err),
+        Granting::Create(CreateTaskError::Once(err)) => refusal(&Sending::Once(err)),
+        Granting::Create(err) => refusal(&Sending::Internal(err.to_string())),
+        Granting::Send(err) => refusal(&err),
     }
 }
 
@@ -354,6 +360,161 @@ pub(crate) async fn create(shared: Shared, task: NewTask, assign: Option<TaskGra
     }
 }
 
+/// The unassign as the TypeScript daemon keeps it under its key.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeptUnassign<'a> {
+    caller: Option<&'a str>,
+    task_id: &'a str,
+    assignment_id: &'a str,
+}
+
+/// `POST /v1/tasks/:id/unassign`: takes an assignment away, and with it every one granted under
+/// it. Its agent is told, and so is each agent under it; the subtasks it held move up.
+pub(crate) async fn unassign(
+    State(shared): State<Shared>,
+    caller: Option<Extension<Caller>>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let unassigned = async {
+        let req =
+            edge::<UnassignTaskRequest>(&body).map_err(|refused| Sending::Invalid(refused.0))?;
+        let run = shared.agents.clone().ok_or(Sending::Unavailable)?;
+        let task = TaskId::parse(&id).ok_or_else(|| Granting::NoTask(id.clone()))?;
+        let assignment = AssignmentId::parse(&req.assignment_id)
+            .ok_or_else(|| Sending::Invalid(format!("no assignment {}", req.assignment_id)))?;
+        let caller = caller_of(caller);
+        // Committed: handed over here, as `assign` hands its mail over.
+        let response = shared
+            .store
+            .run(move |store| {
+                let kept = serde_json::to_string(&KeptUnassign {
+                    caller: caller.as_ref().map(AgentId::as_str),
+                    task_id: task.as_str(),
+                    assignment_id: assignment.as_str(),
+                })?;
+                let mut queued = Vec::new();
+                let response = store.once(&req.idempotency_key, &kept, |w| {
+                    let taking = Taking {
+                        caller: caller.as_ref(),
+                        task: &task,
+                        assignment: &assignment,
+                    };
+                    taking.record(w, run.harnesses(), &mut queued)
+                })?;
+                run.hand(queued);
+                Ok::<_, Granting>(response)
+            })
+            .await
+            .map_err(|err| Sending::Internal(err.to_string()))??;
+        Ok::<_, Granting>(response)
+    };
+    match unassigned.await {
+        Ok(response) => axum::Json(response).into_response(),
+        Err(err) => granting(err),
+    }
+}
+
+/// An assignment a verb takes away, from its task.
+struct Taking<'a> {
+    caller: Option<&'a AgentId>,
+    task: &'a TaskId,
+    assignment: &'a AssignmentId,
+}
+
+impl Taking<'_> {
+    /// Ends the assignment, tells its agent and each agent whose assignment ended with it, then
+    /// moves up the subtasks that leaves stranded (`unassign`).
+    fn record(
+        &self,
+        w: &StoreWriter<'_>,
+        harnesses: &Harnesses,
+        queued: &mut Vec<Queued>,
+    ) -> Result<TaskCommandResponse, Granting> {
+        let reads = w.reads();
+        check_caller(reads, self.caller)?;
+        let no_task = || Granting::NoTask(self.task.as_str().to_owned());
+        let view = reads.task_view(self.task)?.ok_or_else(no_task)?;
+        let granters = reads.granters(self.assignment)?;
+        check_unassign(&view, self.caller, self.assignment, &granters)?;
+        let target = view
+            .active
+            .iter()
+            .find(|a| a.id == *self.assignment)
+            .map(|a| a.agent_id.clone());
+        let under = reads.active_under(std::slice::from_ref(self.assignment))?;
+        let ended = w.end_assignment(
+            self.caller,
+            self.assignment,
+            AssignmentEndedReason::Unassigned,
+        )?;
+        let task = reads.task(self.task)?.ok_or_else(no_task)?;
+        let caller_name = name_of(reads, self.caller)?;
+        let from = self.caller.map(|id| Agent {
+            id,
+            name: &caller_name,
+        });
+        let mut to: Vec<Tell> = target
+            .into_iter()
+            .map(|agent| Tell {
+                body: unassigned_mail(&task, from),
+                agent,
+            })
+            .collect();
+        for a in under {
+            let on = reads.task(&a.task_id)?.ok_or_else(no_task)?;
+            to.push(Tell {
+                body: line_ended_mail(&on),
+                agent: a.agent_id,
+            });
+        }
+        let mut event_ids = vec![ended];
+        event_ids.extend(tell(w, harnesses, to, self.caller, queued)?);
+        let lifted = lift_stranded(w, harnesses, queued)?;
+        if lifted.outran {
+            return Err(Sending::Internal(
+                "subtasks were still stranded after lifting every level".to_owned(),
+            )
+            .into());
+        }
+        event_ids.extend(lifted.event_ids);
+        Ok(TaskCommandResponse { event_ids })
+    }
+}
+
+/// Mail a verb sends one agent.
+pub(crate) struct Tell {
+    pub(crate) agent: AgentId,
+    pub(crate) body: String,
+}
+
+/// Mails each agent but the caller its body (`tellEach`), in the verb's write: a retry of the verb
+/// replays its answer and sends nothing again, so the mail needs no key of its own, and a later
+/// write that tells the same agent the same thing tells it again. An agent that can't take mail
+/// now, gone or one whose harness takes none, goes untold: the verb already happened, and the
+/// dashboard shows it.
+pub(crate) fn tell(
+    w: &StoreWriter<'_>,
+    harnesses: &Harnesses,
+    to: Vec<Tell>,
+    caller: Option<&AgentId>,
+    fresh: &mut Vec<Queued>,
+) -> Result<Vec<u64>, Sending> {
+    let mut event_ids = Vec::new();
+    for one in to {
+        if caller == Some(&one.agent) {
+            continue;
+        }
+        match queue(w, harnesses, &one.agent, &one.body, None, fresh) {
+            Ok(sent) => event_ids.extend(sent.event_ids),
+            Err(Sending::NoAgent(_) | Sending::Gone { .. }) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(event_ids)
+}
+
 /// Refuses an agent caller that is gone, or was never there (`checkCaller`).
 fn check_caller(reads: Reads<'_>, caller: Option<&AgentId>) -> Result<(), Granting> {
     let Some(caller) = caller else {
@@ -475,7 +636,7 @@ impl Grant<'_> {
 }
 
 /// Whether the agent can be given a task: one the store knows that isn't gone (`reachable`).
-fn reachable(reads: Reads<'_>, agent: &AgentId) -> rusqlite::Result<bool> {
+pub(crate) fn reachable(reads: Reads<'_>, agent: &AgentId) -> rusqlite::Result<bool> {
     Ok(reads
         .agent_state(agent.as_str())?
         .is_some_and(|state| !GONE.contains(&state.as_str())))

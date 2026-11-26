@@ -157,3 +157,56 @@ fn heads_the_role_prompt_with_the_task_and_the_roles_title() {
         format!("## Your role on task {TASK}: Worker\n\nDo the work.")
     );
 }
+
+fn named() -> Task {
+    serde_json::from_value(json!({
+        "id": TASK,
+        "title": "Fix the build",
+        "state": "open",
+        "ownerAgentId": null,
+        "parentTaskId": PARENT,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn words_the_mail_a_task_taken_away_or_moved_up_sends_as_the_typescript_daemon_does() {
+    let peer = Agent {
+        id: &agent(),
+        name: "reviewer-1",
+    };
+    let task = named();
+    assert_eq!(
+        [
+            unassigned_mail(&task, Some(peer)),
+            unassigned_mail(&task, None),
+            line_ended_mail(&task),
+            owned_mail(&task),
+            fell_to_the_human(&task, &agent()),
+        ],
+        [
+            format!(
+                "You are no longer assigned to task {TASK} (Fix the build); reviewer-1 ({}) took \
+                 it away. Stop working on it.",
+                agent()
+            ),
+            format!(
+                "You are no longer assigned to task {TASK} (Fix the build); the human took it \
+                 away. Stop working on it."
+            ),
+            format!(
+                "Your assignment on task {TASK} (Fix the build) has ended: whoever gave it to you \
+                 no longer holds the work. Stop working on it."
+            ),
+            format!(
+                "Task {TASK} (Fix the build) is now yours: whoever it was delegated by no longer \
+                 holds the work it is part of. Assign it, finish it or cancel it."
+            ),
+            format!(
+                "Task {TASK} (Fix the build) is yours now: {}, who delegated it, no longer holds \
+                 the work it is part of.",
+                agent()
+            ),
+        ]
+    );
+}

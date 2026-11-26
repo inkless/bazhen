@@ -199,3 +199,82 @@ fn says_an_agent_has_held_a_role_it_holds_or_held_on_any_task_and_no_other() {
         [true, true, false, false]
     );
 }
+
+#[test]
+fn ends_an_assignment_and_those_under_it_and_refuses_one_already_ended() {
+    let (_dir, mut store) = holding(&[
+        Row::Task(1, "open", None, None, None, 1),
+        Row::Asgn(1, 1, 1, "lead", None, None, 2),
+        Row::Asgn(2, 1, 2, "worker", Some(1), None, 3),
+    ]);
+    let event = store
+        .write(|w| {
+            w.end_assignment(
+                Some(&agent(3)),
+                &asgn(1),
+                bazhen_protocol::task_events::AssignmentEndedReason::Unassigned,
+            )
+        })
+        .unwrap();
+    let ends: Vec<(String, String)> = store
+        .reads()
+        .0
+        .prepare("SELECT state, end_reason FROM assignments ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let actor: String = store
+        .reads()
+        .0
+        .query_row(
+            "SELECT actor FROM events WHERE id = ?",
+            [i64::try_from(event).unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        (ends, actor),
+        (
+            vec![
+                ("ended".to_owned(), "unassigned".to_owned()),
+                ("ended".to_owned(), "parent_ended".to_owned()),
+            ],
+            agent(3).as_str().to_owned()
+        )
+    );
+    let again = store.write(|w| {
+        w.end_assignment(
+            None,
+            &asgn(1),
+            bazhen_protocol::task_events::AssignmentEndedReason::Unassigned,
+        )
+    });
+    assert!(
+        matches!(again, Err(AppendError::Refused { .. })),
+        "{again:?}"
+    );
+}
+
+#[test]
+fn moves_a_task_to_another_owner_as_the_systems_doing() {
+    let (_dir, mut store) = holding(&tasks());
+    let event = store
+        .write(|w| w.change_owner(&task(1), Some(agent(3)), Some(asgn(1))))
+        .unwrap();
+    let (owner, from, actor): (String, String, String) = store
+        .reads()
+        .0
+        .query_row(
+            "SELECT t.owner_agent_id, t.delegated_from, e.actor FROM tasks t, events e
+             WHERE t.id = ? AND e.id = ?",
+            (task(1).as_str(), i64::try_from(event).unwrap()),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (owner.as_str(), from.as_str(), actor.as_str()),
+        (agent(3).as_str(), asgn(1).as_str(), "system")
+    );
+}

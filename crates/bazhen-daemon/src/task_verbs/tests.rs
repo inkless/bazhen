@@ -296,6 +296,7 @@ fn left_before_it_committed(f: &Fixture, route: impl Future<Output = Response>) 
 fn hands_over_the_mail_of_an_assignment_whose_caller_left_before_it_committed() {
     let f = fixture(pull());
     let task = made(&f, "c", "b");
+    let made_task = task.clone();
     let body = json!({ "idempotencyKey": "a", "agentId": f.to.as_str(), "role": "worker" });
     let before = bodies(&f).len();
     let assigned = left_before_it_committed(
@@ -313,16 +314,33 @@ fn hands_over_the_mail_of_an_assignment_whose_caller_left_before_it_committed() 
     let before = bodies(&f).len();
     let created = left_before_it_committed(&f, create(f.shared.clone(), asked, grant));
     let (create_queued, create_handed) = (bodies(&f).len() - before, f.hand_over().len());
+    let assignment = assignments(&f)[0].0.clone();
+    let body = json!({ "idempotencyKey": "u", "assignmentId": assignment });
+    let before = bodies(&f).len();
+    let unassigned = left_before_it_committed(
+        &f,
+        unassign(
+            State(f.shared.clone()),
+            Some(Extension(Caller(None))),
+            Path(made_task),
+            Bytes::from(body.to_string()),
+        ),
+    );
+    let (unassign_queued, unassign_handed) = (bodies(&f).len() - before, f.hand_over().len());
     assert_eq!(
         (
             (assigned, assign_queued > 0, assign_handed),
             (created, create_queued > 0, create_handed),
-            granted(&f)
+            (unassigned, unassign_queued > 0, unassign_handed),
+            granted(&f),
+            assignments(&f)[0].1.clone()
         ),
         (
             (false, true, assign_queued),
             (false, true, create_queued),
-            2
+            (false, true, unassign_queued),
+            2,
+            "ended".to_owned()
         )
     );
 }
@@ -698,5 +716,440 @@ fn refuses_an_agents_subtask_under_a_task_it_neither_owns_nor_grants_on_making_n
             ),
             1
         )
+    );
+}
+
+/// Asks, as `caller`, that `assignment` be taken off `task`.
+fn unassign_as(
+    f: &Fixture,
+    caller: Option<&AgentId>,
+    task: &str,
+    key: &str,
+    assignment: &str,
+) -> (u16, Value) {
+    let body = json!({ "idempotencyKey": key, "assignmentId": assignment });
+    let response = f.runtime.block_on(unassign(
+        State(f.shared.clone()),
+        Some(Extension(Caller(caller.cloned()))),
+        Path(task.to_owned()),
+        Bytes::from(body.to_string()),
+    ));
+    let status = response.status().as_u16();
+    let bytes = f
+        .runtime
+        .block_on(axum::body::to_bytes(response.into_body(), 1 << 20))
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+/// The id of the assignment an answer granted.
+fn granted_id(answer: &(u16, Value)) -> String {
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    answer.1["assignmentId"].as_str().unwrap().to_owned()
+}
+
+/// Each assignment's id, state and end reason, oldest first.
+fn assignments(f: &Fixture) -> Vec<(String, String, Option<String>)> {
+    sql(f, |db| {
+        db.prepare("SELECT id, state, end_reason FROM assignments ORDER BY created_event_id")?
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect()
+    })
+}
+
+/// How many events there are.
+fn events(f: &Fixture) -> i64 {
+    sql(f, |db| {
+        db.query_row("SELECT count(*) FROM events", (), |row| row.get(0))
+    })
+}
+
+/// Each open item's agent, kind, summary and task.
+fn items(f: &Fixture) -> Vec<(String, String, String, Option<String>)> {
+    sql(f, |db| {
+        db.prepare(
+            "SELECT agent_session_id, kind, summary, task_id FROM attention_items
+             WHERE state = 'open' ORDER BY created_event_id",
+        )?
+        .query_map((), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect()
+    })
+}
+
+/// A task as mail names it.
+fn named(f: &Fixture, task: &str) -> bazhen_protocol::tasks::Task {
+    let task = TaskId::parse(task).unwrap();
+    f.shared
+        .store
+        .reader()
+        .unwrap()
+        .reads()
+        .task(&task)
+        .unwrap()
+        .unwrap()
+}
+
+/// A body asking for a subtask of `parent`.
+fn under(key: &str, parent: &str) -> Value {
+    json!({ "idempotencyKey": key, "title": "Part of it", "brief": "b", "parentTaskId": parent })
+}
+
+#[test]
+fn unassigns_an_agent_ending_what_was_granted_under_it_and_mails_each_agent_it_ends() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let lead = granted_id(&assign_as(&f, None, &task, "a", f.peer.as_str(), "lead"));
+    let worker = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        "w",
+        f.to.as_str(),
+        "worker",
+    ));
+    let before = bodies(&f).len();
+    let answer = unassign_as(&f, None, &task, "u", &lead);
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let ended = |id: &str, why: &str| (id.to_owned(), "ended".to_owned(), Some(why.to_owned()));
+    let named = named(&f, &task);
+    assert_eq!(
+        (
+            assignments(&f),
+            bodies(&f)[before..].to_vec(),
+            answer.1["eventIds"].as_array().unwrap().len()
+        ),
+        (
+            vec![ended(&lead, "unassigned"), ended(&worker, "parent_ended")],
+            vec![
+                crate::task_mail::unassigned_mail(&named, None),
+                line_ended_mail(&named)
+            ],
+            3
+        )
+    );
+}
+
+#[test]
+fn names_the_agent_that_unassigns_and_mails_no_caller_it_takes_off() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    granted_id(&assign_as(&f, None, &task, "a", f.peer.as_str(), "lead"));
+    let worker = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        "w",
+        f.to.as_str(),
+        "worker",
+    ));
+    let (_, own) = create_as(
+        &f,
+        Some(&f.peer),
+        &json!({ "idempotencyKey": "o", "title": "T", "brief": "b" }),
+    );
+    let own = own["taskId"].as_str().unwrap().to_owned();
+    let itself = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &own,
+        "s",
+        f.peer.as_str(),
+        "worker",
+    ));
+    let before = bodies(&f).len();
+    let by_lead = unassign_as(&f, Some(&f.peer), &task, "u1", &worker);
+    let by_itself = unassign_as(&f, Some(&f.peer), &own, "u2", &itself);
+    let name: String = {
+        let peer = f.peer.clone();
+        sql(&f, move |db| {
+            db.query_row(
+                "SELECT name FROM agent_sessions WHERE id = ?",
+                [peer.as_str()],
+                |row| row.get(0),
+            )
+        })
+    };
+    let from = Agent {
+        id: &f.peer,
+        name: &name,
+    };
+    assert_eq!(
+        (by_lead.0, by_itself.0, bodies(&f)[before..].to_vec()),
+        (
+            200,
+            200,
+            vec![crate::task_mail::unassigned_mail(
+                &named(&f, &task),
+                Some(from)
+            )]
+        )
+    );
+}
+
+#[test]
+fn refuses_to_unassign_one_not_active_or_for_an_agent_it_wasnt_granted_under_recording_nothing() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let theirs = granted_id(&assign_as(&f, None, &task, "a1", f.to.as_str(), "worker"));
+    granted_id(&assign_as(&f, None, &task, "a2", f.peer.as_str(), "worker"));
+    assert_eq!(unassign_as(&f, None, &task, "u1", &theirs).0, 200);
+    let before = events(&f);
+    let other = made(&f, "c2", "b");
+    let held = granted_id(&assign_as(&f, None, &other, "a3", f.to.as_str(), "worker"));
+    let before_refusals = events(&f);
+    assert_eq!(
+        [
+            refused(&unassign_as(&f, None, &task, "u2", &theirs)),
+            refused(&unassign_as(&f, Some(&f.peer), &other, "u3", &held)),
+        ],
+        [
+            (409, format!("{theirs} is not active")),
+            (
+                403,
+                "only an agent it was granted under, the owner or the human can unassign it"
+                    .to_owned()
+            ),
+        ]
+    );
+    assert!(before_refusals > before);
+    assert_eq!(events(&f), before_refusals);
+}
+
+#[test]
+fn answers_a_replayed_unassign_as_it_first_did_and_refuses_its_key_for_another() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let one = granted_id(&assign_as(&f, None, &task, "a1", f.to.as_str(), "worker"));
+    let two = granted_id(&assign_as(&f, None, &task, "a2", f.peer.as_str(), "worker"));
+    let first = unassign_as(&f, None, &task, "u", &one);
+    assert_eq!(first.0, 200, "{}", first.1);
+    assert_eq!(
+        [
+            unassign_as(&f, None, &task, "u", &one),
+            (
+                refused(&unassign_as(&f, None, &task, "u", &two)).0,
+                Value::Null
+            ),
+        ],
+        [first.clone(), (409, Value::Null)]
+    );
+}
+
+#[test]
+fn unassigns_an_agent_gone_by_then_leaving_it_untold() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let held = granted_id(&assign_as(&f, None, &task, "a", f.to.as_str(), "worker"));
+    f.set_state(&f.to.clone(), "closed");
+    let before = bodies(&f).len();
+    let answer = unassign_as(&f, None, &task, "u", &held);
+    assert_eq!((answer.0, bodies(&f).len()), (200, before), "{}", answer.1);
+}
+
+#[test]
+fn moves_a_subtask_its_delegation_left_to_the_human_and_escalates_the_agent_it_was_delegated_by() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let lead = granted_id(&assign_as(&f, None, &task, "a", f.peer.as_str(), "lead"));
+    let (_, sub) = create_as(&f, Some(&f.peer), &under("s", &task));
+    let sub = sub["taskId"].as_str().unwrap().to_owned();
+    let answer = unassign_as(&f, None, &task, "u", &lead);
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let named = named(&f, &sub);
+    assert_eq!(
+        (tasks_made(&f)[1].clone(), items(&f)),
+        (
+            (sub.clone(), None, None),
+            vec![(
+                f.peer.as_str().to_owned(),
+                "escalation".to_owned(),
+                crate::task_mail::fell_to_the_human(&named, &f.peer),
+                Some(sub)
+            )]
+        )
+    );
+}
+
+#[test]
+fn lifts_a_chain_of_subtasks_to_the_live_owner_above_with_its_delegation_and_mails_it() {
+    let f = fixture(pull());
+    let top = made(&f, "c", "b");
+    let above = granted_id(&assign_as(&f, None, &top, "a1", f.peer.as_str(), "lead"));
+    let (_, part) = create_as(&f, Some(&f.peer), &under("p", &top));
+    let part = part["taskId"].as_str().unwrap().to_owned();
+    let lead = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &part,
+        "a2",
+        f.to.as_str(),
+        "lead",
+    ));
+    let (_, sub) = create_as(&f, Some(&f.to), &under("s", &part));
+    let sub = sub["taskId"].as_str().unwrap().to_owned();
+    let (_, deeper) = create_as(&f, Some(&f.to), &under("d", &sub));
+    let deeper = deeper["taskId"].as_str().unwrap().to_owned();
+    let before = bodies(&f).len();
+    let answer = unassign_as(&f, Some(&f.peer), &part, "u", &lead);
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let peer = Some(f.peer.as_str().to_owned());
+    let mail = bodies(&f)[before..].to_vec();
+    assert_eq!(
+        (tasks_made(&f)[2..].to_vec(), mail[1..].to_vec()),
+        (
+            vec![
+                (sub.clone(), peer.clone(), Some(above.clone())),
+                (deeper.clone(), peer, Some(above)),
+            ],
+            vec![
+                crate::task_mail::owned_mail(&named(&f, &sub)),
+                crate::task_mail::owned_mail(&named(&f, &deeper)),
+            ]
+        )
+    );
+}
+
+#[test]
+fn mails_an_owner_each_time_a_start_lifts_a_subtask_to_it_however_often_it_was_told_before() {
+    let f = fixture(pull());
+    let top = made(&f, "c", "b");
+    granted_id(&assign_as(&f, None, &top, "a1", f.peer.as_str(), "lead"));
+    let (_, part) = create_as(&f, Some(&f.peer), &under("p", &top));
+    let part = part["taskId"].as_str().unwrap().to_owned();
+    let lead = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &part,
+        "a2",
+        f.to.as_str(),
+        "lead",
+    ));
+    let (_, sub) = create_as(&f, Some(&f.to), &under("s", &part));
+    let sub = sub["taskId"].as_str().unwrap().to_owned();
+    let agents = Arc::clone(f.shared.agents.as_ref().unwrap());
+    let before = bodies(&f).len();
+    // The lead's delegation ended as a daemon that didn't lift in the same write would leave it,
+    // then the subtask left with `to` under it again, as a store a daemon restored would hold it.
+    for _ in 0..2 {
+        let (to, sub, lead) = (f.to.as_str().to_owned(), sub.clone(), lead.clone());
+        sql(&f, move |db| {
+            db.execute(
+                "UPDATE tasks SET owner_agent_id = ?, delegated_from = ? WHERE id = ?",
+                (&to, &lead, &sub),
+            )?;
+            db.execute(
+                "UPDATE assignments SET state = 'ended', end_reason = 'unassigned' WHERE id = ?",
+                [&lead],
+            )
+        });
+        f.runtime
+            .block_on(crate::task_lift::at_start(&f.shared.store, &agents));
+    }
+    let owned = crate::task_mail::owned_mail(&named(&f, &sub));
+    assert_eq!(bodies(&f)[before..].to_vec(), vec![owned.clone(), owned]);
+}
+
+#[test]
+fn lifts_what_a_store_left_stranded_at_start_and_nothing_a_second_time() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let lead = granted_id(&assign_as(&f, None, &task, "a", f.peer.as_str(), "lead"));
+    let (_, sub) = create_as(&f, Some(&f.peer), &under("s", &task));
+    let sub = sub["taskId"].as_str().unwrap().to_owned();
+    // Ended as a daemon that didn't lift in the same write would have left it.
+    sql(&f, move |db| {
+        db.execute(
+            "UPDATE assignments SET state = 'ended', end_reason = 'unassigned' WHERE id = ?",
+            [lead],
+        )
+    });
+    let agents = Arc::clone(f.shared.agents.as_ref().unwrap());
+    let changes = |f: &Fixture| -> i64 {
+        sql(f, |db| {
+            db.query_row(
+                "SELECT count(*) FROM events WHERE type = 'task.owner_changed'",
+                (),
+                |row| row.get(0),
+            )
+        })
+    };
+    f.runtime
+        .block_on(crate::task_lift::at_start(&f.shared.store, &agents));
+    let once = (tasks_made(&f)[1].clone(), changes(&f), items(&f).len());
+    f.runtime
+        .block_on(crate::task_lift::at_start(&f.shared.store, &agents));
+    assert_eq!(
+        (once, changes(&f), items(&f).len()),
+        (((sub, None, None), 1, 1), 1, 1)
+    );
+}
+
+#[test]
+fn refuses_an_agent_on_the_socket_that_cant_unassign_where_the_human_can() {
+    let f = fixture(pull());
+    let task = made(&f, "c", "b");
+    let held = granted_id(&assign_as(&f, None, &task, "a", f.to.as_str(), "worker"));
+    granted_id(&assign_as(&f, None, &task, "a2", f.peer.as_str(), "worker"));
+    let peer = f.peer.clone();
+    sql(&f, move |db| {
+        db.execute(
+            "UPDATE agent_sessions SET token_hash = ? WHERE id = ?",
+            (crate::tokens::hash_of(PEER_TOKEN), peer.as_str()),
+        )
+    });
+    let ask = |key: &str, token: Option<&str>| {
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/v1/tasks/{task}/unassign"))
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("bazhen-agent-token", token);
+        }
+        let body = json!({ "idempotencyKey": key, "assignmentId": held });
+        let request = request.body(Body::from(body.to_string())).unwrap();
+        let router = crate::routes::socket_router(f.shared.clone());
+        let response = f.runtime.block_on(router.oneshot(request)).unwrap();
+        let status = response.status().as_u16();
+        let bytes = f
+            .runtime
+            .block_on(axum::body::to_bytes(response.into_body(), 1 << 20))
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        (status, body["message"].as_str().map(str::to_owned))
+    };
+    assert_eq!(
+        [ask("k1", Some(PEER_TOKEN)), ask("k2", None)],
+        [
+            (
+                403,
+                Some(
+                    "only an agent it was granted under, the owner or the human can unassign it"
+                        .to_owned()
+                )
+            ),
+            (200, None)
+        ]
+    );
+}
+
+#[test]
+fn refuses_to_unassign_on_no_task_or_a_path_that_names_none() {
+    let f = fixture(pull());
+    let asgn = "asgn_01900000000070008000000000000009";
+    let unknown = "task_0190a1b2c3d47abc8def0123456789ff";
+    assert_eq!(
+        [
+            refused(&unassign_as(&f, None, unknown, "u1", asgn)),
+            refused(&unassign_as(&f, None, "nonsense", "u2", asgn)),
+        ],
+        [
+            (404, format!("no task {unknown}")),
+            (404, "no task nonsense".to_owned())
+        ]
     );
 }

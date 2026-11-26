@@ -45,6 +45,7 @@ mod session;
 mod shell_routes;
 mod shells;
 mod stream;
+mod task_lift;
 mod task_mail;
 mod task_verbs;
 pub mod tasks;
