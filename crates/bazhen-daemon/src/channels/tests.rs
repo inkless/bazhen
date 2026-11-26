@@ -26,6 +26,7 @@ use super::*;
 use crate::agents::{AgentError, Agents, AgentsDeps, NO_CHANNEL, prompts};
 use crate::budget::Budget;
 use crate::budget::tests::{Machine, roomy};
+use crate::channel::rpc::RequestId;
 use crate::hooks::Hooks;
 use crate::roles::Roles;
 use crate::routes::Stop;
@@ -350,6 +351,32 @@ impl Fixture {
             .spawn(async move { agents.launch(&request).await })
     }
 
+    /// The agent's session moved to `session`, as a reconcile or a restart records it.
+    async fn moved_to(&self, session: &str) {
+        let (agent, session) = (self.agent.clone(), session.to_owned());
+        let store = &self.shared.store;
+        store
+            .run(move |store| {
+                store.write(|w| {
+                    let external_ref = bazhen_protocol::agents::ExternalRef {
+                        environment_id: w.local_environment()?,
+                        kind: bazhen_protocol::agents::ExternalRefKind::CodexThread,
+                        id: session,
+                    };
+                    w.append(&NewEvent::Agent {
+                        agent,
+                        actor: "system".to_owned(),
+                        change: AgentChange::ExternalRefUpdated(
+                            bazhen_protocol::agent_events::AgentExternalRefUpdated { external_ref },
+                        ),
+                    })
+                })
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     fn open_items(&self) -> usize {
         let reader = self.shared.store.reader().unwrap();
         reader
@@ -464,6 +491,23 @@ async fn started_thread(server: &mut Server, thread: &str) -> Value {
     assert_eq!(injected["method"], "thread/inject_items", "{injected}");
     say(server, json!({ "id": injected["id"], "result": {} })).await;
     start["params"].clone()
+}
+
+/// How long a server hears nothing before it is taken that nothing was sent.
+const QUIET: Duration = Duration::from_millis(200);
+
+/// A connection of the daemon's to a server of the test's, as a channel's would be, and the
+/// server's side of it.
+async fn connection(f: &Fixture) -> (Rpc, crate::channel::rpc::Inbox, Server, TempDir) {
+    let dir = TempDir::short("on");
+    let socket = dir.path().join("server.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let (connected, server) = tokio::join!(
+        crate::channel::rpc::connect(&socket, &f.tracker, f.stop.clone()),
+        accepted(&listener)
+    );
+    let (on, inbox) = connected.unwrap();
+    (on, inbox, server, dir)
 }
 
 /// Waits until the open items offer `offered`, as each is held once its item is opened, failing
@@ -623,6 +667,41 @@ fn answers_an_approval_its_server_asks_on_the_connection_it_came_on() {
     );
 }
 
+/// A request its server asks again holds nothing of the one it held until it is held itself: an
+/// answer in between is refused, never sent for a request the server may no longer wait on.
+#[test]
+fn answers_nothing_between_a_request_asked_again_and_its_hold() {
+    let f = fixture();
+    let (answered, sent) = runtime().block_on(async {
+        let (mut first, _) = f.picked_up().await;
+        say(&mut first, approval(7, "call-1")).await;
+        offering(&f, &[json!(["allow", "deny"])]).await;
+        let (on, _inbox, mut second, _dir) = connection(&f).await;
+        let asked_again = approval(8, "call-1");
+        let message = Inbound::Request {
+            id: RequestId::Number(8.into()),
+            method: asked_again["method"].as_str().unwrap().to_owned(),
+            params: Some(asked_again["params"].clone()),
+        };
+        let (opened, hold) = super::asked(&f.shared, HarnessId::Codex, message, on)
+            .await
+            .unwrap()
+            .unwrap();
+        let between = (
+            actions(&f).await,
+            decide(&f, opened.as_str(), "answer-1", "allow").await,
+        );
+        assert_eq!(between, (vec![json!([])], 409));
+        f.shared
+            .hooks
+            .approvals
+            .hold(&opened, Responder::Server(hold));
+        let answered = decide(&f, opened.as_str(), "answer-2", "allow").await;
+        (answered, frame(&mut second).await)
+    });
+    assert_eq!((answered, sent), (200, decided(8, "accept")));
+}
+
 /// Each request is answered once: by the first key that answers its item, again by that key
 /// without a second answer, and never by another.
 #[test]
@@ -650,7 +729,8 @@ fn answers_each_request_its_server_asks_once() {
     assert_eq!(sent, [decided(7, "accept"), decided(8, "decline")]);
 }
 
-/// A request the TUI answered first is answered by nothing the human sends after.
+/// A request the TUI answered first is answered by nothing the human sends after, its item
+/// settled by the request, though no agent is on its thread now.
 #[test]
 fn answers_nothing_the_tui_answered_first() {
     let f = fixture();
@@ -661,6 +741,7 @@ fn answers_nothing_the_tui_answered_first() {
         let held = json!(["allow", "deny"]);
         offering(&f, &[held.clone(), held]).await;
         let items = f.items();
+        f.moved_to("elsewhere").await;
         let resolved = json!({ "threadId": STUB_SESSION, "requestId": 7 });
         say(
             &mut server,
@@ -819,6 +900,37 @@ fn answers_a_question_its_server_asks_with_the_humans_text() {
     assert_eq!(
         (f.closed(), f.of("mailbox.queued")),
         (vec![json!("replied")], vec![])
+    );
+}
+
+/// A reply its harness can no longer answer is refused and undone: the item stays open, nothing
+/// is sent, and nothing is recorded closed.
+#[test]
+fn keeps_a_question_open_and_sends_nothing_when_its_harness_cant_answer_it() {
+    let f = fixture();
+    let (replied, sent) = runtime().block_on(async {
+        let (mut server, _) = f.picked_up().await;
+        say(&mut server, user_input(11)).await;
+        offering(&f, &[json!(["reply"])]).await;
+        // Told of a thread no agent is on, the harness lets go of what it held there.
+        f.moved_to("elsewhere").await;
+        let (on, _inbox, _other, _dir) = connection(&f).await;
+        let turn = Inbound::Notification {
+            method: "turn/started".to_owned(),
+            params: Some(json!({ "threadId": STUB_SESSION, "turn": { "id": "u-1" } })),
+        };
+        super::asked(&f.shared, HarnessId::Codex, turn, on)
+            .await
+            .unwrap();
+        f.moved_to(STUB_SESSION).await;
+        let replied = reply(&f, &f.items()[0], None, "main").await.0;
+        let sent = tokio::time::timeout(QUIET, heard(&mut server)).await.ok();
+        (replied, sent)
+    });
+    assert_eq!((replied, sent), (409, None));
+    assert_eq!(
+        (f.open_items(), f.closed(), f.of("mailbox.queued")),
+        (1, vec![], vec![])
     );
 }
 

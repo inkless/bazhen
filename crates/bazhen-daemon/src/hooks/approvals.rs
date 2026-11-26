@@ -177,7 +177,8 @@ impl Approvals {
     }
 
     /// The open item `harness`'s server asked under `key`, marked asked again; none when there is
-    /// none, and the request is new.
+    /// none, and the request is new. It holds nothing until the request asked again is held: the
+    /// one it held may be one the server no longer waits on.
     pub(crate) fn asked_again(&self, harness: HarnessId, key: &ToolKey) -> Option<AttentionId> {
         let mut registry = self.registry();
         let (id, entry) = registry
@@ -188,6 +189,7 @@ impl Approvals {
             harness,
             asked_since: true,
         });
+        entry.responder = None;
         Some(id.clone())
     }
 

@@ -10,7 +10,7 @@ use bazhen_harness::{
     Bound, Held, IngestContext, LaunchRequest, Reply, Report, RunPort, SessionRef,
 };
 use bazhen_protocol::agents::HarnessId;
-use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::ids::{AgentId, AttentionId};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -188,8 +188,27 @@ async fn recorded(shared: &Shared, harness: HarnessId, mut version: String) -> R
 /// answered on the connection `on` it came on; the harness's own TUI, which the server asks it of
 /// too, may answer it first.
 async fn inbound(shared: &Shared, id: HarnessId, message: Inbound, on: Rpc) -> Result<(), String> {
+    if let Some((opened, hold)) = asked(shared, id, message, on).await? {
+        // A request asked again replaces the one held, which came on a connection gone, or which
+        // the server no longer waits on.
+        shared
+            .hooks
+            .approvals
+            .hold(&opened, Responder::Server(hold));
+    }
+    Ok(())
+}
+
+/// The same, but for the hold: the item a request the inbox can answer opened or was asked
+/// again of, and the request to hold for it.
+async fn asked(
+    shared: &Shared,
+    id: HarnessId,
+    message: Inbound,
+    on: Rpc,
+) -> Result<Option<(AttentionId, ServerHold)>, String> {
     let Some(harness) = shared.agents.as_ref().and_then(|a| a.harnesses().get(id)) else {
-        return Ok(());
+        return Ok(None);
     };
     let (method, params, request) = match message {
         Inbound::Notification { method, params } => (method, params, None),
@@ -229,19 +248,15 @@ async fn inbound(shared: &Shared, id: HarnessId, message: Inbound, on: Rpc) -> R
         .hooks
         .channel(shared, id, ingested.observed, routed)
         .await?;
-    if let (Some(opened), Some(request), true) = (opened, request, holds) {
-        let hold = ServerHold {
-            on,
-            id: request,
-            method,
-        };
-        // A request asked again replaces the one held, which came on a connection gone.
-        shared
-            .hooks
-            .approvals
-            .hold(&opened, Responder::Server(hold));
-    }
-    Ok(())
+    let (Some(opened), Some(request), true) = (opened, request, holds) else {
+        return Ok(None);
+    };
+    let hold = ServerHold {
+        on,
+        id: request,
+        method,
+    };
+    Ok(Some((opened, hold)))
 }
 
 /// The session `agent` is bound to, as its stored external ref names it.
