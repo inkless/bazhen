@@ -1104,7 +1104,7 @@ mod tests {
             [unreachable, predates, unreadable].map(|err| terminal_error(&err)),
             [
                 TerminalError::Unreachable(
-                    "terminal term_01900000000070008000000000000001: its holder runs but can't be reached"
+                    "terminal term_01900000000070008000000000000001: its holder can't be reached"
                         .to_owned()
                 ),
                 TerminalError::Predates {

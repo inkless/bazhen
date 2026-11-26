@@ -231,8 +231,8 @@ pub enum RuntimeError {
         #[source]
         source: ConnectError,
     },
-    /// The socket can't be read while the recorded holder still runs.
-    #[error("terminal {terminal_id}: its holder runs but can't be reached")]
+    /// The socket can't be read while the recorded holder may still run.
+    #[error("terminal {terminal_id}: its holder can't be reached")]
     Unreachable {
         terminal_id: TerminalId,
         #[source]
@@ -667,7 +667,7 @@ impl HolderRuntime {
         let runs = Arc::clone(&host);
         let watches = Arc::new(Watches::new(
             options.hello,
-            Running::new(move |holder| runs.runs(holder)),
+            Running::new(move |holder| runs.may_run(holder)),
         ));
         Self {
             options,
@@ -737,8 +737,7 @@ impl HolderRuntime {
         }
     }
 
-    /// Whether the holder `terminal` recorded is still the process at its pid.
-    /// Whether the holder a create started for `terminal_id` that never answered still runs.
+    /// Whether the holder a create started for `terminal_id` that never answered may still run.
     /// One seen ended is forgotten.
     fn unanswered_runs(&self, terminal_id: &TerminalId) -> bool {
         let mut unanswered = self
@@ -748,17 +747,18 @@ impl HolderRuntime {
         let Some(holder) = unanswered.get(terminal_id).copied() else {
             return false;
         };
-        if self.host.runs(holder) {
+        if self.host.may_run(holder) {
             return true;
         }
         unanswered.remove(terminal_id);
         false
     }
 
+    /// Whether the recorded holder may still own its pid.
     fn recorded_runs(&self, terminal: &HolderRef) -> bool {
         terminal
             .holder()
-            .is_some_and(|holder| self.host.runs(holder))
+            .is_some_and(|holder| self.host.may_run(holder))
     }
 
     /// A connection to the holder `terminal` was made on, past `hello`; its events are dropped,
@@ -2047,7 +2047,7 @@ mod tests {
 
     #[test]
     fn takes_no_terminal_for_unstarted_while_a_holder_its_create_started_unanswered_runs() {
-        let proved = [true, false].map(|running| {
+        let proved = [Some(true), Some(false), None].map(|running| {
             let host = FakeHost {
                 running,
                 ..FakeHost::default()
@@ -2065,7 +2065,7 @@ mod tests {
                 proved
             })
         });
-        assert_eq!(proved, [false, true]);
+        assert_eq!(proved, [false, true, false]);
     }
 
     #[test]
@@ -2277,7 +2277,7 @@ mod tests {
     {
         let (mut fixture, _) = Fixture::new(
             FakeHost {
-                running: true,
+                running: Some(true),
                 ..FakeHost::default()
             },
             |_| {},
@@ -2425,7 +2425,13 @@ mod tests {
 
     #[test]
     fn calls_a_terminal_gone_only_when_no_holder_answers_and_the_recorded_one_isnt_running() {
-        let gone: Vec<_> = [(false, false), (false, true), (true, false)]
+        let cases = [
+            (false, Some(false)),
+            (false, Some(true)),
+            (false, None),
+            (true, Some(false)),
+        ];
+        let gone: Vec<_> = cases
             .into_iter()
             .map(|(answers, running)| {
                 let (mut fixture, _) = Fixture::new(
@@ -2470,9 +2476,30 @@ mod tests {
             [
                 (true, Err(true)),
                 (false, Err(false)),
+                (false, Err(false)),
                 (false, Ok((2, String::new())))
             ]
         );
+    }
+
+    #[test]
+    fn a_silent_holder_whose_process_cannot_be_read_is_unreachable() {
+        let (mut fixture, _) = Fixture::new(
+            FakeHost {
+                running: None,
+                ..FakeHost::default()
+            },
+            |_| {},
+        );
+        let terminal = reference(&fixture, &id(1));
+        block_on(async {
+            fixture.serve(&id(1), Answering::Silent);
+            let reached = fixture.runtime.title(&terminal).await;
+            assert!(
+                matches!(reached, Err(RuntimeError::Unreachable { .. })),
+                "{reached:?}"
+            );
+        });
     }
 
     #[test]
@@ -2521,7 +2548,7 @@ mod tests {
             .map(|start| {
                 let host = FakeHost {
                     leader: Some(leader(start)),
-                    running: true,
+                    running: Some(true),
                     ..FakeHost::default()
                 };
                 let (mut fixture, _) = Fixture::new(host, |_| {});

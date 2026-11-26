@@ -13,16 +13,30 @@ use crate::host::{Boxed, Host, Leader, Started};
 pub(crate) const PID: i32 = 4242;
 pub(crate) const START: u64 = 1_700_000_000;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct FakeHost {
     pub(crate) started: Mutex<Vec<StartHolderOptions>>,
     pub(crate) probes: AtomicUsize,
     pub(crate) containment: Option<Result<Containment, CapsRefused>>,
-    /// Whether the holder a pid names is taken for running.
-    pub(crate) running: bool,
+    /// Whether the holder still runs, or None for a process the host cannot read.
+    pub(crate) running: Option<bool>,
     pub(crate) rebinds: bool,
     pub(crate) rebound: Mutex<Vec<HolderProcess>>,
     pub(crate) leader: Option<Leader>,
+}
+
+impl Default for FakeHost {
+    fn default() -> Self {
+        Self {
+            started: Mutex::default(),
+            probes: AtomicUsize::default(),
+            containment: None,
+            running: Some(false),
+            rebinds: false,
+            rebound: Mutex::default(),
+            leader: None,
+        }
+    }
 }
 
 impl Host for FakeHost {
@@ -48,7 +62,7 @@ impl Host for FakeHost {
         Box::pin(std::future::ready(Ok(self.rebinds)))
     }
 
-    fn runs(&self, _: HolderProcess) -> bool {
+    fn running(&self, _: HolderProcess) -> Option<bool> {
         self.running
     }
 
