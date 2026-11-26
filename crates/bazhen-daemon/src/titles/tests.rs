@@ -103,7 +103,7 @@ fn agents_over(
         socket: "/run/b.sock".to_owned(),
         tracker: TaskTracker::new(),
         roles: Arc::new(Roles::new(None)),
-        harnesses,
+        harnesses: Arc::new(harnesses),
         hook_built: true,
         turns: Arc::default(),
         tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),
