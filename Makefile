@@ -38,6 +38,26 @@ check: ## Every gate, in order: what CI runs and a pull request must pass
 	$(MAKE) test-medium
 	$(MAKE) test-bench
 
+# check less test-rust, in the halves CI runs as steps of their own: CI runs test-rust-all in its
+# place, the same nextest run with the ignored tests too. scripts/check-standards.ts (CHECK_HALVES)
+# holds the three to check's steps.
+.PHONY: check-ts
+check-ts: ## check's standards, schema, TypeScript and formatting gates, and its vitest suites
+	$(MAKE) standards
+	$(MAKE) schema-check
+	$(MAKE) lint
+	$(MAKE) format-check
+	$(MAKE) typecheck
+	$(MAKE) test
+	$(MAKE) test-medium
+	$(MAKE) test-bench
+
+.PHONY: check-rust
+check-rust: ## check's Rust gates but its tests: clippy, cargo-deny and the Rust schema
+	$(MAKE) rust-schema-check
+	$(MAKE) lint-rust
+	$(MAKE) deny
+
 .PHONY: standards
 standards:
 	node --disable-warning=ExperimentalWarning scripts/check-standards.ts $(value ARGS)

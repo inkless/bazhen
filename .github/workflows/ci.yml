@@ -59,7 +59,11 @@ jobs:
           tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
       - run: pnpm install --frozen-lockfile
         id: install
-      - run: make check
+      # `make check` in its halves (CHECK_HALVES in scripts/check-standards.ts), less test-rust:
+      # test-rust-all, below, runs the same nextest run and the tests ignored as signalling too.
+      - run: make check-ts
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: make check-rust
       # shellcheck is on the runner image, not on every developer's machine, so it runs here.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: make lint-shell

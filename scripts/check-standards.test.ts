@@ -26,6 +26,7 @@ import {
   makeTargets,
   menuTargets,
   GATE_STEPS,
+  CHECK_HALVES,
   HELP_COMMAND,
   MAKEFILE_SETTINGS,
   OWN_ARGS,
@@ -1436,6 +1437,12 @@ const standardMakefile = [
     (GATE_STEPS["check"] ?? []).map((step) => `$(MAKE) ${step}`),
     "Every gate",
   ),
+  makeRule("check-ts", ["$(MAKE) format-check"], "Half"),
+  makeRule(
+    "check-rust",
+    ["$(MAKE) rust-schema-check", "$(MAKE) lint-rust", "$(MAKE) deny"],
+    "Half",
+  ),
   makeRule("format-check", ["$(MAKE) gate-fmt", `oxfmt --check ${OWN_ARGS}`], "Formatting"),
   makeRule("rust-schema-check", [`scripts/xtask.sh schema --check ${OWN_ARGS}`]),
   ...Object.entries(RUST_GATE_TASKS).map(([name, command]) =>
@@ -1603,10 +1610,34 @@ describe("makefileFailures", () => {
       failures(edited(HELP_COMMAND, "@echo menu")),
     ]).toEqual([
       [expect.stringContaining('the "lint-rust" target must run')],
-      ['Makefile: the "check" target must run `deny` among its deps.'],
+      [
+        'Makefile: the "check" target must run `deny` among its deps.',
+        expect.stringContaining('check-ts and check-rust run `deny` and "check" doesn\'t'),
+      ],
       ['Makefile: the "format-check" target must run `gate-fmt` among its deps.'],
       [expect.stringContaining('the "deny" target must run')],
       [expect.stringContaining('the "help" target, on its own menu, must run')],
+    ]);
+  });
+
+  it("keeps check's steps, test-rust aside, to the halves CI runs, and the halves to check's", () => {
+    const rust = ["$(MAKE) rust-schema-check", "$(MAKE) lint-rust", "$(MAKE) deny"];
+    const halves = { "check-ts": ["$(MAKE) format-check"], "check-rust": rust };
+    const half = (name: keyof typeof halves, lines: string[]) =>
+      edited(makeRule(name, halves[name], "Half"), makeRule(name, lines, "Half"));
+    expect(CHECK_HALVES).toEqual(["check-ts", "check-rust"]);
+    expect([
+      failures(half("check-rust", rust.slice(0, 2))),
+      failures(half("check-ts", ["$(MAKE) format-check", "$(MAKE) test-rust"])),
+      failures(half("check-ts", ["$(MAKE) format-check", "$(MAKE) gate-fmt"])),
+    ]).toEqual([
+      [
+        expect.stringContaining(
+          'the "check" target runs `deny`, which neither of check-ts and check-rust does',
+        ),
+      ],
+      [expect.stringContaining('check-ts and check-rust run `test-rust` and "check" doesn\'t')],
+      [expect.stringContaining('check-ts and check-rust run `gate-fmt` and "check" doesn\'t')],
     ]);
   });
 
@@ -1631,6 +1662,8 @@ describe("menuTargets", () => {
   it("lists the targets with a `##`, which make help shows, and not the ones without", () => {
     expect([...menuTargets(makefileTargets(standardMakefile).targets)].toSorted()).toEqual([
       "check",
+      "check-rust",
+      "check-ts",
       "format-check",
       "help",
     ]);

@@ -4402,6 +4402,12 @@ export const GATE_STEPS: Record<string, readonly string[]> = {
   "format-check": ["gate-fmt"],
 };
 
+// The halves of `check` CI runs as steps of their own, and the one step of it CI leaves to
+// test-rust-all, which runs the same nextest run with the ignored tests as well. Together they run
+// each of check's steps, and nothing else.
+export const CHECK_HALVES: readonly string[] = ["check-ts", "check-rust"];
+export const CHECK_LEFT_TO_CI = "test-rust";
+
 // cargo's target runner, which caps every test binary, and cargo-mutants' test tool, nextest,
 // which runs no doctests: rustdoc starts those without the runner (docs/standards/testing.md
 // § Memory and time caps).
@@ -4848,6 +4854,21 @@ export function makefileFailures(
     for (const step of steps.filter((s) => !named.includes(s))) {
       out.push(`${MAKEFILE}: the "${name}" target must run \`${step}\` among its deps.`);
     }
+  }
+  const checkSteps = targets.get("check")?.deps ?? [];
+  const halves = CHECK_HALVES.flatMap((half) => targets.get(half)?.deps ?? []);
+  for (const step of checkSteps.filter((s) => s !== CHECK_LEFT_TO_CI && !halves.includes(s))) {
+    out.push(
+      `${MAKEFILE}: the "check" target runs \`${step}\`, which neither of ` +
+        `${CHECK_HALVES.join(" and ")} does, so CI would skip it (CHECK_HALVES in ` +
+        "scripts/check-standards.ts).",
+    );
+  }
+  for (const step of halves.filter((s) => !checkSteps.includes(s) || s === CHECK_LEFT_TO_CI)) {
+    out.push(
+      `${MAKEFILE}: ${CHECK_HALVES.join(" and ")} run \`${step}\` and "check" doesn't, or ` +
+        `leaves it to CI's test-rust-all: CI would check what a local check doesn't.`,
+    );
   }
   for (const file of paths.filter((p) => fileName(p) === "package.json")) {
     const scripts = packageScripts(read, file);
