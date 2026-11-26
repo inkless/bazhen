@@ -1543,6 +1543,40 @@ mod tests {
         );
     }
 
+    /// The turn that answers a newcomer's `hello` reads the child's output too, so newcomers
+    /// that keep coming can't hold a flood up.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn a_turn_that_answers_a_hello_reads_the_flood_too() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut held = Failing::with("hello-flood-turn", "exec yes", crate::engine::engine, 100);
+        held.until("the flood begun", |f| f.holder.output().ring().end() > 0);
+        // Output waiting at the turn's poll, beside the newcomer.
+        let waiting = {
+            let master = held.holder.master().unwrap();
+            let mut fds = [PollFd::from_borrowed_fd(master, PollFlags::IN)];
+            let wait = Timespec::try_from(Duration::from_secs(5)).unwrap();
+            readiness(poll(&mut fds, Some(&wait))).unwrap()
+        };
+        assert!(waiting, "the flood stopped");
+        let mut peer = UnixStream::connect(held.dir.join("t.sock")).unwrap();
+        peer.set_nonblocking(true).unwrap();
+        peer.write_all(&hello_request().encode().unwrap()).unwrap();
+        let end = held.holder.output().ring().end();
+        assert!(!held.server.turn(&mut held.holder).unwrap());
+        let mut decoder = bazhen_holder_proto::reply_decoder();
+        let mut replies = Vec::new();
+        read_into(&mut peer, &mut decoder, &mut replies);
+        assert_eq!(
+            (
+                matches!(replies.as_slice(), [Reply::Hello { .. }]),
+                held.holder.output().ring().end() > end
+            ),
+            (true, true),
+            "the hello answered, and the output read on, in one turn: {replies:?}"
+        );
+    }
+
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn a_holder_whose_engine_fails_keeps_its_child_and_answers_with_a_new_engine() {
