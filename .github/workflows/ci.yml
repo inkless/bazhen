@@ -73,17 +73,6 @@ jobs:
       - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-rust-all
 
-      - name: Check the flood assertion against the holder before 439
-        if: ${{ !cancelled() && steps.moon.outcome == 'success' && matrix.node == 'pinned' }}
-        run: |
-          git restore --source=2d9497a0 -- crates/bazhen-holder/src/holder.rs crates/bazhen-holder/src/server.rs
-          if moon run :test-rust-all -- a_flooding_holder_answers_a_hello_within_a_turn_of_its_output >"$RUNNER_TEMP/holder-control" 2>&1; then
-            cat "$RUNNER_TEMP/holder-control"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/holder-control"
-          grep -F "left: (true, true, false)" "$RUNNER_TEMP/holder-control"
-
   # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested.
   # Only clippy and nextest: tmux isn't run here, and rustfmt and cargo-deny don't depend on the
   # OS (deny.toml checks every target triple), so `check` covers them. Like `check`, it runs on
@@ -125,23 +114,6 @@ jobs:
         run: moon run :test-rust-all
       - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-holder
-
-      - name: Measure bytes between macOS flood hellos three times
-        if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
-        run: |
-          python3 - <<'PYTHON'
-          import pathlib
-          test = pathlib.Path("crates/bazhen-holder/tests/binary/socket.rs")
-          source = test.read_text()
-          marker = "    let closest = gaps.iter().min()"
-          assert source.count(marker) == 1
-          test.write_text(source.replace(marker, '    std::fs::write(std::env::var("FLOOD_OFFSETS").unwrap(), format!("{offsets:?} gaps {gaps:?}")).unwrap();\n' + marker))
-          PYTHON
-          export FLOOD_OFFSETS="$RUNNER_TEMP/flood-offsets"
-          for observation in 1 2 3; do
-            moon run :test-rust-all -- a_flooding_holder_answers_a_hello_within_a_turn_of_its_output
-            echo "$observation: $(cat "$FLOOD_OFFSETS")"
-          done
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `moon run :check`, so it is a job of its
