@@ -13,6 +13,7 @@ mod channel;
 mod channels;
 mod commands;
 pub mod config;
+mod descriptors;
 mod detach;
 mod devices;
 mod doctor;
