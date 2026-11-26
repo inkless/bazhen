@@ -653,6 +653,14 @@ What differs:
     `moon run :capped -- cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048
     -max_total_time=600` from the crate's directory. cargo-fuzz starts its target without cargo's
     test runner, so the cap and libFuzzer's own limits are given by hand.
+- **Repairing a base whose Rust tests cannot be listed.** HEAD must still list successfully.
+  Keep the repair in its own PR. Falsify accepts only changes to existing regular Rust files
+  in a workspace crate's `src` directory when their syntax matches after treating a shorthand field `x` and
+  `x: path(x)` as equivalent. This applies inside an unannotated top-level function on simple
+  expression paths such as a struct passed to a call. Macro inputs, inline modules, methods
+  and annotated statements are outside that rule. Workspace build scripts, procedural macros
+  and custom harnesses disable the fallback. It assumes pinned dependency macros and build
+  scripts do not read workspace sources to generate tests. Other changes require a working base.
 - **Falsify judges Rust tests by mutating the change, not by reverting it.** A Rust unit test
   lives in the file it tests, so reverting the source would revert the test, and a test of a new
   function wouldn't compile without it. When a branch touches `crates/` or the Cargo files,

@@ -48,9 +48,10 @@
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
-// own). Each new one is run instead against the mutants cargo-mutants lists in the code the branch
-// changed, one at a time in a throwaway worktree: KILLED by the first mutant it fails under twice
-// with a panic in test code, else INVALID, needing a Control trailer naming it by its full path,
+// own). If only the base fails to list, compare field initializers in unannotated top-level
+// functions, outside macro inputs. Each new test runs against the mutants cargo-mutants lists
+// in the changed code, one at a time in a throwaway worktree: KILLED by the first mutant it fails
+// under twice with a panic in test code, else INVALID, needing a Control trailer naming its full path,
 // `Control: tests::name: <what you broke> -> <how the test failed>`
 // (docs/standards/rust.md § Tests).
 //
@@ -702,6 +703,145 @@ export function addedRustTests(base: string[], head: string[]): { file: string; 
       const space = id.indexOf(" ");
       return { file: id.slice(0, space), title: id.slice(space + 1) };
     });
+}
+
+type SyntaxNode = {
+  kind: string;
+  start: [number, number, number];
+  text?: string;
+  children?: SyntaxNode[];
+};
+
+type ShapeToken = { kind: string; text: string; line: number };
+
+/**
+ * The complete source, with simple field initializers in top-level, unannotated functions
+ * represented by their field name. Keep boundaries as separate array entries: identical text
+ * inside a comment, attribute, macro input or literal must never compare as a field.
+ */
+function fieldRepairShape(source: string, dir: string): ShapeToken[] {
+  const tree: SyntaxNode = JSON.parse(
+    execFileSync("rust-analyzer", ["parse", "--json"], {
+      cwd: dir,
+      input: source,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  );
+  let original = "";
+  const parts: ShapeToken[] = [];
+  function visit(node: SyntaxNode, inBody: boolean): void {
+    const children = node.children ?? [];
+    if (node.kind === "ERROR") throw new Error(`line ${node.start[1] + 1}: ERROR node`);
+    if (node.text !== undefined) {
+      original += node.text;
+      parts.push({ kind: node.kind, text: node.text, line: node.start[1] + 1 });
+      return;
+    }
+    const start = original.length;
+    const part = parts.length;
+    for (const child of children) {
+      const body =
+        node.kind === "FN" &&
+        tree.children?.includes(node) === true &&
+        !children.some((c) => c.kind === "ATTR") &&
+        child.kind === "BLOCK_EXPR";
+      visit(
+        child,
+        body ||
+          (inBody &&
+            [
+              "BLOCK_EXPR",
+              "STMT_LIST",
+              "LET_STMT",
+              "EXPR_STMT",
+              "CALL_EXPR",
+              "ARG_LIST",
+              "RECORD_EXPR",
+              "RECORD_EXPR_FIELD_LIST",
+            ].includes(node.kind) &&
+            !children.some((c) => c.kind === "ATTR")),
+      );
+    }
+    if (!inBody || node.kind !== "RECORD_EXPR_FIELD") return;
+    const field =
+      /^([A-Za-z_][A-Za-z_0-9]*)(?::[ \t]*(?:[A-Za-z_][A-Za-z_0-9]*::)*[A-Za-z_][A-Za-z_0-9]*\(\1\))?$/.exec(
+        original.slice(start),
+      );
+    if (field) {
+      parts.length = part;
+      parts.push({ kind: node.kind, text: field[1] ?? "", line: node.start[1] + 1 });
+    }
+  }
+  visit(tree, false);
+  if (tree.kind !== "SOURCE_FILE" || original !== source || source.includes("\uFFFD"))
+    throw new Error("incomplete Rust syntax tree");
+  return parts;
+}
+
+/**
+ * Workspace generators can inspect any source as data. The pinned dependency macros and
+ * build scripts are assumed not to read workspace sources to generate tests.
+ */
+function ordinaryRustWorkspace(dir: string, head: string): boolean {
+  const inputs = git(["ls-tree", "-rz", "--name-only", head], dir);
+  for (const path of inputs
+    .split("\0")
+    .filter((p) => /(?:^|\/)(?:build\.rs|Cargo\.toml)$/.test(p))) {
+    if (path.endsWith("build.rs")) {
+      console.error(`falsify: ${path} can generate tests`);
+      return false;
+    }
+    const manifest = parseToml(git(["cat-file", "blob", `${head}:${path}`], dir));
+    const lib = asTable(manifest["lib"]);
+    const targets = ["bin", "test", "example", "bench"].flatMap((key) => manifest[key] ?? []);
+    if (
+      asTable(manifest["package"])?.["build"] !== undefined ||
+      lib?.["proc-macro"] ||
+      lib?.["proc_macro"] ||
+      [lib?.["crate-type"], lib?.["crate_type"]].some(
+        (types) => Array.isArray(types) && types.includes("proc-macro"),
+      ) ||
+      [lib, ...targets].some((target) => asTable(target)?.["harness"] === false)
+    ) {
+      console.error(`falsify: ${path} configures code generation or a custom harness`);
+      return false;
+    }
+  }
+  return true;
+}
+
+function onlyFieldRepairs(dir: string, base: string, head: string, changes: Change[]): boolean {
+  for (const { status, path } of changes) {
+    if (status !== "M" || !/^crates\/[^/]+\/src\/.+\.rs$/.test(path)) {
+      console.error(`falsify: ${status} ${path} is outside a Rust field repair`);
+      return false;
+    }
+    try {
+      const read = (rev: string) => {
+        const treeEntry = git(["ls-tree", "-z", rev, "--", path], dir);
+        if (!treeEntry.startsWith("100644 blob "))
+          throw new Error("expected a regular source file");
+        return fieldRepairShape(git(["cat-file", "blob", `${rev}:${path}`], dir), dir);
+      };
+      const old = read(base);
+      const next = read(head);
+      const changed =
+        next.find((token, i) => token.text !== old[i]?.text || token.kind !== old[i]?.kind) ??
+        old[next.length];
+      if (changed) {
+        console.error(
+          `falsify: ${path}:${changed.line} (${changed.kind}) changes more than a simple field initializer`,
+        );
+        return false;
+      }
+    } catch (error) {
+      if (signalExitCode(error) !== undefined) throw error;
+      console.error(`falsify: cannot compare field initializers in ${path}: ${String(error)}`);
+      return false;
+    }
+  }
+  return ordinaryRustWorkspace(dir, head);
 }
 
 const CONTROL_SUBJECT = /^Control: (.+) -> .+$/gm;
@@ -2263,7 +2403,13 @@ async function mutateRustTests(
  * `#[test]`, proptest, or a macro of the crate's own. Mutants are applied only in that worktree,
  * which is removed on every way out, a signal included.
  */
-async function judgeRustTests(top: string, base: string, head: string, rustFiles: string[]) {
+async function judgeRustTests(
+  top: string,
+  base: string,
+  head: string,
+  rustFiles: string[],
+  changes: Change[],
+) {
   const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
   cleanup = () => {
     cleanup = undefined;
@@ -2275,17 +2421,28 @@ async function judgeRustTests(top: string, base: string, head: string, rustFiles
     const before = await listRustTests(dir, top);
     git(["checkout", "--quiet", "--detach", head], dir);
     const after = await listRustTests(dir, top);
-    if (before === undefined || after === undefined) {
-      const where = before === undefined ? `the base, ${base.slice(0, 12)}` : "HEAD";
+    const fieldRepair =
+      before === undefined && after !== undefined && onlyFieldRepairs(dir, base, head, changes);
+    if (fieldRepair)
+      console.log(
+        `falsify: base listing failed; only Rust field initializers changed (files checked: ${changes.length})`,
+      );
+    if (!fieldRepair && before === undefined && after !== undefined) {
       console.error(
-        `falsify: \`cargo-nextest nextest list\` failed at ${where}, so the Rust tests the ` +
+        `falsify: \`cargo-nextest nextest list\` failed at the base, ${base.slice(0, 12)}; the branch did not qualify for the field-repair fallback`,
+      );
+      return undefined;
+    }
+    if (after === undefined) {
+      console.error(
+        `falsify: \`cargo-nextest nextest list\` failed at HEAD, so the Rust tests the ` +
           "branch adds are unknown. Run `moon run :test-rust` there to see why; if cargo-nextest is " +
           `missing, install it: ${installCommand("cargo-nextest")}`,
       );
       return undefined;
     }
-    const atBase = rustTestIds(before);
-    const added = addedRustTests(atBase, rustTestIds(after));
+    const atBase = before === undefined ? [] : rustTestIds(before);
+    const added = fieldRepair ? [] : addedRustTests(atBase, rustTestIds(after));
     if (added.length === 0)
       return {
         verdicts: [],
@@ -2707,7 +2864,7 @@ async function main(args: string[]): Promise<number> {
     process.on("SIGHUP", handleSignal);
     try {
       const rustFiles = changes.flatMap(pathsOf).filter((path) => path.endsWith(".rs"));
-      const judged = await judgeRustTests(top, base, head, rustFiles);
+      const judged = await judgeRustTests(top, base, head, rustFiles, changes);
       if (judged === undefined) return 1;
       rust = judged;
     } finally {
