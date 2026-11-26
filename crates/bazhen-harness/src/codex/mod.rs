@@ -290,56 +290,56 @@ impl Codex {
             None => approvals::read_question(method, params),
             Some(_) => None,
         };
-        // Not an approval or a question, or not for an agent Bazhen runs: the TUI answers it.
+        // Not an approval or a question: the TUI answers it.
         let (thread, tool, summary) = match (&approval, &question) {
             (Some(a), _) => (&a.thread_id, &a.item_id, &a.summary),
             (None, Some(q)) => (&q.thread_id, &q.key, &q.summary),
             (None, None) => return Ingested::nothing(),
-        };
-        let mut t = self.threads();
-        if !bound {
-            t.forget(thread);
-            return Ingested::nothing();
-        }
-        // As serverRequest/resolved names it, so the same id matches however it was written. One
-        // that isn't JSON could never be matched, and is left to the TUI.
-        let Some(id) = Js::parse(id.as_bytes()).map(|id| id.stringify()) else {
-            return Ingested::nothing();
         };
         let key = ToolKey {
             key: Js::Array(vec![Js::String(thread.clone()), Js::String(tool.clone())]).stringify(),
             caller: None,
             prompt_id: None,
         };
-        t.requests.insert(id, (thread.clone(), key.clone()));
         let answers = question.as_ref().and_then(|q| q.answers.clone());
-        let (fact, reply) = match (&approval, answers) {
-            (None, None) => (
-                Observed::QuestionAsked {
-                    key,
-                    summary: summary.clone(),
-                },
-                Reply::Quiet,
-            ),
+        let fact = match (&approval, &answers) {
+            (None, None) => Observed::QuestionAsked {
+                key: key.clone(),
+                summary: summary.clone(),
+            },
+            (_, answers) => Observed::ApprovalAsked {
+                key: key.clone(),
+                summary: summary.clone(),
+                question: answers.is_some(),
+            },
+        };
+        let mut t = self.threads();
+        if !bound {
+            // Left to the TUI, with nothing of the thread kept, but still told under its key: one
+            // asked again of an item an agent had on the thread holds nothing of what it held.
+            t.forget(thread);
+            return Ingested {
+                observed: vec![on(thread, fact)],
+                origin: None,
+                reply: Reply::Quiet,
+                reply_gate: Gate::None,
+            };
+        }
+        // As serverRequest/resolved names it, so the same id matches however it was written. One
+        // that isn't JSON could never be matched, and is left to the TUI.
+        let Some(id) = Js::parse(id.as_bytes()).map(|id| id.stringify()) else {
+            return Ingested::nothing();
+        };
+        t.requests.insert(id, (thread.clone(), key.clone()));
+        let reply = match (&fact, answers) {
+            (Observed::QuestionAsked { .. }, _) => Reply::Quiet,
             (_, answers) => {
-                let question = answers.is_some();
                 if let Some(answers) = answers {
                     t.questions
                         .insert(key.key.clone(), (thread.clone(), answers));
                 }
                 // No deadline: the TUI asks the same request, and the first answer wins.
-                let held = Held::Approval {
-                    key: key.clone(),
-                    wait_ms: None,
-                };
-                (
-                    Observed::ApprovalAsked {
-                        key,
-                        summary: summary.clone(),
-                        question,
-                    },
-                    Reply::Hold(held),
-                )
+                Reply::Hold(Held::Approval { key, wait_ms: None })
             }
         };
         Ingested {

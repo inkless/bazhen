@@ -874,6 +874,60 @@ fn stales_an_approval_its_server_asks_again_on_a_session_two_agents_are_on() {
     );
 }
 
+/// A request its server asks again on the same connection, where it can't be routed, as on a
+/// session two agents are on, holds nothing of the one it held: the server may no longer answer
+/// that one, so the human's answer is refused, and nothing is sent.
+#[test]
+fn answers_nothing_for_a_request_asked_again_on_its_connection_where_it_cant_be_routed() {
+    let f = fixture();
+    let session = SessionKey(STUB_SESSION.to_owned());
+    // Under the key Codex gives the call on its thread, as the request asked again names it.
+    let first_asked = Observed::ApprovalAsked {
+        key: ToolKey {
+            key: json!([STUB_SESSION, "call-1"]).to_string(),
+            caller: None,
+            prompt_id: None,
+        },
+        summary: "Run ls".to_owned(),
+        question: false,
+    };
+    f.told(
+        vec![on_thread(STUB_SESSION, first_asked)],
+        Some((&session, Some(&f.agent))),
+    );
+    f.launched("k-2", "two");
+    let (answered, sent) = runtime().block_on(async {
+        let (on, _inbox, mut server, _dir) = connection(&f).await;
+        let item = f.items().remove(0);
+        let first = approval(7, "call-1");
+        let held = ServerHold {
+            on: on.clone(),
+            id: RequestId::Number(7.into()),
+            method: first["method"].as_str().unwrap().to_owned(),
+        };
+        f.shared
+            .hooks
+            .approvals
+            .hold(&AttentionId::parse(&item).unwrap(), Responder::Server(held));
+        let again = approval(8, "call-1");
+        let message = Inbound::Request {
+            id: RequestId::Number(8.into()),
+            method: again["method"].as_str().unwrap().to_owned(),
+            params: Some(again["params"].clone()),
+        };
+        // Kept open, as the channel keeps it, so that nothing heard is nothing sent.
+        let _open = on.clone();
+        super::inbound(&f.shared, HarnessId::Codex, message, on)
+            .await
+            .unwrap();
+        let answered = decide(&f, &item, "answer-1", "allow").await;
+        let sent = tokio::time::timeout(QUIET, heard(&mut server)).await.ok();
+        (answered, sent)
+    });
+    assert_eq!((answered, sent), (409, None));
+    assert_eq!((f.of("attention.opened").len(), f.open_items()), (1, 1));
+}
+
 /// A reply to a question its server asks is that request's answer, the human's text, and no
 /// mail.
 #[test]

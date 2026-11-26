@@ -92,6 +92,12 @@ impl Hooks {
                 (Key::Agent(agent), _) => Some(agent.clone()),
             };
             let Some(agent) = agent else {
+                // Asked again where it can't be routed: what was held for it may not be answered.
+                if let Observed::ApprovalAsked { key, .. } | Observed::QuestionAsked { key, .. } =
+                    &keyed.fact
+                {
+                    self.approvals.unhold(harness, key);
+                }
                 continue;
             };
             let one = Keyed {
