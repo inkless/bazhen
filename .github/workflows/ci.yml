@@ -98,9 +98,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: ./.github/actions/apt-update
       # The real-shell tests run zsh, bash and fish.
       - name: Install the shells the real-shell tests run
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
+        run: sudo apt-get install -y tmux fish zsh
       # The suites that signal processes they didn't start, which run only on a sandbox: this
       # runner, marked disposable here, or the test container. `make check` leaves them out.
       - name: Mark the runner disposable
@@ -234,9 +235,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: ./.github/actions/apt-update
+        if: runner.os == 'Linux'
       - name: Install tmux, and the shells the suites start in it
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
+        run: sudo apt-get install -y tmux fish zsh
       - name: Install tmux
         if: runner.os == 'macOS'
         run: command -v tmux || brew install tmux
@@ -275,8 +278,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: ./.github/actions/apt-update
       - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
+        run: sudo apt-get install -y tmux fish zsh
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - name: Install the pinned Rust toolchain
@@ -302,10 +306,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: ./.github/actions/apt-update
       - name: Install tmux, and what the shell suite runs in a shell
         run: |
           echo "man-db man-db/auto-update boolean false" | sudo debconf-set-selections
-          sudo apt-get update
           sudo apt-get install -y tmux fish zsh
           sudo apt-get install -y --no-install-recommends neovim less man-db htop
       - name: Mark the runner disposable
@@ -362,8 +366,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: ./.github/actions/apt-update
       - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
+        run: sudo apt-get install -y tmux fish zsh
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       # Falsify lists the Rust tests with nextest, at the base and at HEAD, to find the new ones,

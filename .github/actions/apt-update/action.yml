@@ -1,0 +1,15 @@
+name: Update apt's package lists without the runner's Microsoft source
+description: >-
+  Runs `apt-get update` after removing the packages.microsoft.com source that the runner image
+  preinstalls for its own Azure CLI, PowerShell and .NET. Nothing a workflow here installs comes
+  from it, but when it answers 403 apt calls its list "no longer signed" and fails the whole
+  update, and with it the job.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        for source in /etc/apt/sources.list.d/*; do
+          if grep -q packages.microsoft.com "$source"; then sudo rm -f -- "$source"; fi
+        done
+        sudo apt-get update
