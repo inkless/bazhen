@@ -18,7 +18,7 @@ use crate::tokens::AgentTokens;
 use crate::writer::Thread;
 
 /// The root process the fake runtime records for an agent's first terminal.
-pub(super) const ROOT: i32 = 5000;
+pub(super) const ROOT: i32 = crate::terminals::fake::FIRST_CHILD_PID;
 
 /// A Claude Code agent launched on the fake runtime, on the session `session-1`.
 struct Fixture {

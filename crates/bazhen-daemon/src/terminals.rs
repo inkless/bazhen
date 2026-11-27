@@ -353,9 +353,15 @@ pub(crate) mod fake {
         TerminalError::Other("the fake can't be read".to_owned())
     }
 
-    /// The holder every fake terminal names, as its locator records it.
-    pub(crate) const HOLDER_PID: u64 = 4243;
+    /// The holder every fake terminal names, as its locator records it. It, and each child's pid
+    /// after it, is past every pid a process can have: Linux's are below 2^22, macOS's below
+    /// 100,000. A request a test sends over a real socket is read by its real process and
+    /// ancestry, so a fake pid a process of the run had would take the test's own request for one
+    /// under Bazhen's runtime, or from an agent's terminal.
+    pub(crate) const HOLDER_PID: u64 = 1 << 22;
     pub(crate) const HOLDER_START: u64 = 1_700_000_000;
+    /// The pid of a fake terminal's child at generation 0, as a peer's pid reads.
+    pub(crate) const FIRST_CHILD_PID: i32 = (1 << 22) + 1000;
 
     /// One terminal the fake runs.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -531,7 +537,10 @@ pub(crate) mod fake {
             ("socket".to_owned(), format!("/fake/{terminal_id}.sock")),
             ("holderPid".to_owned(), HOLDER_PID.to_string()),
             ("holderStart".to_owned(), HOLDER_START.to_string()),
-            ("childPid".to_owned(), (5000 + generation).to_string()),
+            (
+                "childPid".to_owned(),
+                (u64::from(FIRST_CHILD_PID.unsigned_abs()) + generation).to_string(),
+            ),
             ("generation".to_owned(), generation.to_string()),
         ])
     }
