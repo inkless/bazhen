@@ -337,7 +337,7 @@ and drop paths, then the rest. A fourth group, `macos`, holds the files only mac
 script refuses it elsewhere, since every mutant of code that isn't compiled would read as missed.
 Groups go by file, so a `#[cfg(target_os = "macos")]` item in a file Linux also compiles stays in
 that file's group and reads as missed on Linux: such a survivor is classed by reading it against
-the tests CI's `rust (macos)` jobs run.
+the tests the legs of CI's `rust-macos` run.
 Survivors a sweep read and found to change nothing are listed in `EQUIVALENTS`
 (`scripts/holder-mutants.ts`), each with its reason, and every group leaves them out, so a
 re-sweep doesn't triage them again. Each is matched by function and mutation, not line, and the

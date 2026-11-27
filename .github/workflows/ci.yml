@@ -41,7 +41,10 @@ jobs:
           node-version: ${{ matrix.node != 'pinned' && matrix.node || '' }}
           node-version-file: ${{ matrix.node == 'pinned' && '.nvmrc' || '' }}
           cache: pnpm
-      # No tmux, shells or disposable marking: check-ts runs no suite that needs them.
+      # No tmux or shells: check-ts runs no suite that starts them. The marker stays: the medium
+      # tests of falsify-base and falsify that run only on a sandbox run here and nowhere else.
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
       # check-ts runs rustfmt on the crates (crates/), and builds the binaries the medium tests run,
       # on the toolchain rust-toolchain.toml pins.
       - name: Install the pinned Rust toolchain
@@ -104,6 +107,11 @@ jobs:
         run: sudo touch /etc/bazhen-disposable-host
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
+      # A leg with no tool would hand install-action an empty list, which it takes as nothing to do.
+      - name: Check the leg names its tool
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: test -n "$TOOL" || { echo "::error::this leg's matrix entry names no tool"; exit 1; }
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: ${{ matrix.tool }}

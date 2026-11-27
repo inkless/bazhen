@@ -182,7 +182,7 @@ source with comments and strings set aside, and fails on:
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins
   the list with why the gates build it: a `target_os` joins only with a CI job in the same pull
   request that runs `make lint-rust` and `make test-rust` on that OS, as the PTY holder's
-  `linux` and `macos` code will need (CI's `rust (macos)` jobs run them on macOS);
+  `linux` and `macos` code will need (on macOS, the gates and tests legs of CI's `rust-macos` run them);
 - a test harness of a member's own (`harness = false`), which could run nothing.
 
 The targets themselves are read from Cargo, not from the manifests' text, so no spelling of a
@@ -249,8 +249,8 @@ outlive the run, and `cargo clean` removes it.
 
 `scripts/check-standards.ts` pins the script's text. xtask holds the
 gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses
-any option after the gate but `--partition` (`make test-rust ARGS='<name>'` may name tests), removes the variables
-that change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks
+any option after the gate but `--partition` (`make test-rust ARGS='<name>'` may name tests),
+removes the variables that change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks
 every other source of rustflags), and overrides any configured compiler or wrapper.
 
 `CI`, set and non-empty, is the one variable that changes a gate's arguments: `test` and `test-all`
