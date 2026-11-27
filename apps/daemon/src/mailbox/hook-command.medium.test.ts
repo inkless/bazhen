@@ -26,6 +26,11 @@ let dir = "";
 const running = new Set<ChildProcess>();
 /** Connections a stub holds open, which closing the server leaves be. */
 const held = new Set<Socket>();
+/**
+ * How a stub's connection fails when its client has hung up: a reset, a write to a closed pipe, or,
+ * on macOS, the shutdown that ends a reply to a peer already gone.
+ */
+const HUNG_UP = new Set(["ECONNRESET", "EPIPE", "ENOTCONN"]);
 /** Errors on a stub's connections other than a client hanging up, which no case expects. */
 const stubFailures: string[] = [];
 /** What each case's client and stub did, and when, for a case that timed out to report. */
@@ -118,7 +123,7 @@ function listen(socket: string, answers: (Buffer | Held | null)[]) {
   server = createServer((conn) => {
     conn.on("error", (e: NodeJS.ErrnoException) => {
       stage(`stub's connection failed: ${e.code}`);
-      if (e.code !== "ECONNRESET" && e.code !== "EPIPE") stubFailures.push(e.code ?? e.message);
+      if (!HUNG_UP.has(e.code ?? "")) stubFailures.push(e.code ?? e.message);
     });
     void readRequest(conn).then((request) => {
       seen.push(request);

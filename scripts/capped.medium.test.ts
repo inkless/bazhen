@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cappedScope, chooseMode, runIn } from "../packages/host-guard/src/index.ts";
+import { cappedScope, chooseMode, runIn, type Mode } from "../packages/host-guard/src/index.ts";
 import { KILLS_ENV, TEST_BINARY_CAP } from "./capped.ts";
 
 const capped = fileURLToPath(new URL("capped.ts", import.meta.url));
@@ -22,6 +22,14 @@ const asRunner = (argv: string[], env: NodeJS.ProcessEnv = process.env) =>
 const RUNAWAY =
   "const a = []; setInterval(() => a.length < 64 ? a.push(Buffer.alloc(16 << 20, 1)) : process.exit(0), 20)";
 const SMALL = { memory: 128 * 1024 ** 2, timeMs: 30_000 };
+/**
+ * The cap of a run around the runner. A scope's is the runner's, since the runner runs its test
+ * through it. A watched run sums its whole tree, the runner's own node too, which on macOS is some
+ * 50 MiB of resident code, sampled every 500 ms: at the runner's cap it would often fire before the
+ * runner did, so it is well above that and still under the runaway's 1 GiB.
+ */
+const outerCap = (mode: Mode) =>
+  mode === "watched" ? { ...SMALL, memory: 768 * 1024 ** 2 } : SMALL;
 /** A run of its own: a sibling scope beside the one this test runs in, else what the host offers. */
 const outerMode = async () => (inScope ? "scope" : (await chooseMode(SMALL, "run")).mode);
 const dir = mkdtempSync(join(tmpdir(), "bz-capped-"));
@@ -92,7 +100,7 @@ describe("capped as cargo's test runner", () => {
         "-e",
         RUNAWAY,
       ),
-      SMALL,
+      outerCap(outer),
       { ...process.env, [KILLS_ENV]: kills },
     );
     expect(existsSync(kills)).toBe(true);
