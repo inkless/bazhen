@@ -210,16 +210,22 @@ jobs:
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `make check`, so it is a job of its own.
+  # The tmux runtime's own suite, against a private real tmux, runs here too, before it: it takes
+  # under a minute on the same setup, so a job of its own would spend a runner on setup alone.
+  # tmux is an opt-in runtime, but its suite fails these required checks like the api suite does.
   api:
     name: api (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The api suite's 20 minutes, and the 20 the Makefile caps the integration suite at.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         # Linux only, as in `check`: the real-tmux suites refuse any host but a marked Linux one.
         # 24.04's fish (3.7) is one the shell integration types a restarted shell's line back into,
-        # and the latest image's isn't, so between them the suite covers both.
+        # and the latest image's isn't, so between them the api suite covers both. 24.04's system
+        # tmux is 3.4, before the crash fix the README names, so the integration suite checks its
+        # defects there; the latest image's tmux is newer.
         os: [ubuntu-latest, ubuntu-24.04]
     steps:
       - uses: actions/checkout@v7
@@ -228,7 +234,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - name: Install tmux
+      - name: Install tmux, and the shells the suites start in it
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Install tmux
@@ -239,7 +245,15 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
-      - run: make test-api
+        id: install
+      - name: The integration suite (tmux)
+        run: make test-integration
+      # It runs after the integration suite has failed, so one red suite doesn't hide what the
+      # other finds, but not after a setup step has, which would only add red steps that aren't
+      # test failures.
+      - name: The api suite
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: make test-api
 
   # The api test files tests/rust-daemon.txt lists, against the Rust daemon, which is to replace the
   # TypeScript one: each passes on both, running every test it has. It also fails when the list lost
@@ -277,32 +291,6 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'push' && github.event.before || 'HEAD^1' }}
         run: make test-api-rust ARGS="--base $BASE"
-
-  # The tmux runtime's own suite, against a private real tmux. tmux is an opt-in runtime, so this
-  # job runs on every pull request but isn't a required check.
-  integration-tmux:
-    name: integration (tmux, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        # 24.04's system tmux is 3.4, before the crash fix the README names, so the suite checks
-        # its defects there; the latest image's tmux is newer.
-        os: [ubuntu-latest, ubuntu-24.04]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - name: Install tmux, and the shells the suite starts in it
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
-      - name: Mark the runner disposable
-        run: sudo touch /etc/bazhen-disposable-host
-      - run: pnpm install --frozen-lockfile
-      - run: make test-integration
 
   e2e:
     runs-on: ubuntu-latest
