@@ -246,21 +246,24 @@ fn vouchable_by(holder: HolderProcess, read: impl FnOnce(Pid) -> Reading) -> boo
 
 /// Whether this pid still belongs to the recorded holder. An unreadable process may still be
 /// the holder; init, an empty pid, one now held by another process, or one that started at
-/// another time, its name read or not, cannot be.
+/// another time, its name read or not, cannot be, unless the holder's own start was never known.
 pub fn holder_running(holder: HolderProcess) -> Option<bool> {
     running_by(holder, read_process)
 }
 
 /// `holder_running`, on what `read` shows, so its tests can show it any reading without a
 /// process: `Some(false)` for init or below, which is never read.
+///
+/// A holder recorded under `UNKNOWN_START` is one whose start was never read, so no reading's
+/// start disproves it, and no name does either: its pid is the child the start spawned, which
+/// may still run the scope's launcher or the limits' shell rather than `bazhen-holder`. Only a
+/// pid no process has shows it gone; any process there may be it, `None`.
 fn running_by(holder: HolderProcess, read: impl FnOnce(Pid) -> Reading) -> Option<bool> {
     match reading_of(holder, read) {
-        None => Some(false),
-        // Its start alone shows it isn't the holder, though no signal is sent on that, unless the
-        // holder's own start was never known.
-        Some(Reading::Nameless { start, .. })
-            if holder.start != UNKNOWN_START && start.abs_diff(holder.start) > START_SKEW_S =>
-        {
+        None | Some(Reading::Absent) => Some(false),
+        Some(_) if holder.start == UNKNOWN_START => None,
+        // Its start alone shows it isn't the holder, though no signal is sent on that.
+        Some(Reading::Nameless { start, .. }) if start.abs_diff(holder.start) > START_SKEW_S => {
             Some(false)
         }
         Some(reading) => shown(holder, &reading).ok(),
@@ -1544,6 +1547,28 @@ mod tests {
             start: UNKNOWN_START,
         };
         assert_eq!(super::running_by(unknown, |_| nameless(START)), None);
+    }
+
+    /// Nor can a running process's start disprove a holder recorded under `UNKNOWN_START`, nor its
+    /// name: the pid is the child the start spawned, which may run its launcher or shell still, or
+    /// the holder exec'd from them. Only a pid no process has shows it gone.
+    #[test]
+    fn keeps_a_running_process_at_a_holder_whose_start_was_never_known() {
+        let unknown = HolderProcess {
+            pid: pid(),
+            start: UNKNOWN_START,
+        };
+        let readings = [
+            holder_at(START),
+            launcher_at(START),
+            running("sh", START),
+            stranger(),
+            Reading::Absent,
+        ];
+        assert_eq!(
+            readings.map(|reading| super::running_by(unknown, |_| reading)),
+            [None, None, None, None, Some(false)]
+        );
     }
 
     /// Its start read twice alike and its name not, a process is nameless; its start changed
