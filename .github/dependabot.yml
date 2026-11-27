@@ -1,6 +1,8 @@
-# Monthly and grouped because the main ruleset requires branches to be up to date: every merge
-# makes each open PR rebase and run the full CI again. So merge update PRs one at a time,
-# security first. npm and cargo majors are left to a person, who takes them one at a time.
+# Monthly and grouped, each ecosystem on its own day of the month, because every update PR runs
+# the full CI and the Free plan runs 20 jobs at once: PRs that all open together queue behind
+# each other and behind people's work. Merge them one at a time, security first, each after
+# `@dependabot rebase` so it is tested on the main it lands on (the ruleset doesn't require it).
+# npm and cargo majors are left to a person, who takes them one at a time.
 # A cargo group fails if it brings in a second version of a crate, which deny.toml refuses:
 # close it, or add the crate to `ignore`.
 # Not managed here, so bumped by hand: .nvmrc, packageManager, rust-toolchain.toml (pinned
@@ -11,7 +13,8 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: monthly
+      interval: cron
+      cronjob: "0 9 1 * *"
     cooldown:
       default-days: 7
     open-pull-requests-limit: 4
@@ -54,7 +57,8 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: monthly
+      interval: cron
+      cronjob: "0 9 8 * *"
     cooldown:
       default-days: 7
     open-pull-requests-limit: 3
@@ -88,7 +92,8 @@ updates:
     # The root covers .github/workflows; a local action's own directory has to be named.
     directories: ["/", "/.github/actions/*"]
     schedule:
-      interval: monthly
+      interval: cron
+      cronjob: "0 9 15 * *"
     cooldown:
       default-days: 7
     open-pull-requests-limit: 1
