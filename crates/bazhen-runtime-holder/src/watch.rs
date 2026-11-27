@@ -71,8 +71,8 @@ pub enum RuntimeEvent {
     Lost { terminal: HolderRef },
 }
 
-/// Whether the holder a watch records still runs, as the host shows it: the runtime's
-/// `Host::may_run`, asked while that holder won't answer.
+/// Whether the holder a watch records still runs, as the host shows it: the `may_run`
+/// of the runtime's host, asked while that holder won't answer.
 #[derive(Clone)]
 pub(crate) struct Running(Arc<dyn Fn(HolderProcess) -> bool + Send + Sync>);
 
