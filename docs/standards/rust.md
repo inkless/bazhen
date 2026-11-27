@@ -650,12 +650,14 @@ What differs:
     library. The decoder is `pub` there; the binary, if any, is a `main` that calls the
     library, as `crates/bazhen-hook/src/main.rs` is.
   - `.github/workflows/fuzz.yml` runs every target nightly, and for a minute on a pull request
-    that changes the Rust, side by side, each crate with its own build cache. A pull request runs
-    one job per crate. Nightly, ten minutes a target, a crate's targets are split across jobs of
-    at most `TARGETS_PER_JOB` (3), so that none outlasts its timeout, and on main a `build` job
-    builds each crate once, before its target jobs restore it. A pull request runs every crate, not only
-    those its change reaches: its `paths` filter decides whether the workflow runs at all. The
-    `fuzz` check passes when every fuzz job did. The
+    that changes the Rust, side by side, each crate with its own build cache. A pull request
+    fuzzes every crate, not only those its change reaches (its `paths` filter decides whether the
+    workflow runs at all), in a few jobs of several crates each, `PR_JOBS` in the workflow,
+    balanced by their measured minutes. A draft fuzzes nothing, and its `fuzz` check is skipped;
+    marking it ready runs them. Nightly, ten minutes a target, a crate's targets are split across
+    jobs of at most `TARGETS_PER_JOB` (3), so that none outlasts its timeout, and on main a
+    `build` job builds each crate once, before its target jobs restore it. The `fuzz` check
+    passes when every fuzz job did. The
     fuzz jobs alone build on nightly, pinned there as `NIGHTLY`, because libFuzzer's
     instrumentation needs it; everything else builds on the pinned toolchain. Its `properties`
     job runs the property tests (above), not the targets. To run a target locally,

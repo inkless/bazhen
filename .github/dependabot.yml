@@ -85,7 +85,8 @@ updates:
   # GitHub's own actions stay on a major tag, which GitHub moves to each release, so only their
   # majors come here. Third-party actions are pinned to a commit, so every release of theirs does.
   - package-ecosystem: github-actions
-    directory: /
+    # The root covers .github/workflows; a local action's own directory has to be named.
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: monthly
     cooldown:

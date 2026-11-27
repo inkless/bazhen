@@ -1,0 +1,34 @@
+name: Restore a crate's fuzz build and corpus
+description: >-
+  Restores what .github/workflows/fuzz.yml saved for one crate: its build, on an exact key, and its
+  newest corpus. A job of the fuzz workflow uses it once for each crate it fuzzes, since a step
+  can't loop.
+inputs:
+  crate:
+    description: The crate, a directory under crates/ with a fuzz crate.
+    required: true
+  nightly:
+    description: The pinned nightly, the workflow's NIGHTLY.
+    required: true
+  cargo-fuzz:
+    description: cargo-fuzz's version, the workflow's CARGO_FUZZ.
+    required: true
+runs:
+  using: composite
+  steps:
+    # The build the workflow's `build` job saved, or off main the newest one main saved, so a pull
+    # request rebuilds only the workspace's own crates. Restored on an exact key only, so a build
+    # saved for an older lockfile never carries its artifacts into the next. Keys separate the
+    # crate with `.`, which a package name can't hold, so one crate's key is never a prefix of
+    # another's. The `build` job's key is this one, written out again.
+    - uses: actions/cache/restore@v6
+      with:
+        path: crates/${{ inputs.crate }}/fuzz/target
+        key: fuzz-target.${{ inputs.crate }}.${{ inputs.nightly }}.cargo-fuzz-${{ inputs.cargo-fuzz }}.${{ hashFiles(format('crates/{0}/fuzz/Cargo.lock', inputs.crate)) }}
+    # Each run starts from the corpus the last one left, so the nightly runs add up. The whole
+    # crate's is restored, and the workflow's `corpus` job saves it again from its target jobs'.
+    - uses: actions/cache/restore@v6
+      with:
+        path: crates/${{ inputs.crate }}/fuzz/corpus
+        key: fuzz-corpus.${{ inputs.crate }}.${{ github.run_id }}
+        restore-keys: fuzz-corpus.${{ inputs.crate }}.
