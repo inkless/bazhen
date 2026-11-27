@@ -493,7 +493,7 @@ of its own, and a runaway dies alone.
   scope or process group half a second after it, which the run counts and stops. A process that
   left both escapes the count. A mutation task counts its tests' memory kills as outcomes, so it passes
   `--memory-kills-counted`, and a memory kill alone doesn't fail it. `make check` refuses the
-  flag on any task but those in `COUNTED_KILLS_TASKS` (`scripts/check-standards.ts`). A test
+  flag on any target but those in `COUNTED_KILLS_TARGETS` (`scripts/check-standards.ts`). A test
   binary ends as it did, and its runner, which reads its status, has the say.
 - **A cap is a ceiling, not a budget.** A script's cap is about twice its measured peak, and at
   least 4 GiB. A test that needs more than that is the bug, not the cap.

@@ -12,7 +12,7 @@ import {
   ROOT_TABLES,
   TOOLCHAIN_CONFIG,
   DENY_CONFIG,
-  RUST_GATE_TASKS,
+  RUST_GATE_TARGETS,
   WORKSPACE_LINTS,
   byteTakers,
   cargoManifestFailures,
@@ -1443,10 +1443,10 @@ const standardMakefile = [
     ["$(MAKE) rust-schema-check", "$(MAKE) lint-rust", "$(MAKE) deny"],
     "Half",
   ),
-  makeRule("format-check", ["$(MAKE) gate-fmt", `oxfmt --check ${OWN_ARGS}`], "Formatting"),
-  makeRule("rust-schema-check", [`scripts/xtask.sh schema --check ${OWN_ARGS}`]),
-  ...Object.entries(RUST_GATE_TASKS).map(([name, command]) =>
-    makeRule(name, [`${command} ${OWN_ARGS}`]),
+  makeRule("format-check", ["$(MAKE) gate-fmt", `exec oxfmt --check ${OWN_ARGS}`], "Formatting"),
+  makeRule("rust-schema-check", [`exec scripts/xtask.sh schema --check ${OWN_ARGS}`]),
+  ...Object.entries(RUST_GATE_TARGETS).map(([name, command]) =>
+    makeRule(name, [`exec ${command} ${OWN_ARGS}`]),
   ),
 ].join("\n");
 
@@ -1480,9 +1480,9 @@ describe("makefileFailures", () => {
 
   it("runs deps in order, one `$(MAKE)` line each before the target's own command", () => {
     expect([
-      failures(withTarget("$(MAKE) deny", "$(MAKE) lint-rust", `vite build ${OWN_ARGS}`)),
-      failures(plus(".PHONY: t", "t: deny", "\tvite build")),
-      failures(withTarget("vite build", "$(MAKE) deny")),
+      failures(withTarget("$(MAKE) deny", "$(MAKE) lint-rust", `exec vite build ${OWN_ARGS}`)),
+      failures(plus(".PHONY: t", "t: deny", "\texec vite build")),
+      failures(withTarget("exec vite build", "$(MAKE) deny")),
       failures(withTarget("$(MAKE) deny lint-rust")),
       failures(withTarget("$(MAKE) deny ARGS=x")),
       failures(withTarget("$(MAKE) deny && vite build")),
@@ -1495,6 +1495,28 @@ describe("makefileFailures", () => {
       [expect.stringContaining("must run one dep and nothing else")],
       [expect.stringContaining("runs $(MAKE) inside a command")],
       [expect.stringContaining('the "t" target runs `gone`, which is no target')],
+    ]);
+  });
+
+  it("runs a target's own command as the program itself, `exec`ed after a `cd` at most", () => {
+    expect([
+      failures(withTarget("vite build")),
+      failures(withTarget("cd apps/web && vite build")),
+      failures(withTarget("exec vite build | tee x")),
+      failures(withTarget("cd apps/web && exec vite build && exec chmod -R g-w dist")),
+      failures(withTarget("exec node x.ts $$(cat y)")),
+      failures(withTarget("exec sh -c 'a && b'")),
+      failures(
+        withTarget(`cd apps/web && exec vite build ${OWN_ARGS} < /dev/null`, "exec chmod x"),
+      ),
+      failures(withTarget("exec env A=$${A:-1} node x.ts")),
+    ]).toEqual([
+      ...Array.from({ length: 5 }, () => [
+        expect.stringContaining('the "t" target\'s command line must be one program'),
+      ]),
+      [],
+      [],
+      [],
     ]);
   });
 
@@ -1513,9 +1535,9 @@ describe("makefileFailures", () => {
 
   it("refuses what make reads and the check doesn't: a variable, an include, a rule it can't read", () => {
     expect([
-      failures(withTarget("vite build $(FLAGS)")),
-      failures(withTarget("echo $HOME")),
-      failures(withTarget("echo $${HOME} $(value ARGS)")),
+      failures(withTarget("exec vite build $(FLAGS)")),
+      failures(withTarget("exec echo $HOME")),
+      failures(withTarget("exec echo $${HOME} $(value ARGS)")),
       failures(plus("FLAGS = --x")),
       failures(plus("include other.mk")),
       failures(plus("%.o: %.c", "\tcc $<")),
@@ -1536,15 +1558,21 @@ describe("makefileFailures", () => {
 
   it("refuses a line whose failure make would pass, a second command and a target that runs nothing", () => {
     expect([
-      failures(withTarget("-vite build")),
-      failures(withTarget("+vite build")),
-      failures(withTarget("vite build", "chmod -R g-w dist")),
+      failures(withTarget("-exec vite build")),
+      failures(withTarget("+exec vite build")),
+      failures(withTarget("@-exec vite build")),
+      failures(withTarget("@ @ - exec vite build")),
+      failures(withTarget("@+exec vite build")),
+      failures(withTarget("exec vite build && chmod -R g-w dist")),
       failures(plus(".PHONY: t", "t: ## Nothing")),
-      failures(plus(makeRule("deny", ["true"]))),
+      failures(plus(makeRule("deny", ["exec true"]))),
     ]).toEqual([
       [expect.stringContaining("starts a line with `-`")],
       [expect.stringContaining("starts a line with `+`")],
-      [expect.stringContaining('the "t" target has a second command line')],
+      [expect.stringContaining("starts a line with `-`")],
+      [expect.stringContaining("starts a line with `-`")],
+      [expect.stringContaining("starts a line with `+`")],
+      [expect.stringContaining('the "t" target\'s command line must be one program')],
       [expect.stringContaining('the "t" target has no recipe')],
       [
         expect.stringContaining('the "deny" target is defined twice'),
@@ -1556,10 +1584,12 @@ describe("makefileFailures", () => {
   it("needs the settings that keep ARGS to the named target, and no makefile but the root's", () => {
     expect([
       failures(edited("unexport ARGS\n", "")),
+      failures(edited("MAKE := $(MAKE_COMMAND)\n", "")),
       failures({ "apps/web/Makefile": "", GNUmakefile: "", "tools/x.mk": "" }),
       failures({}, ["Makefile"]),
     ]).toEqual([
       [expect.stringContaining("needs `unexport ARGS`")],
+      [expect.stringContaining("needs `MAKE := $(MAKE_COMMAND)`")],
       [
         expect.stringContaining("apps/web/Makefile: make would read it"),
         expect.stringContaining("GNUmakefile: make would read it"),
@@ -1568,7 +1598,7 @@ describe("makefileFailures", () => {
       [
         "Makefile is missing; its targets are the repository's commands.",
         expect.stringContaining('the "help" target'),
-        ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("target must run")),
+        ...Object.keys(RUST_GATE_TARGETS).map(() => expect.stringContaining("target must run")),
         ...["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check", "gate-fmt"].map(
           (step) => expect.stringContaining(`must run \`${step}\` among its deps`),
         ),
@@ -1579,23 +1609,29 @@ describe("makefileFailures", () => {
   it("refuses a target that starts tests without a cap, and counts memory kills only where it may", () => {
     const counted = "node scripts/capped.ts --memory 8G --time 120m --memory-kills-counted --";
     expect([
-      failures(withTarget(`vitest run ${OWN_ARGS}`)),
+      failures(withTarget(`exec vitest run ${OWN_ARGS}`)),
       failures(
         withTarget(
-          "cd tests/e2e && node ../../scripts/capped.ts --memory 4G --time 9m -- playwright test",
+          "cd tests/e2e && exec node ../../scripts/capped.ts --memory 4G --time 9m -- playwright test",
         ),
       ),
       failures(
-        withTarget("node scripts/capped.ts --memory 4G --time 9m -- vitest run; vitest run"),
+        withTarget("exec node scripts/capped.ts --memory 4G --time 9m -- vitest run; vitest run"),
       ),
       failures(
-        plus(makeRule("test-falsify", [`${counted} node scripts/falsify.ts ${OWN_ARGS}`], "Tests")),
+        plus(
+          makeRule(
+            "test-falsify",
+            [`exec ${counted} node scripts/falsify.ts ${OWN_ARGS}`],
+            "Tests",
+          ),
+        ),
       ),
-      failures(plus(makeRule("test-medium", [`${counted} vitest run`], "Tests"))),
+      failures(plus(makeRule("test-medium", [`exec ${counted} vitest run`], "Tests"))),
     ]).toEqual([
       [expect.stringContaining('the "t" target starts tests without a memory and time cap')],
       [],
-      [expect.stringContaining("`&&` alone")],
+      [expect.stringContaining("must be one program"), expect.stringContaining("`&&` alone")],
       [],
       [expect.stringContaining("passes capped `--memory-kills-counted`")],
     ]);
@@ -1603,11 +1639,11 @@ describe("makefileFailures", () => {
 
   it("holds the gates to their pinned commands, check and format-check to running them, and help to the menu", () => {
     expect([
-      failures(edited(`${RUST_GATE_TASKS["lint-rust"]} ${OWN_ARGS}`, "cargo clippy --workspace")),
+      failures(edited(`${RUST_GATE_TARGETS["lint-rust"]} ${OWN_ARGS}`, "cargo clippy --workspace")),
       failures(edited("\t$(MAKE) deny\n", "")),
       failures(edited("\t$(MAKE) gate-fmt\n", "")),
       failures(edited(".PHONY: deny\ndeny:\n", ".PHONY: deny\ndeny:\n\t$(MAKE) gate-fmt\n")),
-      failures(edited(HELP_COMMAND, "@echo menu")),
+      failures(edited(HELP_COMMAND, "@exec echo menu")),
     ]).toEqual([
       [expect.stringContaining('the "lint-rust" target must run')],
       [
@@ -1684,6 +1720,7 @@ describe("makeTargets", () => {
         "make",
         "make $TASK",
         "make dev exited at start:",
+        "make tset-real # a typo, then a comment",
       ].map(makeTargets),
     ).toEqual([
       ["check"],
@@ -1696,6 +1733,7 @@ describe("makeTargets", () => {
       [],
       [],
       [],
+      ["tset-real"],
     ]);
   });
 });

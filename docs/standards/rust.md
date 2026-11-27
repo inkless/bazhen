@@ -206,7 +206,7 @@ under the workspace lints before taking its crate on.
 **The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`, the
 root manifest's other tables, `rust-toolchain.toml`, `clippy.toml` and `deny.toml` as
 `WORKSPACE_LINTS`, `ROOT_TABLES`, `TOOLCHAIN_CONFIG`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
-gate targets in the `Makefile` as `RUST_GATE_TASKS`, and the root `.cargo/config.toml` (the
+gate targets in the `Makefile` as `RUST_GATE_TARGETS`, and the root `.cargo/config.toml` (the
 capping test runner, which caps what `cargo run` and `cargo bench` start too) and `.cargo/mutants.toml` as `CARGO_CONFIG` and `MUTANTS_CONFIG`, and fails
 when the files differ, so a lint level, the toolchain or a gate changes only in a commit that
 changes the task and this page with it. The root manifest holds no other table (a patch, an

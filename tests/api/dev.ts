@@ -128,8 +128,8 @@ export class DevRun {
 
   /**
    * Each app's node processes, by app: the daemon's (`node --watch` and the daemon it starts) and
-   * vite's. The `sh` make starts each app's command in is left out: it reads nothing, and holds the
-   * terminal make gave it.
+   * vite's. The make that runs both is left out: it reads nothing, and holds the terminal it was
+   * given.
    */
   apps(): { daemon: number[]; web: number[] } {
     const below = this.record();

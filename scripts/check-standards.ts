@@ -397,7 +397,8 @@ const MAKE_VALUE_FLAGS = new Set(["-C", "-f", "-I", "-o", "-W"]);
 export function makeTargets(span: string): string[] {
   const command = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*make\b(.*)$/.exec(span);
   if (command === null) return [];
-  const [line = ""] = (command[1] ?? "").split(/&&|\|\||[;|&)]/);
+  // Up to a shell operator, or a comment, which is no part of the command.
+  const [line = ""] = (command[1] ?? "").split(/&&|\|\||[;|&)]|(?:^|\s)#/);
   const words = line.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) ?? [];
   const targets: string[] = [];
   for (let i = 0; i < words.length; i++) {
@@ -4391,7 +4392,7 @@ export const DENY_CONFIG = [
 // tests run under a cap like any. `check` also runs `rust-schema-check`, the Rust schema's
 // generator and its leak checks, which nothing else after a merge runs.
 const GATE = "scripts/xtask.sh gate";
-export const RUST_GATE_TASKS: Record<string, string> = {
+export const RUST_GATE_TARGETS: Record<string, string> = {
   "gate-fmt": `${GATE} fmt`,
   "lint-rust": `${GATE} lint`,
   deny: `${GATE} deny`,
@@ -4489,10 +4490,10 @@ const CAPPED_STEP = new RegExp(
 );
 export const MAX_CAP = { gib: 24, minutes: 120 };
 
-// The root's tasks whose command counts its tests' memory kills as outcomes, as a mutation run
+// The targets whose command counts its tests' memory kills as outcomes, as a mutation run
 // does, and so may pass capped's flag that keeps such a kill from failing the run. Anywhere else a
 // memory kill fails the run that saw it.
-export const COUNTED_KILLS_TASKS: ReadonlySet<string> = new Set([
+export const COUNTED_KILLS_TARGETS: ReadonlySet<string> = new Set([
   "test-falsify",
   "test-falsify-base",
   "test-mutants-holder",
@@ -4514,7 +4515,7 @@ export function cappedScriptFailures(
     if (script.includes(COUNTED_KILLS_FLAG) && !countsKills.has(name)) {
       out.push(
         `${file}: the "${name}" ${noun} passes capped \`${COUNTED_KILLS_FLAG}\`, which only a ` +
-          "root task that counts its tests' memory kills may (COUNTED_KILLS_TASKS in " +
+          "target that counts its tests' memory kills may (COUNTED_KILLS_TARGETS in " +
           "scripts/check-standards.ts): anywhere else a memory kill fails the run.",
       );
     }
@@ -4580,6 +4581,7 @@ const OTHER_MAKEFILE = /(?:^|\/)(?:GNUmakefile|[Mm]akefile)$|\.mk$/;
 // The Makefile's settings, exactly: ARGS reaches the named target's own command alone, as neither
 // a dep's make nor one a script starts inherits it, and sub-makes say nothing of directories.
 export const MAKEFILE_SETTINGS = [
+  "MAKE := $(MAKE_COMMAND)",
   "MAKEFLAGS += --no-print-directory",
   "MAKEOVERRIDES :=",
   "unexport ARGS",
@@ -4589,8 +4591,14 @@ export const OWN_ARGS = "$(value ARGS)";
 // `make help`, the menu: each target that has a `##`, with what follows it. The menu is what
 // documents a target, so the docs may name only those.
 export const HELP_COMMAND =
-  "@printf 'make <target> [ARGS=\"<its arguments>\"]\\n\\n' && awk -F ':.*## ' " +
-  "'/^[a-z][a-z0-9-]*:.*## / { printf \"  %-22s %s\\n\", $$1, $$2 }' Makefile";
+  '@exec awk -F \':.*## \' \'BEGIN { print "make <target> [ARGS=\\"<its arguments>\\"]\\n" } ' +
+  '/^[a-z][a-z0-9-]*:.*## / { printf "  %-22s %s\\n", $$1, $$2 }\' Makefile';
+// A target's own command, a line per program: `exec <program>`, after a `cd <dir> &&` at most. make
+// passes a SIGTERM to its children alone, and a shell left between make and the program dies of it
+// and leaves the program running.
+const EXEC_LINE = /^[@\s+-]*(?:cd [^\s;&|<>()`'"]+ && )?exec \S/;
+// What runs a second program, or one round the exec, once quoted text is left out.
+const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\(/;
 // The targets whose deps run at once, each with why. Anywhere else deps run one at a time, in
 // order: a dep may build what the next one runs.
 export const PARALLEL_TARGETS: Record<string, string> = {
@@ -4674,9 +4682,10 @@ export function makefileTargets(text: string): {
       recipeLines++;
       const body = raw.slice(1).trim();
       const name = current.name;
-      if (/^[-+]/.test(body)) {
+      const prefix = /^[@\s]*([-+])/.exec(body);
+      if (prefix !== null) {
         problems.push(
-          `${makefileAt(line)}: the "${name}" target starts a line with \`${body[0]}\`: \`-\` would pass a ` +
+          `${makefileAt(line)}: the "${name}" target starts a line with \`${prefix[1]}\`: \`-\` would pass a ` +
             "failing line and `+` would run one under `make -n`.",
         );
       }
@@ -4718,12 +4727,20 @@ export function makefileTargets(text: string): {
           `${makefileAt(line)}: the "${name}" target runs $(MAKE) inside a command; a dep is a ` +
             "`$(MAKE) <dep>` line of its own.",
         );
-      } else if (command !== undefined) {
-        problems.push(
-          `${makefileAt(line)}: the "${name}" target has a second command line; join its steps with \`&&\`.`,
-        );
       } else {
-        command = body;
+        const unquoted = body
+          .replace(EXEC_LINE, "")
+          .replaceAll(OWN_ARGS, "")
+          .replaceAll(/\$\$\{[^}]*\}/g, "")
+          .replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "");
+        if (!EXEC_LINE.test(body) || SHELL_OPERATOR.test(unquoted)) {
+          problems.push(
+            `${makefileAt(line)}: the "${name}" target's command line must be one program, ` +
+              "`exec`ed after a `cd <dir> &&` at most: make passes a SIGTERM to its children alone, " +
+              "so a shell left between make and the program would leave it running.",
+          );
+        }
+        command = command === undefined ? body : `${command} && ${body}`;
       }
       continue;
     }
@@ -4796,7 +4813,11 @@ export function menuTargets(targets: ReadonlyMap<string, MakeTarget>): Set<strin
 
 /** A target's own command as its shell reads it, less the ARGS a person adds. */
 const shellCommand = (command: string): string =>
-  command.replaceAll(` ${OWN_ARGS}`, "").replaceAll(OWN_ARGS, "").replaceAll("$$", "$");
+  command
+    .replaceAll(` ${OWN_ARGS}`, "")
+    .replaceAll(OWN_ARGS, "")
+    .replaceAll("$$", "$")
+    .replaceAll(/(^|&& )@*(cd \S+ && )?exec /g, "$1$2");
 
 /** Why the Makefile or a package.json's scripts would let a command run unchecked. */
 export function makefileFailures(
@@ -4824,7 +4845,7 @@ export function makefileFailures(
           MAKEFILE,
           { [name]: shellCommand(command) },
           "target",
-          COUNTED_KILLS_TASKS,
+          COUNTED_KILLS_TARGETS,
         ),
       );
     }
@@ -4835,16 +4856,16 @@ export function makefileFailures(
         "in scripts/check-standards.ts): it lists the targets the docs may name.",
     );
   }
-  for (const [name, command] of Object.entries(RUST_GATE_TASKS)) {
+  for (const [name, command] of Object.entries(RUST_GATE_TARGETS)) {
     const target = targets.get(name);
     if (
       target === undefined ||
-      target.command !== `${command} ${OWN_ARGS}` ||
+      target.command !== `exec ${command} ${OWN_ARGS}` ||
       target.deps.length > 0
     ) {
       out.push(
-        `${MAKEFILE}: the "${name}" target must run \`${command} ${OWN_ARGS}\` and nothing else ` +
-          "(RUST_GATE_TASKS in scripts/check-standards.ts); a gate's command changes in " +
+        `${MAKEFILE}: the "${name}" target must run \`exec ${command} ${OWN_ARGS}\` and nothing else ` +
+          "(RUST_GATE_TARGETS in scripts/check-standards.ts); a gate's command changes in " +
           "crates/bazhen-xtask/src/gate.rs.",
       );
     }

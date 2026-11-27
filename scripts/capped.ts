@@ -14,7 +14,7 @@
 //
 // A run fails, whatever its command's status, when its memory cap killed a process in it, when it
 // reached its time cap, or when its command left processes running. `--memory-kills-counted` is
-// for a task that counts its tests' memory kills as outcomes, as the mutation tasks do; the time
+// for a target that counts its tests' memory kills as outcomes, as the mutation targets do; the time
 // cap and leftovers still fail it.
 //
 // `--own-scope` gives a run a scope of its own even inside a capped scope, where it would otherwise
@@ -78,7 +78,7 @@ export type Invocation = {
   args: string[];
 };
 
-/** scripts/check-standards.ts allows it only on the tasks in `COUNTED_KILLS_TASKS` there. */
+/** scripts/check-standards.ts allows it only on the targets in `COUNTED_KILLS_TARGETS` there. */
 export const COUNTED_KILLS_FLAG = "--memory-kills-counted";
 export const OWN_SCOPE_FLAG = "--own-scope";
 
