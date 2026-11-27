@@ -4631,6 +4631,8 @@ export const MAKEFILE_SETTINGS = [
 ];
 /** What a recipe appends to its own command: the words a person put in ARGS, unexpanded by make. */
 export const OWN_ARGS = "$(value ARGS)";
+// OWN_ARGS as arguments of their own: a whole word, not after a redirection or an escaped space.
+const OWN_WORDS = /(?<![<>\\]\s*)(?<=^|\s)\$\(value ARGS\)(?=\s|$)/;
 // `make help`, the menu: each target that has a `##`, with what follows it. The menu is what
 // documents a target, so the docs may name only those.
 export const HELP_COMMAND =
@@ -4651,12 +4653,37 @@ export const ARGLESS_LINES: Readonly<
 // passes a SIGTERM to its children alone, and a shell left between make and the program dies of it
 // and leaves the program running.
 const EXEC_LINE = /^[@\s+-]*(?:cd [^\s;&|<>()`'"]+ && )?exec \S/;
-// What runs a second program, or one round the exec, once quoted text is left out.
-// `$$((`, arithmetic, runs nothing.
-const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\((?!\()/;
+// What runs a second program, or one round the exec, once quoted text and arithmetic are left out.
+const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\(/;
 /** The command substitutions in a shell's text, each as the operator that starts it. */
 const substitutions = (text: string) =>
-  [...text.matchAll(/`|\$\$\((?!\()/g)].map(([found]) => found).join(" ");
+  [...text.matchAll(/`|\$\$\(/g)].map(([found]) => found).join(" ");
+
+/** Whether the `$$((` that ends just before `from` is arithmetic: its `)` is followed by another. */
+function closesArithmetic(text: string, from: number): boolean {
+  let depth = 0;
+  for (let i = from; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && depth > 0) depth--;
+    else if (text[i] === ")") return text[i + 1] === ")";
+  }
+  return false;
+}
+
+/**
+ * `text` with each `$$((` that opens arithmetic, which runs nothing, written `((`, and what it holds
+ * kept, a substitution in it included. bash reads `$((` as arithmetic only where the `)` that
+ * matches its second `(` is followed by another, so `$$((true) )` stays a command substitution.
+ */
+function withoutArithmetic(text: string): string {
+  let out = "";
+  let from = 0;
+  for (let at = text.indexOf("$$((", from); at !== -1; at = text.indexOf("$$((", from)) {
+    out += text.slice(from, at) + (closesArithmetic(text, at + 4) ? "((" : "$$((");
+    from = at + 4;
+  }
+  return out + text.slice(from);
+}
 // The targets whose deps run at once, each with why. Anywhere else deps run one at a time, in
 // order: a dep may build what the next one runs.
 export const PARALLEL_TARGETS: Record<string, string> = {
@@ -4787,7 +4814,7 @@ export function makefileTargets(text: string): {
         );
       } else {
         // A double-quoted string still runs what a backtick or `$(` in it names, so those stay.
-        const unquoted = body
+        const unquoted = withoutArithmetic(body)
           .replace(EXEC_LINE, "")
           .replaceAll(OWN_ARGS, "")
           .replaceAll(/\$\$\{[^}`(]*\}/g, "")
@@ -4801,13 +4828,16 @@ export function makefileTargets(text: string): {
               "so a shell left between make and the program would leave it running.",
           );
         }
-        // Quoted, ARGS would reach the program as one word; after a `#`, as none.
-        const bare = body.replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, " ");
-        const takesArgs = bare.includes(OWN_ARGS) && !/(?:^|\s)#/.test(bare);
+        // Quoted, ARGS would reach the program as one word; after a `#`, as none. Joined to other
+        // text, `\"`, `A=` or `'a'`, its first word would be joined to it, and after a redirection
+        // or an escaped space, a file's name or a part of the word before it.
+        const bare = body.replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''");
+        const takesArgs = OWN_WORDS.test(bare) && !/(?:^|\s)#/.test(bare);
         if (!takesArgs && ARGLESS_LINES[name]?.line !== body) {
           problems.push(
             `${makefileAt(line)}: the "${name}" target's command line must take \`${OWN_ARGS}\`, ` +
-              "unquoted, on a line with no `#` comment, or the shell would drop the ARGS a " +
+              "unquoted and as words of their own, joined to no other text and after no " +
+              "redirection, on a line with no `#` comment, or the shell would drop the ARGS a " +
               "person gives it, or join them (ARGLESS_LINES in scripts/check-standards.ts lists " +
               "the lines that may not take them).",
           );

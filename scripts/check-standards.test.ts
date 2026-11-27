@@ -1568,16 +1568,44 @@ describe("makefileFailures", () => {
     ]).toEqual([refused, refused, refused, refused, [], []]);
   });
 
+  it("passes ARGS on as arguments of their own: no other text joined to them, and no redirection's", () => {
+    const refused = [expect.stringContaining('the "t" target\'s command line must take')];
+    expect([
+      failures(withTarget(`exec x \\"${OWN_ARGS}\\"`)),
+      failures(withTarget(`exec x 'a'${OWN_ARGS}`)),
+      failures(withTarget(`exec env A=${OWN_ARGS} x`)),
+      failures(withTarget(`exec x \\ ${OWN_ARGS}`)),
+      failures(withTarget(`exec x <<< ${OWN_ARGS}`)),
+      failures(withTarget(`exec x <<<${OWN_ARGS}`)),
+      failures(withTarget(`exec x 2> ${OWN_ARGS}`)),
+      failures(withTarget(`exec x 'a' ${OWN_ARGS} < /dev/null`)),
+    ]).toEqual([refused, refused, refused, refused, refused, refused, refused, []]);
+  });
+
   it("takes `$$((…))` on a command line as arithmetic, which runs nothing", () => {
     expect([
       failures(withTarget(`exec x $$((1+2)) ${OWN_ARGS}`)),
       failures(withTarget(`exec x "$$((1+2))" ${OWN_ARGS}`)),
       failures(withTarget(`exec x "$$( (true) )" ${OWN_ARGS}`)),
+      failures(withTarget(`exec x $$(( (1+2) * 3 )) ${OWN_ARGS}`)),
     ]).toEqual([
       [],
       [],
       [expect.stringContaining('the "t" target\'s command line must be one program')],
+      [],
     ]);
+  });
+
+  it("takes `$$((…)` as a command substitution where its `)` is followed by no other, as bash does", () => {
+    expect([
+      failures(withTarget(`exec x $$((true) ) ${OWN_ARGS}`)),
+      failures(withTarget(`exec x "$$((true) )" ${OWN_ARGS}`)),
+      failures(withTarget(`exec x $$(( $$(true) )) ${OWN_ARGS}`)),
+    ]).toEqual(
+      Array.from({ length: 3 }, () => [
+        expect.stringContaining('the "t" target\'s command line must be one program'),
+      ]),
+    );
   });
 
   it("lists in ARGLESS_LINES only lines their targets run", () => {
