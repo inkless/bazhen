@@ -49,8 +49,10 @@ const DEFAULT_BASE = "origin/main";
 const BASE_REF = "refs/remotes/origin/main";
 
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
+/** Every suite test-real can run. */
+export const SUITE_NAMES: readonly Suite[] = Object.keys(SUITES).filter(isSuite);
 const USAGE =
-  `usage: make test-real ARGS='[${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
+  `usage: make test-real ARGS='[${SUITE_NAMES.join("|")}]… [--base <ref>] ` +
   "[--group <g> [--shard k/n] [--only <regex>]]'";
 
 /**
@@ -704,9 +706,9 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
           "--rm",
           "--init",
           // The init passes a forwarded signal to the suite's whole process group, not to make
-          // alone, which would wait out a SIGINT, or to falsify's shell alone, which would die of
-          // one and take the container with it: so a stop reaches the suite, which prints what it
-          // ran, before the client's grace runs out.
+          // alone, or to falsify's shell alone: each waits out a SIGINT for the child it is
+          // running, so the suite would never get it. So a stop reaches the suite, which prints
+          // what it ran, before the client's grace runs out.
           "--env",
           "TINI_KILL_PROCESS_GROUP=1",
           "--name",
