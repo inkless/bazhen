@@ -63,9 +63,7 @@ describe("the holder ledger", () => {
         return [];
       },
     });
-    await expect(sweep("/nonexistent/ledger", deps)).rejects.toThrow(
-      "moon run :test-real -- holder",
-    );
+    await expect(sweep("/nonexistent/ledger", deps)).rejects.toThrow("make test-real ARGS=holder");
     expect([listed, killed]).toEqual([[], []]);
   });
 

@@ -12,7 +12,7 @@ import {
   ROOT_TABLES,
   TOOLCHAIN_CONFIG,
   DENY_CONFIG,
-  RUST_GATE_TASKS,
+  RUST_GATE_TARGETS,
   WORKSPACE_LINTS,
   byteTakers,
   cargoManifestFailures,
@@ -20,9 +20,17 @@ import {
   declaredTokens,
   fuzzManifestFailures,
   tomlTables,
-  moonFailures,
-  moonTargets,
-  isMoonTarget,
+  makefileFailures,
+  makefileTargets,
+  makeNameFailures,
+  makeTargets,
+  menuTargets,
+  GATE_STEPS,
+  CHECK_HALVES,
+  HELP_COMMAND,
+  MAKEFILE_SETTINGS,
+  OWN_ARGS,
+  PARALLEL_TARGETS,
   hasRuntimeCode,
   inheritsWorkspaceLints,
   attributeFailures,
@@ -305,7 +313,7 @@ describe("migrationHistoryFailures", () => {
     ]);
   });
 
-  it("is one of the checks moon run :check runs", () => {
+  it("is one of the checks make check runs", () => {
     expect(STANDARDS_CHECKS).toContain(checkMigrations);
   });
 });
@@ -354,29 +362,6 @@ describe("pnpmScripts", () => {
         pnpmScripts,
       ),
     ).toEqual([["test"], ["lint"], ["test"], ["build"], []]);
-  });
-});
-
-describe("moonTargets", () => {
-  it("reads the targets of `moon run` up to the arguments after `--`", () => {
-    expect(
-      [
-        "moon run :check",
-        "moon run :test-real -- rust",
-        "moon run web:dev :build",
-        "moon run :capped -- node x:y",
-        "moon tasks",
-      ].map(moonTargets),
-    ).toEqual([[":check"], [":test-real"], ["web:dev", ":build"], [":capped"], []]);
-  });
-
-  it("knows a task by its project, or by its name in any project", () => {
-    const targets = new Set(["root:check", "web:dev", "e2e:test-e2e"]);
-    expect(
-      [":check", "web:dev", ":dev", ":test", "root:dev", ":test-e2e"].map((t) =>
-        isMoonTarget(t, targets),
-      ),
-    ).toEqual([true, true, true, false, false, true]);
   });
 });
 
@@ -558,11 +543,11 @@ describe("attributeFailures", () => {
   it("lets a test that signals processes it didn't start be ignored, by that reason alone", () => {
     const source = [
       "#[test]",
-      '#[ignore = "signals processes; runs in moon run :test-real -- rust"]',
+      '#[ignore = "signals processes; runs in make test-real ARGS=rust"]',
       "fn a() { bazhen_test_signal::require_sandbox().unwrap(); }",
       '#[ignore = "signals processes"]',
-      '#![ignore = "signals processes; runs in moon run :test-real -- rust"]',
-      '#[cfg_attr(test, ignore = "signals processes; runs in moon run :test-real -- rust")]',
+      '#![ignore = "signals processes; runs in make test-real ARGS=rust"]',
+      '#[cfg_attr(test, ignore = "signals processes; runs in make test-real ARGS=rust")]',
     ].join("\n");
     expect(scan(source).map((f) => f.split(": ")[0])).toEqual([
       "crates/x/src/a.rs:4",
@@ -571,8 +556,7 @@ describe("attributeFailures", () => {
     ]);
   });
   it("requires such a test to refuse to run off a sandbox, before anything else", () => {
-    const ignored =
-      '#[test]\n#[ignore = "signals processes; runs in moon run :test-real -- rust"]\n';
+    const ignored = '#[test]\n#[ignore = "signals processes; runs in make test-real ARGS=rust"]\n';
     const source = [
       `${ignored}fn a() {\n    bazhen_test_signal::require_sandbox().unwrap();\n    sweep();\n}`,
       `${ignored}fn b() -> Result<()> { bazhen_test_signal::require_sandbox()?; Ok(()) }`,
@@ -1412,13 +1396,13 @@ describe("cappedScriptFailures", () => {
     const flagged = [expect.stringContaining("passes capped `--memory-kills-counted`")];
     expect([
       cappedScriptFailures(
-        "moon.toml",
+        "Makefile",
         { "test-falsify": `${counted} node scripts/falsify.ts` },
-        "task",
+        "recipe",
         may,
       ),
-      cappedScriptFailures("moon.toml", { "test-medium": `${counted} vitest run` }, "task", may),
-      cappedScriptFailures("moon.toml", { capped: `${counted} sh -c true` }, "task", may),
+      cappedScriptFailures("Makefile", { "test-medium": `${counted} vitest run` }, "recipe", may),
+      cappedScriptFailures("Makefile", { capped: `${counted} sh -c true` }, "recipe", may),
       cappedScriptFailures("package.json", {
         "test-falsify": `${counted} node scripts/falsify.ts`,
       }),
@@ -1438,176 +1422,183 @@ describe("cappedScriptFailures", () => {
   });
 });
 
-/** A moon task's table, named `name`, with `body` for its keys. */
-const moonTask = (name: string, body: string) => `[tasks.${name}]\n${body}\n`;
-/** A command that starts vitest under the cap `cap`, from a project one folder down. */
-const cappedVitest = (cap: string) => `node ../../scripts/capped.ts ${cap} -- vitest run`;
-/** A repository whose .moon/workspace.toml is `text`. */
-const workspace = (text: string) => ({ ".moon/workspace.toml": text });
-/** A package.json with these scripts and devDependencies. */
-const packageJson = (scripts: Record<string, string>, devDependencies = {}) =>
-  JSON.stringify({ scripts, devDependencies });
+/** A .PHONY target of a Makefile, its recipe a line each, with `doc` after its `##`. */
+const makeRule = (name: string, lines: readonly string[], doc?: string) =>
+  `.PHONY: ${name}\n${name}:${doc === undefined ? "" : ` ## ${doc}`}\n` +
+  lines.map((line) => `\t${line}\n`).join("");
+/** A package.json with these scripts. */
+const packageJson = (scripts: Record<string, string>) => JSON.stringify({ scripts });
+const standardMakefile = [
+  ...MAKEFILE_SETTINGS,
+  "",
+  makeRule("help", [HELP_COMMAND], "This menu"),
+  makeRule(
+    "check",
+    (GATE_STEPS["check"] ?? []).map((step) => `$(MAKE) ${step}`),
+    "Every gate",
+  ),
+  makeRule("check-ts", ["$(MAKE) format-check"], "Half"),
+  makeRule(
+    "check-rust",
+    ["$(MAKE) rust-schema-check", "$(MAKE) lint-rust", "$(MAKE) deny"],
+    "Half",
+  ),
+  makeRule("format-check", ["$(MAKE) gate-fmt", `exec oxfmt --check ${OWN_ARGS}`], "Formatting"),
+  makeRule("rust-schema-check", [`exec scripts/xtask.sh schema --check ${OWN_ARGS}`]),
+  ...Object.entries(RUST_GATE_TARGETS).map(([name, command]) =>
+    makeRule(name, [`exec ${command} ${OWN_ARGS}`]),
+  ),
+].join("\n");
 
-describe("moonFailures", () => {
-  const task = moonTask;
-  const uncached = "options = { cache = false }";
-  const gates = Object.entries(RUST_GATE_TASKS).map(([name, command]) =>
-    task(name, `command = "${command}"\n${uncached}`),
-  );
-  const root = [
-    task(
-      "check",
-      'deps = ["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check"]\n' + uncached,
-    ),
-    task("format-check", 'command = "oxfmt --check"\ndeps = ["root:gate-fmt"]\n' + uncached),
-    ...gates,
-  ].join("\n");
+describe("makefileFailures", () => {
   const standard: Record<string, string> = {
-    ".moon/workspace.toml": 'telemetry = false\n[projects]\nroot = "."\nweb = "apps/web"\n',
-    "moon.toml": root,
-    "apps/web/moon.toml": task("build", `command = "vite build"\n${uncached}`),
-    ".prototools": 'moon = "2.6.5"\n',
-    "package.json": packageJson({ prepare: "husky" }, { "@moonrepo/cli": "2.6.5" }),
+    Makefile: standardMakefile,
+    "package.json": packageJson({ prepare: "husky" }),
     "apps/web/package.json": JSON.stringify({ dependencies: { vite: "1.0.0" } }),
   };
   const failures = (extra: Record<string, string>, drop: string[] = []) => {
     const repo = { ...standard, ...extra };
     const paths = Object.keys(repo).filter((p) => !drop.includes(p));
-    return moonFailures(paths, (p) => repo[p] ?? "");
+    return makefileFailures(paths, (p) => repo[p] ?? "");
   };
-  const web = (body: string) => ({ "apps/web/moon.toml": task("t", body) });
+  /** The standard Makefile with these lines after it. */
+  const plus = (...lines: string[]) => ({ Makefile: `${standardMakefile}\n${lines.join("\n")}\n` });
+  /** The standard Makefile with a target `t` whose recipe is `lines`. */
+  const withTarget = (...lines: string[]) => plus(makeRule("t", lines, "A target"));
+  const edited = (from: string, to: string) => ({ Makefile: standardMakefile.replace(from, to) });
 
-  it("accepts the standard's workspace, tasks, moon pin and package.json", () => {
+  it("accepts the standard's settings, targets and package.json", () => {
     expect(failures({})).toEqual([]);
   });
 
-  it("keeps the root's mutation tasks counting memory kills, and flags any other task", () => {
-    const counted = cappedVitest("--memory 8G --time 120m --memory-kills-counted").replace(
-      "../../",
-      "",
-    );
-    const command = (name: string) => task(name, `command = "${counted}"\n${uncached}`);
-    const flagged = [expect.stringContaining("passes capped `--memory-kills-counted`")];
-    expect([
-      failures({
-        "moon.toml": `${root}\n${command("test-falsify")}\n${command("test-mutants-holder")}`,
-      }),
-      failures({ "moon.toml": `${root}\n${command("test-medium")}` }),
-      failures({ "apps/web/moon.toml": command("test-falsify") }),
-    ]).toEqual([[], flagged, flagged]);
-  });
-
-  it("accepts a task that sets how moon prints its output", () => {
-    expect(
-      failures(web('command = "vite"\noptions = { cache = false, outputStyle = "stream" }')),
-    ).toEqual([]);
-  });
-
-  it("refuses an output style that prints no log", () => {
-    expect([
-      failures(web('command = "vite"\noptions = { cache = false, outputStyle = "none" }')),
-      failures(web('command = "vite"\noptions = { cache = false, outputStyle = "hash" }')),
-    ]).toEqual([
-      [expect.stringContaining('`options.outputStyle` to anything but "stream"')],
-      [expect.stringContaining('`options.outputStyle` to anything but "stream"')],
+  it("refuses a target make could take as up to date, and a .PHONY naming no target", () => {
+    expect([failures(edited(".PHONY: deny\n", "")), failures(plus(".PHONY: gone"))]).toEqual([
+      [expect.stringContaining('the "deny" target must be .PHONY')],
+      ["Makefile: .PHONY names `gone`, which is no target."],
     ]);
   });
 
-  it("refuses a task moon could replay from its cache", () => {
+  it("runs deps in order, one `$(MAKE)` line each before the target's own command", () => {
     expect([
-      failures(web('command = "vite build"')),
-      failures(web('command = "vite build"\noptions = { cache = true }')),
+      failures(withTarget("$(MAKE) deny", "$(MAKE) lint-rust", `exec vite build ${OWN_ARGS}`)),
+      failures(plus(".PHONY: t", "t: deny", "\texec vite build")),
+      failures(withTarget("exec vite build", "$(MAKE) deny")),
+      failures(withTarget("$(MAKE) deny lint-rust")),
+      failures(withTarget("$(MAKE) deny ARGS=x")),
+      failures(withTarget("$(MAKE) deny && vite build")),
+      failures(withTarget("$(MAKE) gone")),
     ]).toEqual([
-      [expect.stringContaining('the "t" task needs `options = { cache = false }`')],
-      [expect.stringContaining('the "t" task needs `options = { cache = false }`')],
+      [],
+      [expect.stringContaining('the "t" target names prerequisites')],
+      [expect.stringContaining('the "t" target runs a dep after its own command')],
+      [expect.stringContaining("must run one dep and nothing else")],
+      [expect.stringContaining("must run one dep and nothing else")],
+      [expect.stringContaining("runs $(MAKE) inside a command")],
+      [expect.stringContaining('the "t" target runs `gone`, which is no target')],
     ]);
   });
 
-  it("refuses a task that starts tests without a cap, or with one too big to bite", () => {
-    const capped = cappedVitest;
+  it("runs a target's own command as the program itself, `exec`ed after a `cd` at most", () => {
     expect([
-      failures(web(`command = "vitest run"\n${uncached}`)),
-      failures(web(`script = "${capped("--memory 4G --time 10m")}; vitest run"\n${uncached}`)),
+      failures(withTarget("vite build")),
+      failures(withTarget("cd apps/web && vite build")),
+      failures(withTarget("exec vite build | tee x")),
+      failures(withTarget("cd apps/web && exec vite build && exec chmod -R g-w dist")),
+      failures(withTarget("exec node x.ts $$(cat y)")),
+      failures(withTarget("exec sh -c 'a && b'")),
       failures(
-        web(`command = "${capped(`--memory ${MAX_CAP.gib + 1}G --time 10m`)}"\n${uncached}`),
+        withTarget(`cd apps/web && exec vite build ${OWN_ARGS} < /dev/null`, "exec chmod x"),
       ),
-      failures(web(`command = ["vitest"]\nargs = ["run"]\n${uncached}`)),
+      failures(withTarget("exec env A=$${A:-1} node x.ts")),
     ]).toEqual([
-      [expect.stringContaining('the "t" task starts tests without a memory and time cap')],
-      [expect.stringContaining("`&&` alone")],
-      [expect.stringContaining("too big to bite")],
-      [expect.stringContaining('the "t" task starts tests without a memory and time cap')],
-    ]);
-  });
-
-  const edited = (from: string, to: string) => ({ "moon.toml": root.replace(from, to) });
-  it("refuses a gate task that runs anything else, and a check or format-check that skips one", () => {
-    expect([
-      failures(edited("scripts/xtask.sh gate lint", "cargo clippy --workspace")),
-      failures(edited('"deny", ', "")),
-      failures(edited('deps = ["root:gate-fmt"]', "deps = []")),
-      failures(edited(`[tasks.deny]\n`, `[tasks.deny]\nargs = ["--x"]\n`)),
-      failures(edited(`[tasks.deny]\ncommand = "${RUST_GATE_TASKS["deny"]}"`, "[tasks.none]")),
-    ]).toEqual([
-      [expect.stringContaining('the "lint-rust" task must run')],
-      ['moon.toml: the "check" task must run `deny` among its deps.'],
-      ['moon.toml: the "format-check" task must run `gate-fmt` among its deps.'],
-      [expect.stringContaining('the "deny" task must run')],
-      [expect.stringContaining('the "deny" task must run')],
-    ]);
-  });
-
-  it("refuses a key or option it doesn't read, a dep given args, and CI skipping a task", () => {
-    expect([
-      failures(web(`command = "vite build"\nextends = "build"\n${uncached}`)),
-      failures(web(`command = "vite build"\nenv = { NODE_OPTIONS = "--x" }\n${uncached}`)),
-      failures(web('command = "vite build"\noptions = { cache = false, allowFailure = true }')),
-      failures(web(`deps = [{ target = "root:test-rust", args = "x" }]\n${uncached}`)),
-      failures(web('command = "vite build"\noptions = { cache = false, runInCI = false }')),
-      failures(
-        web('command = "vite"\noptions = { cache = false, persistent = true, runInCI = false }'),
-      ),
-    ]).toEqual([
-      [expect.stringContaining('the "t" task sets `extends`')],
-      [expect.stringContaining('the "t" task sets `env`')],
-      [expect.stringContaining('the "t" task sets `options.allowFailure`')],
-      [expect.stringContaining('the "t" task must name its deps as a list of targets')],
-      [expect.stringContaining('the "t" task sets `options.runInCI`')],
+      ...Array.from({ length: 5 }, () => [
+        expect.stringContaining('the "t" target\'s command line must be one program'),
+      ]),
+      [],
+      [],
       [],
     ]);
   });
 
-  it("refuses a moon config it doesn't read, telemetry on, and projects it can't list", () => {
+  it("lets only the targets PARALLEL_TARGETS lists run their deps at once, a job each", () => {
+    expect(Object.keys(PARALLEL_TARGETS)).toEqual(["dev"]);
     expect([
-      failures({ ".moon/tasks/all.toml": "", "apps/web/moon.yml": "" }),
-      failures(workspace('telemetry = true\n[projects]\nroot = "."\n'), ["apps/web/moon.toml"]),
-      failures(workspace('telemetry = false\nprojects = ["apps/*"]\n'), ["apps/web/moon.toml"]),
-      failures({}, [".moon/workspace.toml"]),
-      failures({ "moon.toml": "[tasks\n" }),
+      failures(plus(makeRule("dev", ["$(MAKE) -j2 deny lint-rust"], "Servers"))),
+      failures(plus(makeRule("dev", ["$(MAKE) -j3 deny lint-rust"], "Servers"))),
+      failures(withTarget("$(MAKE) -j2 deny lint-rust")),
     ]).toEqual([
+      [],
+      [expect.stringContaining('the "dev" target runs its deps at once')],
+      [expect.stringContaining('the "t" target runs its deps at once')],
+    ]);
+  });
+
+  it("refuses what make reads and the check doesn't: a variable, an include, a rule it can't read", () => {
+    expect([
+      failures(withTarget("exec vite build $(FLAGS)")),
+      failures(withTarget("exec echo $HOME")),
+      failures(withTarget("exec echo $${HOME} $(value ARGS)")),
+      failures(plus("FLAGS = --x")),
+      failures(plus("include other.mk")),
+      failures(plus("%.o: %.c", "\tcc $<")),
+      failures(plus("\techo stray")),
+    ]).toEqual([
+      [expect.stringContaining('the "t" target names `$(FLAGS)`')],
+      [expect.stringContaining('the "t" target names `$H`')],
+      [],
+      [expect.stringContaining("make reads `FLAGS = --x`")],
+      [expect.stringContaining("make reads `include other.mk`")],
       [
-        expect.stringContaining(".moon/tasks/all.toml: moon reads it, and this check doesn't"),
-        expect.stringContaining("apps/web/moon.yml: moon reads it, and this check doesn't"),
+        expect.stringContaining("make reads `%.o: %.c`"),
+        expect.stringContaining("follows no target"),
       ],
-      [expect.stringContaining("set `telemetry = false`")],
+      [expect.stringContaining("a recipe line that follows no target")],
+    ]);
+  });
+
+  it("refuses a line whose failure make would pass, a second command and a target that runs nothing", () => {
+    expect([
+      failures(withTarget("-exec vite build")),
+      failures(withTarget("+exec vite build")),
+      failures(withTarget("@-exec vite build")),
+      failures(withTarget("@ @ - exec vite build")),
+      failures(withTarget("@+exec vite build")),
+      failures(withTarget("exec vite build && chmod -R g-w dist")),
+      failures(plus(".PHONY: t", "t: ## Nothing")),
+      failures(plus(makeRule("deny", ["exec true"]))),
+    ]).toEqual([
+      [expect.stringContaining("starts a line with `-`")],
+      [expect.stringContaining("starts a line with `+`")],
+      [expect.stringContaining("starts a line with `-`")],
+      [expect.stringContaining("starts a line with `-`")],
+      [expect.stringContaining("starts a line with `+`")],
+      [expect.stringContaining('the "t" target\'s command line must be one program')],
+      [expect.stringContaining('the "t" target has no recipe')],
       [
-        expect.stringContaining("list the projects as a table"),
-        expect.stringContaining("moon.toml: moon reads it, and this check doesn't"),
-        ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
-        ...["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check", "gate-fmt"].map(
-          (step) => expect.stringContaining(`must run \`${step}\` among its deps`),
-        ),
+        expect.stringContaining('the "deny" target is defined twice'),
+        expect.stringContaining('the "deny" target must run'),
+      ],
+    ]);
+  });
+
+  it("needs the settings that keep ARGS to the named target, and no makefile but the root's", () => {
+    expect([
+      failures(edited("unexport ARGS\n", "")),
+      failures(edited("MAKE := $(MAKE_COMMAND)\n", "")),
+      failures({ "apps/web/Makefile": "", GNUmakefile: "", "tools/x.mk": "" }),
+      failures({}, ["Makefile"]),
+    ]).toEqual([
+      [expect.stringContaining("needs `unexport ARGS`")],
+      [expect.stringContaining("needs `MAKE := $(MAKE_COMMAND)`")],
+      [
+        expect.stringContaining("apps/web/Makefile: make would read it"),
+        expect.stringContaining("GNUmakefile: make would read it"),
+        expect.stringContaining("tools/x.mk: make would read it"),
       ],
       [
-        ".moon/workspace.toml is missing; moon's tasks are the repository's commands.",
-        ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
-        ...["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check", "gate-fmt"].map(
-          (step) => expect.stringContaining(`must run \`${step}\` among its deps`),
-        ),
-      ],
-      [
-        expect.stringContaining("moon.toml: moon can't read it"),
-        ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
+        "Makefile is missing; its targets are the repository's commands.",
+        expect.stringContaining('the "help" target'),
+        ...Object.keys(RUST_GATE_TARGETS).map(() => expect.stringContaining("target must run")),
         ...["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check", "gate-fmt"].map(
           (step) => expect.stringContaining(`must run \`${step}\` among its deps`),
         ),
@@ -1615,44 +1606,161 @@ describe("moonFailures", () => {
     ]);
   });
 
-  it("refuses a .prototools that doesn't pin moon alone and exactly", () => {
-    const why = expect.stringContaining(".prototools: must pin moon to one exact version");
+  it("refuses a target that starts tests without a cap, and counts memory kills only where it may", () => {
+    const counted = "node scripts/capped.ts --memory 8G --time 120m --memory-kills-counted --";
     expect([
-      failures({ ".prototools": 'moon = "^2.6"\n' }),
-      failures({ ".prototools": 'moon = "2.6.5"\nnode = "26"\n' }),
-      failures({ ".prototools": "moon = \n" }),
-      failures({}, [".prototools"]),
-    ]).toEqual([
-      [why],
-      [why],
-      [why],
-      [".prototools is missing; it pins the moon every host runs."],
-    ]);
-  });
-
-  it("keeps package.json to pnpm's install hook, and moon to the lockfile's, at the pinned version", () => {
-    const cli = { "@moonrepo/cli": "2.6.5" };
-    const rootPackage = (scripts: Record<string, string>, dev: Record<string, string> = cli) => ({
-      "package.json": packageJson(scripts, dev),
-    });
-    expect([
-      failures(rootPackage({ prepare: "husky", check: "moon run :check" })),
-      failures(rootPackage({ prepare: "husky --x" })),
-      failures({ "apps/web/package.json": packageJson({ dev: "vite" }) }),
-      failures(rootPackage({ prepare: "husky" }, {})),
-      failures(rootPackage({ prepare: "husky" }, { "@moonrepo/cli": "2.6.4" })),
+      failures(withTarget(`exec vitest run ${OWN_ARGS}`)),
       failures(
-        rootPackage({ prepare: "husky" }, { ...cli, "@moonrepo/core-linux-x64-gnu": "2.6.5" }),
+        withTarget(
+          "cd tests/e2e && exec node ../../scripts/capped.ts --memory 4G --time 9m -- playwright test",
+        ),
       ),
-      failures({ "apps/web/package.json": packageJson({}, cli) }),
+      failures(
+        withTarget("exec node scripts/capped.ts --memory 4G --time 9m -- vitest run; vitest run"),
+      ),
+      failures(
+        plus(
+          makeRule(
+            "test-falsify",
+            [`exec ${counted} node scripts/falsify.ts ${OWN_ARGS}`],
+            "Tests",
+          ),
+        ),
+      ),
+      failures(plus(makeRule("test-medium", [`exec ${counted} vitest run`], "Tests"))),
     ]).toEqual([
-      [expect.stringContaining('package.json: the "check" script belongs in a moon task')],
+      [expect.stringContaining('the "t" target starts tests without a memory and time cap')],
+      [],
+      [expect.stringContaining("must be one program"), expect.stringContaining("`&&` alone")],
+      [],
+      [expect.stringContaining("passes capped `--memory-kills-counted`")],
+    ]);
+  });
+
+  it("holds the gates to their pinned commands, check and format-check to running them, and help to the menu", () => {
+    expect([
+      failures(edited(`${RUST_GATE_TARGETS["lint-rust"]} ${OWN_ARGS}`, "cargo clippy --workspace")),
+      failures(edited("\t$(MAKE) deny\n", "")),
+      failures(edited("\t$(MAKE) gate-fmt\n", "")),
+      failures(edited(".PHONY: deny\ndeny:\n", ".PHONY: deny\ndeny:\n\t$(MAKE) gate-fmt\n")),
+      failures(edited(HELP_COMMAND, "@exec echo menu")),
+    ]).toEqual([
+      [expect.stringContaining('the "lint-rust" target must run')],
+      [
+        'Makefile: the "check" target must run `deny` among its deps.',
+        expect.stringContaining('check-ts and check-rust run `deny` and "check" doesn\'t'),
+      ],
+      ['Makefile: the "format-check" target must run `gate-fmt` among its deps.'],
+      [expect.stringContaining('the "deny" target must run')],
+      [expect.stringContaining('the "help" target, on its own menu, must run')],
+    ]);
+  });
+
+  it("keeps check's steps, test-rust aside, to the halves CI runs, and the halves to check's", () => {
+    const rust = ["$(MAKE) rust-schema-check", "$(MAKE) lint-rust", "$(MAKE) deny"];
+    const halves = { "check-ts": ["$(MAKE) format-check"], "check-rust": rust };
+    const half = (name: keyof typeof halves, lines: string[]) =>
+      edited(makeRule(name, halves[name], "Half"), makeRule(name, lines, "Half"));
+    expect(CHECK_HALVES).toEqual(["check-ts", "check-rust"]);
+    expect([
+      failures(half("check-rust", rust.slice(0, 2))),
+      failures(half("check-ts", ["$(MAKE) format-check", "$(MAKE) test-rust"])),
+      failures(half("check-ts", ["$(MAKE) format-check", "$(MAKE) gate-fmt"])),
+    ]).toEqual([
+      [
+        expect.stringContaining(
+          'the "check" target runs `deny`, which neither of check-ts and check-rust does',
+        ),
+      ],
+      [expect.stringContaining('check-ts and check-rust run `test-rust` and "check" doesn\'t')],
+      [expect.stringContaining('check-ts and check-rust run `gate-fmt` and "check" doesn\'t')],
+    ]);
+  });
+
+  it("keeps package.json to pnpm's install hook", () => {
+    expect([
+      failures({ "package.json": packageJson({ prepare: "husky", check: "make check" }) }),
+      failures({ "package.json": packageJson({ prepare: "husky --x" }) }),
+      failures({ "apps/web/package.json": packageJson({ dev: "vite" }) }),
+    ]).toEqual([
+      [expect.stringContaining('package.json: the "check" script belongs in a Makefile target')],
       ['package.json: the "prepare" script must be `husky`.'],
-      [expect.stringContaining('apps/web/package.json: the "dev" script belongs in a moon task')],
-      [expect.stringContaining('package.json: needs "@moonrepo/cli": "2.6.5" in devDependencies')],
-      [expect.stringContaining("package.json: depends on @moonrepo/cli 2.6.4")],
-      [expect.stringContaining("package.json: depends on @moonrepo/core-linux-x64-gnu 2.6.5")],
-      [expect.stringContaining("apps/web/package.json: depends on @moonrepo/cli 2.6.5")],
+      [
+        expect.stringContaining(
+          'apps/web/package.json: the "dev" script belongs in a Makefile target',
+        ),
+      ],
+    ]);
+  });
+});
+
+describe("menuTargets", () => {
+  it("lists the targets with a `##`, which make help shows, and not the ones without", () => {
+    expect([...menuTargets(makefileTargets(standardMakefile).targets)].toSorted()).toEqual([
+      "check",
+      "check-rust",
+      "check-ts",
+      "format-check",
+      "help",
+    ]);
+  });
+});
+
+describe("makeTargets", () => {
+  it("reads the targets a make command names, past the variables set for it and its options, and none in prose", () => {
+    expect(
+      [
+        "make check",
+        "make test-real ARGS=rust",
+        "PROPTEST_RNG_SEED=1 make test-rust",
+        "make -C ../.. web-dev",
+        "make -j2 daemon-dev web-dev",
+        "make test-falsify ARGS='--base x' && make other",
+        "run make check",
+        "make",
+        "make $TASK",
+        "make dev exited at start:",
+        "make tset-real # a typo, then a comment",
+      ].map(makeTargets),
+    ).toEqual([
+      ["check"],
+      ["test-real"],
+      ["test-rust"],
+      ["web-dev"],
+      ["daemon-dev", "web-dev"],
+      ["test-falsify"],
+      [],
+      [],
+      [],
+      [],
+      ["tset-real"],
+    ]);
+  });
+});
+
+describe("makeNameFailures", () => {
+  const menu = new Set(["check", "test-real", "test-holder"]);
+  it("flags a target off the menu that a doc, script or workflow names, and passes one on it", () => {
+    expect([
+      makeNameFailures("docs/x.md", "Run `make check`, then `make tests`.\n", menu),
+      makeNameFailures("docs/x.md", "```sh\nmake test-real ARGS=rust\nmake gone\n```\n", menu),
+      makeNameFailures("docs/x.md", "To make sure, make gone.\n", menu),
+      makeNameFailures("x.yml", "      - run: make check && make gone\n      # make gone\n", menu),
+      makeNameFailures("x.sh", 'if ! FC_SEED="$s" make gone; then\n', menu),
+      makeNameFailures(
+        "x.ts",
+        '// `make gone`\nrun("make", ["test-holder"]);\nrun("make", ["gone"]);\n',
+        menu,
+      ),
+      makeNameFailures("x.ts", 'const why = "make gone";\n', menu),
+    ]).toEqual([
+      ["docs/x.md: names `make tests`, which is not a target on `make help`'s menu."],
+      [expect.stringContaining("names `make gone`")],
+      [],
+      [expect.stringContaining("names `make gone`")],
+      [expect.stringContaining("names `make gone`")],
+      [expect.stringContaining("names `make gone`")],
+      [],
     ]);
   });
 });
@@ -4867,7 +4975,7 @@ const testIn = (crate: string, call: string) => ({
 });
 
 describe("tests that signal processes they didn't start", () => {
-  const MARK = '#[ignore = "signals processes; runs in moon run :test-real -- rust"]';
+  const MARK = '#[ignore = "signals processes; runs in make test-real ARGS=rust"]';
   const marked = `#[test]\n${MARK}\nfn m() {\n    bazhen_test_signal::require_sandbox().unwrap();\n}`;
 
   it("must be marked in a binary that runs the holder, in any of its files", () => {

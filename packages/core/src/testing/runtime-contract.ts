@@ -1,5 +1,5 @@
 // What every RuntimeAdapter promises the daemon, as one suite. It runs against FakeRuntime in
-// `moon run :check`, in both its attach modes, and against TmuxRuntime in the test container, so
+// `make check`, in both its attach modes, and against TmuxRuntime in the test container, so
 // the fake can't drift from tmux. It reads a ref's locator only for the generation every runtime
 // records.
 

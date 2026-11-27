@@ -8,7 +8,7 @@ The daemon listens on IPv4 loopback (`127.0.0.1`) and nowhere else, and it never
 To open it from a laptop or another machine, forward a port to that loopback address over SSH.
 When the two machines aren't on one network, reach the daemon host's SSH port through a VPN such as
 Tailscale. The forward carries the page and its API, and the daemon needs no extra configuration
-for it. Build the web app first (`moon run :build`): the daemon serves whatever was built last, and
+for it. Build the web app first (`make build`): the daemon serves whatever was built last, and
 answers that it isn't built until then.
 
 `web.listen = "lan"`, `web.lan_port` and `web.lan_allow` are not supported by the Rust daemon: it

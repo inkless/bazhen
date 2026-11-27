@@ -1,4 +1,4 @@
-//! The event log against what `moon run :schema` records of the TypeScript one
+//! The event log against what `make schema` records of the TypeScript one
 //! (packages/protocol/fixtures/store/events.json): the same event types, each streamed with the
 //! same keys, the same rows written for the same commands, and the same idempotency answers.
 

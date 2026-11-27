@@ -5,7 +5,7 @@ description: Writes an integration test in tests/integration that drives Bazhen'
 
 # Write an integration test against real tmux
 
-**Gate: integration tests run only in the test container (`moon run :test-real`), never on the
+**Gate: integration tests run only in the test container (`make test-real`), never on the
 host, and every tmux server the test starts is named by `testServer()` and killed in
 `afterAll`.** Teardown fails the whole run on any server left alive. A leaked PTY starves every
 terminal on the machine, not just Bazhen's.
@@ -23,9 +23,9 @@ terminal on the machine, not just Bazhen's.
    with the last value it saw. Never `sleep` to wait for a result, and never a boolean wait helper.
 5. If the code opens PTYs, add or extend the lifecycle test: repeat the operation about 30 times
    and `expect.poll(ptyHandleCount).toBeLessThanOrEqual(baseline)`.
-6. Run it with `moon run :test-real -- integration`, then `moon run :check`. On the host the suite
+6. Run it with `make test-real ARGS=integration`, then `make check`. On the host the suite
    refuses to start; that is the safety check working, not something to get around.
-7. Before pushing, run `moon run :test-real -- falsify` and handle the result as in
+7. Before pushing, run `make test-real ARGS=falsify` and handle the result as in
    `bz-write-unit-test` step 6.
 
 ## Gotchas (each one cost real debugging)

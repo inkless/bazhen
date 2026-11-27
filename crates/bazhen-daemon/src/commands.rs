@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn ends_a_command_that_outlives_its_timeout_and_says_so() {
         bazhen_test_signal::require_sandbox().unwrap();
         let run = commands(&[("PATH", "/usr/bin:/bin")]);

@@ -342,7 +342,7 @@ mod tests {
     /// Each target would harm nothing if the floor let it through: SIGCONT changes nothing for a
     /// running process.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_nothing_to_this_process_its_parent_or_its_group() {
         bazhen_test_signal::require_sandbox().unwrap();
         let this = getpid();
@@ -404,7 +404,7 @@ mod tests {
     /// pin: whatever had it is gone, and nothing at it is read or sent.
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn pins_a_process_before_checking_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut child = Command::new("true").spawn().unwrap();
@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_nothing_to_a_pinned_process_not_shown_as_the_one_meant() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (mut child, at) = sleeping();
@@ -440,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_to_a_pinned_process_shown_as_the_one_meant() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (mut child, at) = sleeping();
@@ -516,7 +516,7 @@ mod tests {
     /// Signal 0 sends nothing, but a child exited and unreaped still holds its pid, so it is
     /// still there.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn finds_a_child_alive_until_it_is_reaped() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut child = Command::new("true").spawn().unwrap();

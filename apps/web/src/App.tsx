@@ -58,7 +58,7 @@ export function App() {
             <>
               <p role="alert">
                 This page and the daemon are different builds of Bazhen. Reload the page; if this
-                comes back, build and restart Bazhen: <code>moon run :build</code>, then{" "}
+                comes back, build and restart Bazhen: <code>make build</code>, then{" "}
                 <code>bazhen stop</code> and <code>bazhen start</code>.
               </p>
               {/* The dashboard it replaces may have held focus, which would be left nowhere. */}

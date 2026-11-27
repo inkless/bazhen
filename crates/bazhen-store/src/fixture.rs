@@ -1,4 +1,4 @@
-//! The Rust store against what `moon run :schema` records of the TypeScript one
+//! The Rust store against what `make schema` records of the TypeScript one
 //! (packages/protocol/fixtures/store/): the same migrations, each with code where it has code, the
 //! same pragmas, the same schema from any starting point, and the same rows from each migration
 //! with code of its own. A migration added to the TypeScript daemon fails here until it is added

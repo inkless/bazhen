@@ -120,7 +120,7 @@ export const DoctorResponse = z.object({
        * Absent from an older daemon.
        */
       pairing: z.object({ mode: z.enum(["auto", "always"]), required: z.boolean() }).optional(),
-      /** The built web client the daemon serves, or null before `moon run :build`. Absent from an older daemon. */
+      /** The built web client the daemon serves, or null before `make build`. Absent from an older daemon. */
       app: z.string().nullable().optional(),
       /**
        * Why the web client built where the daemon looks isn't served: someone besides the
@@ -148,7 +148,7 @@ export const DoctorResponse = z.object({
     .optional(),
   /**
    * Whether desktop notifications are on, and the notifier they go through: Bazhen.app on macOS,
-   * notify-send on Linux, or null where there is none (on macOS, `moon run :build-notify` builds
+   * notify-send on Linux, or null where there is none (on macOS, `make build-notify` builds
    * it). Absent from an older daemon.
    */
   notifications: z.object({ desktop: z.boolean(), notifier: z.string().nullable() }).optional(),

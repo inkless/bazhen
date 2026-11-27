@@ -22,6 +22,7 @@ import {
   selections,
   type Verdict,
   withoutEquivalents,
+  withoutMake,
 } from "./holder-mutants.ts";
 
 const at = (file: string, what: string) => `crates/bazhen-holder/src/${file}:10:5: ${what}`;
@@ -586,5 +587,18 @@ describe("refusalUnderTest", () => {
 
   it("is in force in this very test run", () => {
     expect(refusalUnderTest(process.env)).toContain("under a test");
+  });
+});
+
+describe("withoutMake", () => {
+  it("gives the suite's make none of the flags the make that started the run hands on", () => {
+    const outer = {
+      MAKEFLAGS: "i -- ARGS=x",
+      MFLAGS: "-i",
+      MAKELEVEL: "1",
+      MAKEOVERRIDES: "",
+      PATH: "/bin",
+    };
+    expect(withoutMake(outer)).toEqual({ PATH: "/bin" });
   });
 });

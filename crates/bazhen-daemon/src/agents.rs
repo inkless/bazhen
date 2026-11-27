@@ -136,7 +136,7 @@ pub(crate) const NO_CHANNEL: &str =
     "the daemon is still starting: try again once it serves its agents";
 
 /// Why no agent can be launched while no hook client is built: agents report through it.
-pub(crate) const NO_HOOK: &str = "this daemon can't launch agents: bazhen-hook, which they report through, isn't built. Build it with moon run :build-hook, then start the daemon again";
+pub(crate) const NO_HOOK: &str = "this daemon can't launch agents: bazhen-hook, which they report through, isn't built. Build it with make build-hook, then start the daemon again";
 
 /// The request as a launch key keeps it: as it was asked, before its directory was resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1592,7 +1592,7 @@ pub(crate) mod tests {
         });
         let refused = runtime().block_on(f.launch(request("k-1")));
         assert_eq!(refused, Err(AgentError::Unavailable(NO_HOOK.to_owned())));
-        assert!(NO_HOOK.contains("moon run :build-hook"));
+        assert!(NO_HOOK.contains("make build-hook"));
         assert_eq!(f.types(), Vec::<String>::new());
     }
 

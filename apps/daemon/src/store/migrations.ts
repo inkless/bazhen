@@ -46,7 +46,7 @@ export interface Migration {
  * on those already here when it was written, and two written in parallel must not depend on each
  * other: either may run first. When two appended at once conflict, keep both.
  *
- * A migration here is never edited, renamed or removed (`moon run :check` holds it): it has run on
+ * A migration here is never edited, renamed or removed (`make check` holds it): it has run on
  * users' databases, and changing it forks their schema from new installs. Add one instead, with a
  * medium test that upgrades a database from the one before.
  */
@@ -88,7 +88,7 @@ export const MIGRATIONS: readonly Migration[] = [
 
 /**
  * The migrations the runner that numbered them knew, in its order: a database it left at version n
- * has run the first n. `MIGRATIONS` starts with these, in this order (`moon run :check` holds it).
+ * has run the first n. `MIGRATIONS` starts with these, in this order (`make check` holds it).
  */
 export const NUMBERED_MIGRATIONS: readonly string[] = [
   "2026-11-01-host-events-terminals",

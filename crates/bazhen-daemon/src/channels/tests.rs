@@ -1225,7 +1225,7 @@ fn records_the_version_its_server_answers_on_once_for_each_change() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn respawns_a_codex_agent_on_its_thread_resumed_over_the_channel() {
     bazhen_test_signal::require_sandbox().unwrap();
     let f = fixture();

@@ -945,7 +945,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn attaches_a_view_that_says_hello_and_answers_its_ping() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -963,7 +963,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_a_page_from_another_build_with_an_error_then_closes() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -979,7 +979,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_a_terminal_that_isnt_running_with_an_error_then_closes() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1017,7 +1017,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_an_unreadable_frame_with_an_error_then_closes() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1036,7 +1036,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_view_once_its_terminal_has_gone_after_sending_what_it_was_given() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1055,7 +1055,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn types_binary_frames_only_from_its_driver_into_the_terminal_and_resizes_it_as_it_asks() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1100,7 +1100,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_the_terminal_once_the_client_closes() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1118,7 +1118,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_the_terminal_timed_out_once_the_client_stops_answering_its_pings() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1135,7 +1135,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_revoked_device_s_view_and_leaves_the_terminal() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1201,7 +1201,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_the_terminal_once_a_revoked_device_s_close_is_sent_though_its_peer_never_answers() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1228,7 +1228,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_the_terminal_once_its_refusal_of_a_joined_view_is_sent_though_its_peer_never_answers()
     {
         bazhen_test_signal::require_sandbox().unwrap();
@@ -1248,7 +1248,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn serves_a_view_on_the_socket_s_router_from_a_task_of_its_own() {
         bazhen_test_signal::require_sandbox().unwrap();
         let served = Served::running();
@@ -1394,7 +1394,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn reads_the_socket_after_its_close_until_the_client_closes_too() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
@@ -1418,7 +1418,7 @@ mod tests {
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn ends_a_view_still_joining_as_timed_out_once_its_client_stops_answering() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {

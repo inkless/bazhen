@@ -62,5 +62,4 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/moon
-      - run: moon run :test-containment
+      - run: make test-containment

@@ -2,7 +2,7 @@
 // items they raise for the human and their tasks, as the TypeScript store appended them, each with
 // the payload it wrote or the refusal it gave, and the rows they left; and the `/v1/state`
 // snapshot of what they left, under a view a test can answer the same.
-// `moon run :schema` writes it to packages/protocol/fixtures/agents/, where crates/bazhen-store's
+// `make schema` writes it to packages/protocol/fixtures/agents/, where crates/bazhen-store's
 // tests replay the same events and compare.
 
 import { mkdtempSync, rmSync } from "node:fs";

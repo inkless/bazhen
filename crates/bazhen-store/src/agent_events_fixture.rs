@@ -1,5 +1,5 @@
 //! The events of agents, their mail, their items for the human and their tasks, against what
-//! `moon run :schema` records of the TypeScript store (packages/protocol/fixtures/agents/events.json):
+//! `make schema` records of the TypeScript store (packages/protocol/fixtures/agents/events.json):
 //! the same run of events appended, each taken or refused as it was there, leaving the same rows
 //! in every table they write; and the `/v1/state` snapshot of what they left (snapshot.json),
 //! under the same answers to what the snapshot asks of a daemon.

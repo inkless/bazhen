@@ -351,7 +351,7 @@ mod tests {
         detail: String,
     }
 
-    /// What TypeScript's `failureDetail` answered for each text, as `moon run :schema` records it.
+    /// What TypeScript's `failureDetail` answered for each text, as `make schema` records it.
     fn cases() -> Vec<Case> {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../packages/protocol/fixtures/details/cases.json");

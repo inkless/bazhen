@@ -1,4 +1,4 @@
-// Vitest globalSetup for the medium project, which runs on the host in `moon run :check`. Medium
+// Vitest globalSetup for the medium project, which runs on the host in `make check`. Medium
 // tests never run tmux. Should one gain a tmux command by mistake, it still finds an empty socket
 // directory of its own and no TMUX, so it can only start a throwaway server, never reach one.
 // BAZHEN_HOME is temporary, so no test touches the user's real data.

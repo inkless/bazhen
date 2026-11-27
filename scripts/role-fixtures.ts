@@ -2,7 +2,7 @@
 // role files too: for each case, the definition it reads or the problem it names. A problem a YAML
 // syntax error raises is marked `syntax`, since only the words before the parser's own differ
 // from one parser to another. The built-in roles are recorded as the daemon reads them.
-// `moon run :schema` writes it to packages/protocol/fixtures/roles/.
+// `make schema` writes it to packages/protocol/fixtures/roles/.
 
 import { builtinRoles, parseRole } from "../apps/daemon/src/roles/roles.ts";
 

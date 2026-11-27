@@ -2775,7 +2775,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn kills_a_real_holder_by_its_proof_alone() {
         bazhen_test_signal::require_sandbox().unwrap();
         let dir = TempDir::new();
@@ -2810,7 +2810,7 @@ mod tests {
 
     /// The pid is read again once it is pinned, so a kill reaches only the holder still there.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn kills_nothing_at_a_vouched_pid_another_process_has_now() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (mut stranger, proof) = stranger_vouched_for(HolderUse::Kill);
@@ -2821,7 +2821,7 @@ mod tests {
 
     /// SIGUSR1 ends a process with no handler for it, as a holder's reused pid would have.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn rebinds_nothing_at_a_vouched_pid_another_process_has_now() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (mut stranger, proof) = stranger_vouched_for(HolderUse::Rebind);
@@ -2832,7 +2832,7 @@ mod tests {
 
     /// The sleeper has no handler for SIGUSR1, so the rebind ends it, which shows it was sent.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn rebinds_a_real_holder_this_process_didn_t_start_through_start_holder() {
         bazhen_test_signal::require_sandbox().unwrap();
         let dir = TempDir::new();
@@ -2851,7 +2851,7 @@ mod tests {
     /// killed by a proof for its pid and start. The shell can't stand in for it: run as a script,
     /// the holder's name is the kernel's only until the script execs something else.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn kills_a_real_silent_holder_once_the_kernel_shows_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let root = TempDir::new();

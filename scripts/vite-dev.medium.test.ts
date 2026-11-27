@@ -1,4 +1,4 @@
-// The web dev server as `moon run :dev` runs it, its own config and plugins included, in front of a
+// The web dev server as `make dev` runs it, its own config and plugins included, in front of a
 // stub daemon: what it refuses must never reach the daemon, over HTTP or as a WebSocket.
 
 import { once } from "node:events";
@@ -18,7 +18,7 @@ const STOP_MS = 5000;
 
 /**
  * Starts the dev server with the repository's own config, but its dependency cache in `cacheDir`:
- * a `moon run :dev` running alongside shares the default one, and would find its optimized
+ * a `make dev` running alongside shares the default one, and would find its optimized
  * dependencies swapped under it.
  */
 const START = `
@@ -206,7 +206,7 @@ describe("the web dev server", () => {
       stdio: ["ignore", "ignore", "pipe"],
       env: {
         ...process.env,
-        // As `moon run :dev` runs it, not as the test runner it was started from.
+        // As `make dev` runs it, not as the test runner it was started from.
         NODE_ENV: "development",
         BZ_VITE_CACHE: cache,
         BAZHEN_PORT: String(daemonPort),

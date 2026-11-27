@@ -51,7 +51,7 @@ function reading(example: Awaited<ReturnType<typeof examplesOf>>[number]) {
 
 const examples = (await Promise.all(messages.map(examplesOf))).flat();
 
-/** Where `cargo xtask schema` writes the planted corpus, which `moon run :rust-schema-check` runs. */
+/** Where `cargo xtask schema` writes the planted corpus, which `make check` runs (its rust-schema-check step). */
 const CORPUS = new URL("../../../target/protocol-shadow/corpus.json", import.meta.url);
 
 /**

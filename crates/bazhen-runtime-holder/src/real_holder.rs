@@ -217,7 +217,7 @@ fn kill_holder(terminal: &HolderRef) {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn creates_a_terminal_its_inventory_finds_and_closes_it_by_protocol() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -243,7 +243,7 @@ fn creates_a_terminal_its_inventory_finds_and_closes_it_by_protocol() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn tells_an_exit_and_a_respawn_as_the_holder_pushes_them() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -292,7 +292,7 @@ fn tells_an_exit_and_a_respawn_as_the_holder_pushes_them() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn tells_a_holder_killed_lost_and_counts_its_terminal_closed_removing_its_socket() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -319,7 +319,7 @@ fn tells_a_holder_killed_lost_and_counts_its_terminal_closed_removing_its_socket
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn reads_what_holds_a_terminals_foreground_with_its_directory() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -353,7 +353,7 @@ fn reads_what_holds_a_terminals_foreground_with_its_directory() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn lists_each_holder_for_doctor_with_its_pid_memory_and_scope() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -442,7 +442,7 @@ async fn offset_of(client: &HolderClient) -> u64 {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn holds_a_streams_snapshot_until_it_has_delivered_the_output_before_it() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -527,7 +527,7 @@ fn holds_a_streams_snapshot_until_it_has_delivered_the_output_before_it() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn confirms_a_resize_by_the_size_the_readers_holder_reports() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -564,7 +564,7 @@ const FLOOD: u64 = 8 << 20;
 const FLOODED: &str = "flood-over";
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();
@@ -639,7 +639,7 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+#[ignore = "signals processes; runs in make test-real ARGS=rust"]
 fn hands_the_writer_slot_to_the_next_stream_once_the_last_has_closed() {
     bazhen_test_signal::require_sandbox().unwrap();
     let dir = TempDir::new();

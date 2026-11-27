@@ -49,14 +49,13 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
       - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/moon
       - name: Mutate
         env:
           GROUP: ${{ inputs.group }}
           SHARD: ${{ matrix.shard }}
         run: |
           set -o pipefail
-          moon run :test-mutants-holder -- --group "$GROUP" --shard "$SHARD/4" | tee holder-mutants.txt
+          make test-mutants-holder ARGS="--group $GROUP --shard $SHARD/4" | tee holder-mutants.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:

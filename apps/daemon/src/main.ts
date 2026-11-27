@@ -229,7 +229,7 @@ if (peerInstall.installed === null)
   console.warn(
     `bazhen: no bazhen-peer (${peerInstall.reason}), so the daemon can't read which process ` +
       "calls on its socket: a call from inside an agent that presents nothing passes as yours. " +
-      "moon run :build builds it, so this install is incomplete",
+      "make build builds it, so this install is incomplete",
   );
 else
   void pruneHolderBuilds(
@@ -500,7 +500,7 @@ console.log(
 console.log(
   (await built(BUNDLE))
     ? `bazhen: serving the web app from ${BUNDLE}`
-    : `bazhen: the web app isn't built (${BUNDLE}); \`moon run :build\` builds it, serving only the API until then`,
+    : `bazhen: the web app isn't built (${BUNDLE}); \`make build\` builds it, serving only the API until then`,
 );
 const pairing = new PairingCodes();
 const devices = new DeviceAuth(store);

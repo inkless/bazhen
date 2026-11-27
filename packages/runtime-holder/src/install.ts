@@ -138,7 +138,7 @@ export async function installHolder(
 ): Promise<HolderInstall> {
   const built = await lstatOrNull(source);
   if (built === null)
-    return { installed: null, reason: `${source} isn't built; run \`moon run :build\`` };
+    return { installed: null, reason: `${source} isn't built; run \`make build\`` };
   const refusal = await dirRefusal(dir, uid);
   if (refusal !== undefined) {
     return { installed: null, reason: `refusing ${dir} for ${command} builds: ${refusal}` };

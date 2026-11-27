@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn tells_those_under_an_agent_it_closes_and_lifts_what_the_close_strands() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, lead, generation) = launched();
@@ -735,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn tells_those_under_a_lost_agent_it_closes_and_lifts_what_the_close_strands() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, lead, generation) = launched();
@@ -759,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_running_agent_ending_its_terminal_and_making_its_mail_on_the_way_undeliverable() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();
@@ -797,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn leaves_an_agent_closing_when_its_runtime_cant_be_reached_and_a_later_close_finishes_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();
@@ -826,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn forces_only_a_close_already_refused_and_only_past_a_failure_force_may_record_past() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();
@@ -863,7 +863,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn closes_a_lost_agent_without_asking_its_runtime() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();
@@ -891,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn signals_a_running_agents_process_through_its_runtime_and_records_it_once_per_key() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();
@@ -919,7 +919,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_a_signal_at_another_generation_or_to_an_agent_it_doesnt_know_recording_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();
@@ -947,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_a_signal_to_a_process_that_has_exited_as_the_runtime_says() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();
@@ -961,7 +961,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_a_signal_to_an_agent_recorded_exited_without_asking_its_runtime() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (f, agent, generation) = launched();

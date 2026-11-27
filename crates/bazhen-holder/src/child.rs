@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_close_of_a_reaped_child_signals_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (status, seen) = signals_seen_by_a_stand_in(|pid| {
@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_signal_after_the_exit_is_refused_and_sends_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (status, seen) = signals_seen_by_a_stand_in(|pid| {
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_signal_to_a_live_child_reaches_its_group() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (_, seen) = signals_seen_by_a_stand_in(|pid| {
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_child_reaped_during_the_grace_is_not_killed() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (status, seen) = signals_seen_by_a_stand_in(|pid| {
@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_second_close_carries_on_the_first_rather_than_starting_it_over() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (status, _) = signals_seen_by_a_stand_in(|pid| {

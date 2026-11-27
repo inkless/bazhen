@@ -277,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn answers_how_a_run_that_ends_in_time_exited() {
         bazhen_test_signal::require_sandbox().unwrap();
         let run = ran(
@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn keeps_the_output_of_a_kept_run() {
         bazhen_test_signal::require_sandbox().unwrap();
         let run = block_on(run_kept(
@@ -322,7 +322,7 @@ mod tests {
 
     /// Past the cap the output is still read, so the command isn't held up writing it.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn keeps_no_more_output_than_its_cap_and_reads_the_rest() {
         bazhen_test_signal::require_sandbox().unwrap();
         let run = block_on(run_kept(
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn answers_a_command_that_isnt_there_as_unstarted() {
         bazhen_test_signal::require_sandbox().unwrap();
         let run = ran(
@@ -355,7 +355,7 @@ mod tests {
     /// Its output closed, the run is past reading and waits for its leader; a grandchild in its
     /// group, which a kill of the leader alone would leave running, ends with the group.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn kills_the_whole_group_of_a_run_that_outlives_its_time() {
         bazhen_test_signal::require_sandbox().unwrap();
         let file = pid_file("outlives");
@@ -371,7 +371,7 @@ mod tests {
     /// The leader exits at once, but a member of its group holds the output open: the run is
     /// still bounded, and the member still ends with its group.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn kills_a_member_that_holds_the_output_after_its_leader_exits() {
         bazhen_test_signal::require_sandbox().unwrap();
         let file = pid_file("holds");
@@ -387,7 +387,7 @@ mod tests {
     /// On macOS tokio's first spawn sets a SIGCHLD handler of its own, which holds the leader as
     /// well, so only Linux's run shows the default is what holds it.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn kills_a_member_after_its_leader_exits_once_an_ignored_sigchld_is_given_its_default() {
         bazhen_test_signal::require_sandbox().unwrap();
         if !bazhen_test_signal::in_sigchld_ignored_run() {
@@ -414,7 +414,7 @@ mod tests {
     /// keeps the leader. The test runs itself again under a parent that ignored SIGCHLD.
     #[test]
     #[cfg(target_os = "linux")]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_the_group_of_a_leader_the_kernel_reaped_as_sigchld_was_ignored() {
         bazhen_test_signal::require_sandbox().unwrap();
         if !bazhen_test_signal::in_sigchld_ignored_run() {
@@ -442,7 +442,7 @@ mod tests {
     /// A run given up on, as a handler's future dropped when its client goes, still ends its
     /// group.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn kills_the_group_of_a_run_given_up_on() {
         bazhen_test_signal::require_sandbox().unwrap();
         let file = pid_file("dropped");
@@ -464,7 +464,7 @@ mod tests {
     /// Reaped by something other than its `Child`, which still names its pid, the leader's pid is
     /// free: the kernel is asked, not the `Child`.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_nothing_to_a_group_whose_leader_something_else_reaped() {
         bazhen_test_signal::require_sandbox().unwrap();
         block_on(async {
@@ -483,7 +483,7 @@ mod tests {
 
     /// Reaped, the leader's pid is free, and the group's number can become another's.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn sends_nothing_to_a_group_whose_leader_has_been_reaped() {
         bazhen_test_signal::require_sandbox().unwrap();
         block_on(async {

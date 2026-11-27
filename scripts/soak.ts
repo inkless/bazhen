@@ -1,6 +1,6 @@
-// `moon run :soak -- [--profile gate|long-life|smoke] [--hours n] [--out dir] [--fault close-holder|slow-probe]…`:
+// `make soak ARGS='[--profile gate|long-life|smoke] [--hours n] [--out dir] [--fault close-holder|slow-probe]…'`:
 // a real daemon on holders, under design §12.4's load and churn, for hours, then the verdict of
-// scripts/soak-judge.ts on what it recorded. `moon run :soak -- --judge <dir>` judges a finished
+// scripts/soak-judge.ts on what it recorded. `make soak ARGS='--judge <dir>'` judges a finished
 // run's directory again. The long-life profile is the gate's without the daemon's restarts, so the
 // one daemon's memory and echo are read over its whole life; a run whose daemon dies ends there.
 //
@@ -217,8 +217,8 @@ export type SoakArgs =
     };
 
 const USAGE =
-  `usage: moon run :soak -- [--profile ${PROFILES.join("|")}] [--hours n] [--out dir] ` +
-  "[--fault close-holder|slow-probe]… | moon run :soak -- --judge <dir>";
+  `usage: make soak ARGS='[--profile ${PROFILES.join("|")}] [--hours n] [--out dir] ` +
+  "[--fault close-holder|slow-probe]…' | make soak ARGS='--judge <dir>'";
 
 /** The command line's run, or the directory to judge again. */
 export function parseSoakArgs(args: readonly string[], now = new Date()): SoakArgs {
@@ -1402,7 +1402,7 @@ class Soak {
   }
 }
 
-/** `moon run :soak`: a run, refused off a disposable host, or a run's directory judged again. */
+/** `make soak`: a run, refused off a disposable host, or a run's directory judged again. */
 export async function main(
   args: readonly string[],
   sandboxed = inSignalSandbox(),

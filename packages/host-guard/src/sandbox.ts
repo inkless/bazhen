@@ -31,5 +31,5 @@ export const inSignalSandbox = (host: SandboxHost = thisHost()) => host.markerOw
 /** Why a signalling test won't run here, and where it does. */
 export const SANDBOX_RULE =
   "such a test signals processes it didn't start, so it runs only on a host that exists to be " +
-  "thrown away: the test container (moon run :test-real) or a CI runner, each carrying a root-owned " +
+  "thrown away: the test container (make test-real) or a CI runner, each carrying a root-owned " +
   `${DISPOSABLE_HOST_MARKER}. Never create that file on a machine you work on`;

@@ -670,7 +670,7 @@ mod tests {
     const JOB: &str = "set -m; (trap '' HUP; exec sleep 30) & wait";
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_count_finds_the_leader_and_a_job_in_a_group_of_its_own() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start(JOB);
@@ -696,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_signal_reaches_a_job_in_a_group_of_its_own_and_the_leader() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start(JOB);
@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_pass_signals_the_leader_before_its_jobs_whatever_order_it_lists_them_in() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start(&format!("trap '' HUP; {JOB}"));
@@ -724,7 +724,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_process_outside_the_session_is_never_signalled_though_it_is_a_candidate() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start(JOB);
@@ -749,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_pid_with_no_process_counts_as_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start(JOB);
@@ -761,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_leader_killed_with_its_output_unread_is_still_seen_to_exit() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start("echo unread; exec sleep 30");
@@ -774,7 +774,7 @@ mod tests {
     /// The drop is how most tests end their leader, so it is held to the same bound: run on a
     /// thread of its own, a drop that blocks fails here instead of hanging the test.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_leader_dropped_with_its_output_unread_is_ended_and_reaped() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start("echo unread; exec sleep 30");
@@ -798,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn an_exited_leader_left_unreaped_is_not_counted() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start("exit 3");
@@ -834,7 +834,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_pass_that_cant_list_the_processes_is_incomplete_not_empty() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start(JOB);
@@ -848,7 +848,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn a_member_that_cant_be_read_makes_the_pass_incomplete_not_empty() {
         bazhen_test_signal::require_sandbox().unwrap();
         let leader = Leader::start(JOB);
@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn passes_over_one_listing_each_find_their_own_session_and_no_other() {
         bazhen_test_signal::require_sandbox().unwrap();
         let (first, second) = (Leader::start(JOB), Leader::start(JOB));

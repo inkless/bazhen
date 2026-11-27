@@ -7,7 +7,7 @@
 // tests/api pins, committed in packages/protocol/fixtures/codex-schema/, unless it is marked `bad`:
 // off that schema on purpose, with a field the readers take absent, null or of the wrong type.
 // codex-fixtures.medium.test.ts holds each case to the schema.
-// `moon run :schema` writes it to packages/protocol/fixtures/codex/. This script is a parity
+// `make schema` writes it to packages/protocol/fixtures/codex/. This script is a parity
 // capture: it goes with the TypeScript daemon, and the fixtures it wrote stay.
 
 import type { AgentLaunchRequest, HarnessChannelPort, LaunchOptions } from "@bazhen/core";

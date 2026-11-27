@@ -64,7 +64,7 @@ export function judgeableHere(work: SignallingWork): boolean {
   if ((work.sources.length === 0 && work.tests.length === 0) || inSandbox()) return true;
   console.error(
     "falsify: this branch would revert or mutate code that signals processes, or run tests that " +
-      "do, which happens only in a sandbox. Run `moon run :test-real -- falsify`." +
+      "do, which happens only in a sandbox. Run `make test-real ARGS=falsify`." +
       pathList("Signalling code", work.sources) +
       pathList("Signalling tests", work.tests),
   );

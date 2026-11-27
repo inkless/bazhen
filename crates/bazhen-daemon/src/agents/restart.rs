@@ -811,7 +811,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn starts_an_exited_agent_again_on_its_session_at_the_next_generation_waiting_on_its_harness() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -874,7 +874,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn refuses_an_agent_whose_session_cant_resume_recording_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull());
@@ -908,7 +908,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn rejects_a_respawn_its_runtime_refuses_leaving_the_agent_exited_on_its_terminal() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();
@@ -953,7 +953,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn rejects_a_respawn_its_harness_refuses_as_a_conflict_starting_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull())
@@ -987,7 +987,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn keeps_the_session_its_tui_moved_to_while_it_started_again() {
         bazhen_test_signal::require_sandbox().unwrap();
         let stub = StubHarness::new(pull()).resuming();

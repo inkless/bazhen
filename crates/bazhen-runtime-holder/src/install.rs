@@ -67,7 +67,7 @@ pub struct InstalledHolder {
 /// Why no build was installed.
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
-    #[error("{} isn't built; run `moon run :build`", .binary.display())]
+    #[error("{} isn't built; run `make build`", .binary.display())]
     NotBuilt { binary: PathBuf },
     #[error("refusing {} for {command} builds: {why}", .dir.display())]
     Refused {
@@ -1148,7 +1148,7 @@ mod tests {
     /// this process and the sleeper: any other process of this user whose arguments can't be read
     /// would rightly make the running builds unknown.
     #[test]
-    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    #[ignore = "signals processes; runs in make test-real ARGS=rust"]
     fn keeps_a_build_a_live_holder_runs_while_the_next_installs_then_prunes_it_once_it_ends() {
         bazhen_test_signal::require_sandbox().unwrap();
         let home = home();

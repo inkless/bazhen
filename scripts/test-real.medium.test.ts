@@ -1,4 +1,4 @@
-// What moon run :test-real puts over HEAD in its build context, read from a throwaway repository
+// What make test-real puts over HEAD in its build context, read from a throwaway repository
 // with changes staged, unstaged, deleted, renamed and untracked.
 
 import { execFileSync } from "node:child_process";

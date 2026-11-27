@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import type { DoctorResponse } from "@bazhen/protocol";
 import type { HolderInstall, HolderRuntime } from "@bazhen/runtime-holder";
 
-/** What `moon run :build` makes: the holder, in the profile that unwinds on a panic. */
+/** What `make build` makes: the holder, in the profile that unwinds on a panic. */
 export const HOLDER_SOURCE = fileURLToPath(
   new URL("../../../../target/release-holder/bazhen-holder", import.meta.url),
 );

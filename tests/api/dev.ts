@@ -1,4 +1,4 @@
-// `moon run :dev` as a developer's terminal runs it: in a pty, stopped with Ctrl-C. Linux only, for
+// `make dev` as a developer's terminal runs it: in a pty, stopped with Ctrl-C. Linux only, for
 // /proc and util-linux `script`: like every api helper, it runs on a disposable host.
 
 import type { ChildProcess } from "node:child_process";
@@ -65,7 +65,7 @@ const commandLine = (pid: number) =>
   proc(() => readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim());
 
 /**
- * `moon run :dev` on a fresh home and free ports, in the pty of a `script` that leads a process
+ * `make dev` on a fresh home and free ports, in the pty of a `script` that leads a process
  * group of this run's own. Ctrl-C goes in through `script`'s stdin, as a key would.
  */
 export class DevRun {
@@ -73,7 +73,7 @@ export class DevRun {
   private readonly script: ChildProcess;
   private output = "";
   private exited = false;
-  /** What `script -e` reports: moon's exit status, or 128 + the signal that ended it. */
+  /** What `script -e` reports: make's exit status, or 128 + the signal that ended it. */
   private status: number | null = null;
   /** Everything the run started, kept so `stop` can wait for processes reparented away. */
   private readonly seen = new Set<number>();
@@ -97,8 +97,8 @@ export class DevRun {
       BAZHEN_PORT: String(await freePort()),
       BAZHEN_WEB_PORT: String(await freePort()),
     };
-    // `exec`, so the status is moon's: a non-interactive sh left in between dies of the Ctrl-C.
-    const script = spawnGroup("script", ["-qefc", "exec moon run :dev", "/dev/null"], {
+    // `exec`, so the status is make's: a non-interactive sh left in between dies of the Ctrl-C.
+    const script = spawnGroup("script", ["-qefc", "exec make dev", "/dev/null"], {
       cwd: repo,
       env,
       stdio: "pipe",
@@ -110,10 +110,10 @@ export class DevRun {
           run.record();
           return run.exited || (run.text.includes("listening on") && run.text.includes("ready in"));
         },
-        "moon run :dev to start",
+        "make dev to start",
         90_000,
       );
-      if (run.exited) throw new Error(`moon run :dev exited at start:\n${run.text}`);
+      if (run.exited) throw new Error(`make dev exited at start:\n${run.text}`);
     } catch (err) {
       await run.stop();
       throw err;
@@ -128,8 +128,8 @@ export class DevRun {
 
   /**
    * Each app's node processes, by app: the daemon's (`node --watch` and the daemon it starts) and
-   * vite's. The `sh` moon starts each app's script in is left out: it reads nothing, and holds the
-   * terminal moon gave it.
+   * vite's. The make that runs both is left out: it reads nothing, and holds the terminal it was
+   * given.
    */
   apps(): { daemon: number[]; web: number[] } {
     const below = this.record();
@@ -167,12 +167,12 @@ export class DevRun {
   }
 
   /**
-   * The command lines of the processes under `moon run :dev` that hold its terminal on stdin,
+   * The command lines of the processes under `make dev` that hold its terminal on stdin,
    * stdout or stderr from outside the foreground process group, which the shell doesn't wait for.
    */
   backgroundHolders(): string[] {
-    const [moon, ...rest] = this.record();
-    const terminal = moon === undefined ? undefined : link(`/proc/${moon}/fd/0`);
+    const [make, ...rest] = this.record();
+    const terminal = make === undefined ? undefined : link(`/proc/${make}/fd/0`);
     return rest
       .filter((pid) => {
         const s = stat(pid);
@@ -182,17 +182,17 @@ export class DevRun {
       .map((pid) => commandLine(pid) ?? `${pid} (exited)`);
   }
 
-  /** Presses Ctrl-C and waits for `moon run :dev` to end; its exit status. */
+  /** Presses Ctrl-C and waits for `make dev` to end; its exit status. */
   async interrupt(): Promise<number | null> {
     this.record();
     this.script.stdin?.write("\x03");
-    await waitUntil(() => this.exited, "moon run :dev to exit", 30_000);
+    await waitUntil(() => this.exited, "make dev to exit", 30_000);
     return this.status;
   }
 
   /**
    * Ends the whole tree, then removes the home. Killing `script` closes the pty, whose hangup
-   * ends moon and the apps, which run in the terminal's foreground process group with it. Nothing
+   * ends make and the apps, which run in the terminal's foreground process group with it. Nothing
    * is removed until every process the run started has gone.
    */
   async stop(): Promise<void> {
@@ -200,7 +200,7 @@ export class DevRun {
     if (!this.exited) signalGroup(this.script, "SIGKILL");
     await waitUntil(
       () => [...this.seen].every((pid) => !existsSync(`/proc/${pid}`)),
-      "every process of moon run :dev to exit",
+      "every process of make dev to exit",
       20_000,
     );
     TmuxServer.at(join(this.home, "run", "tmux.sock"), { root: this.home }).killServer();
