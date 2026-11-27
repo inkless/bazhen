@@ -341,6 +341,16 @@ describe("make test-real cleans up after itself", () => {
     expect(ownerOf(RUN)).toBe(OWN_PID);
   });
 
+  it("has the container's init pass a signal to the suite's whole group, not to make alone", async () => {
+    const fake = fakeHost(passing);
+    expect(await run(["api"], fake.host)).toBe(0);
+    const suite = fake.calls.find(isSuiteRun);
+    expect([suite?.includes("--init"), valueAfter(suite, "--env")]).toEqual([
+      true,
+      "TINI_KILL_PROCESS_GROUP=1",
+    ]);
+  });
+
   it("gives each suite's container a CPU budget, so the run cannot take the machine", async () => {
     const fake = fakeHost(passing);
     expect(await run(["api"], fake.host)).toBe(0);

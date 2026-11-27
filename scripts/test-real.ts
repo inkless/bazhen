@@ -697,6 +697,11 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
           "run",
           "--rm",
           "--init",
+          // The init passes a forwarded signal to the suite's whole process group, not to make
+          // alone, which would wait for the suite to end: so Ctrl-C stops the suite, which prints
+          // what it ran, before the client's grace runs out.
+          "--env",
+          "TINI_KILL_PROCESS_GROUP=1",
           "--name",
           container,
           ...labels,
