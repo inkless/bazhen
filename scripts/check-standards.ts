@@ -926,8 +926,8 @@ const FOREIGN_MACROS: Record<string, ForeignMacro> = {
   "clap::value_parser": {
     read: {
       clap: {
-        version: "4.6.7",
-        checksum: "aa8876b300ab35ba921adea3dfd70157a46249b33f95c9084ae5709785478946",
+        version: "4.6.9",
+        checksum: "844c5c0b65be192cb68d570cca1b21a6444431d24e39c084dc0336177015337c",
       },
       clap_builder: {
         version: "4.6.7",
@@ -935,7 +935,7 @@ const FOREIGN_MACROS: Record<string, ForeignMacro> = {
       },
     },
     reason:
-      "read clap@4.6.7 src/lib.rs (pub use clap_builder::*) and clap_builder@4.6.7 " +
+      "read clap@4.6.9 src/lib.rs (pub use clap_builder::*) and clap_builder@4.6.7 " +
       "src/builder/value_parser.rs (value_parser!, a block of a use and a call): expansion " +
       "writes no impl",
   },
