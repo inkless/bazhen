@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@bazhen/protocol": "workspace:*",
-    "ws": "8.22.2"
+    "ws": "8.23.0"
   },
   "devDependencies": {
     "@types/ws": "8.18.2"
