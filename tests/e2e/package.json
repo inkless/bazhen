@@ -8,7 +8,7 @@
     "@bazhen/protocol": "workspace:*"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.322",
+    "@anthropic-ai/claude-code": "2.1.329",
     "@playwright/test": "1.65.1"
   }
 }
