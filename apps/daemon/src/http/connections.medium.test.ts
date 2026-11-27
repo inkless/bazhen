@@ -85,12 +85,17 @@ describe("a server whose connections are heard from the moment they are accepted
     expect(ran).toMatchObject({ code: 0, out: "lived\n" });
   });
 
-  it("ends by the same reset when its connections aren't heard, which is what hearing prevents", async () => {
-    const ran = await resetHeldUpgrade("((s) => s)");
-    expect(ran.code).toBe(1);
-    // The trace a daemon in CI died by: a read the peer reset, on a socket nothing heard.
-    expect(ran.err).toMatch(/read ECONNRESET\n\s+at Pipe\.onStreamRead/);
-  });
+  // Only Linux resets a Unix socket whose peer closes with bytes unread: macOS's reads an end
+  // instead, and its 8 KiB socket buffers never take the 64 KiB written, so the peer never closes.
+  it.runIf(process.platform === "linux")(
+    "ends by the same reset when its connections aren't heard, which is what hearing prevents",
+    async () => {
+      const ran = await resetHeldUpgrade("((s) => s)");
+      expect(ran.code).toBe(1);
+      // The trace a daemon in CI died by: a read the peer reset, on a socket nothing heard.
+      expect(ran.err).toMatch(/read ECONNRESET\n\s+at Pipe\.onStreamRead/);
+    },
+  );
 });
 
 describe("WebSockets served through heardWebSockets", () => {

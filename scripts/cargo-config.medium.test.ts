@@ -412,7 +412,10 @@ describe("scripts/xtask.sh's own build", () => {
   }, 600_000);
 
   it("runs only the one executable cargo names, and refuses none or two", () => {
-    const runs = [[], ["/bin/true", "/bin/false"], ["/bin/true"]].map((executables) => {
+    // Scripts of its own, since macOS keeps true and false in /usr/bin, not /bin.
+    const passes = runner("passes", "exit 0");
+    const fails = runner("fails", "exit 1");
+    const runs = [[], [passes, fails], [passes]].map((executables) => {
       const run = spawnSync(WRAPPER, ["help"], { encoding: "utf8", env: fakeCargo(executables) });
       rmSync(join(dir, "fake-cargo"), { recursive: true, force: true });
       return { status: run.status, refused: run.stderr.includes("no single executable") };

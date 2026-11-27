@@ -366,6 +366,9 @@ async function callers(): Promise<{ daemon: FakeDaemon; env: { BAZHEN_SOCKET: st
 const CONFLICT = (socket: string, home: string) =>
   `--home ${home} names another daemon than BAZHEN_SOCKET ${socket}; run with BAZHEN_SOCKET= to use --home\n`;
 
+/** Where the run directory follows XDG_RUNTIME_DIR, as only Linux's does. */
+const linux = process.platform === "linux";
+
 describe("the daemon any verb reaches", () => {
   it("is never looked for on a command line that names no command, so it is a usage error first", async () => {
     const elsewhere = { BAZHEN_SOCKET: join(s.root, "elsewhere", "bazhen.sock") };
@@ -585,7 +588,8 @@ describe("the daemon any verb reaches", () => {
     expect(s.daemon.received).toEqual([]);
   });
 
-  it("is under XDG_RUNTIME_DIR with no home given", async () => {
+  // XDG_RUNTIME_DIR is Linux's: macOS has none, and keeps the socket in TMPDIR (below).
+  it.runIf(linux)("is under XDG_RUNTIME_DIR with no home given", async () => {
     const runtime = join(s.root, "xdg");
     mkdirSync(join(runtime, "bazhen"), { recursive: true });
     const theirs = await FakeDaemon.listen(join(runtime, "bazhen", "bazhen.sock"));
@@ -597,6 +601,30 @@ describe("the daemon any verb reaches", () => {
       await theirs.close();
     }
   });
+
+  it.runIf(process.platform === "darwin")(
+    "is under TMPDIR on macOS with no home given, whatever XDG_RUNTIME_DIR says",
+    async () => {
+      const tmp = join(s.root, "tmp");
+      const runtime = join(s.root, "xdg");
+      mkdirSync(join(tmp, "bazhen"), { recursive: true });
+      mkdirSync(join(runtime, "bazhen"), { recursive: true });
+      const ours = await FakeDaemon.listen(join(tmp, "bazhen", "bazhen.sock"));
+      const theirs = await FakeDaemon.listen(join(runtime, "bazhen", "bazhen.sock"));
+      try {
+        ours.answer("GET /v1/state", StateSnapshot, snapshot());
+        theirs.answer("GET /v1/state", StateSnapshot, snapshot());
+        const ran = await s.bare(["tasks", "list", "--all"], {
+          TMPDIR: tmp,
+          XDG_RUNTIME_DIR: runtime,
+        });
+        expect([ran.code, ours.routes(), theirs.routes()]).toEqual([0, ["GET /v1/state"], []]);
+      } finally {
+        await ours.close();
+        await theirs.close();
+      }
+    },
+  );
 
   it("is in a short directory of its own under /tmp when the home's socket path would be too long", async () => {
     const home = join(s.root, "h".repeat(100));
@@ -614,12 +642,15 @@ describe("the daemon any verb reaches", () => {
     }
   });
 
-  it("is /tmp/bazhen-<uid>'s with no home and no absolute XDG_RUNTIME_DIR", async ({ skip }) => {
-    const socket = `/tmp/bazhen-${userInfo().uid}/bazhen.sock`;
-    skip(existsSync(socket), `a daemon may be listening on ${socket}`);
-    const ran = await s.bare(["doctor"], { XDG_RUNTIME_DIR: "relative/is/ignored" });
-    expect([ran.code, ran.stdout]).toEqual([1, `daemon: not running (no answer on ${socket})\n`]);
-  });
+  it.runIf(linux)(
+    "is /tmp/bazhen-<uid>'s with no home and no absolute XDG_RUNTIME_DIR",
+    async ({ skip }) => {
+      const socket = `/tmp/bazhen-${userInfo().uid}/bazhen.sock`;
+      skip(existsSync(socket), `a daemon may be listening on ${socket}`);
+      const ran = await s.bare(["doctor"], { XDG_RUNTIME_DIR: "relative/is/ignored" });
+      expect([ran.code, ran.stdout]).toEqual([1, `daemon: not running (no answer on ${socket})\n`]);
+    },
+  );
 });
 
 const TOKEN = `${"t".repeat(42)}_`;
