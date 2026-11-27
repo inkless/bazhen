@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use bazhen_holder::{process, start_time};
-use bazhen_holder_proto::body::SpawnSpec;
+use bazhen_holder_proto::body::{SpawnSpec, StartTime};
 use futures_util::future::{Either, select};
 use rustix::process::{Pid, RawPid, Signal};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -160,15 +160,29 @@ impl fmt::Display for Reading {
 /// What the kernel says of `pid`: when it started, its name, and when it started again, so a
 /// pid reused between the reads reads as unreadable rather than as half of each process.
 pub(crate) fn read_process(pid: Pid) -> Reading {
-    let start = match start_time::of(pid) {
-        Ok(start) => start.get(),
+    read_process_by(
+        pid,
+        |pid| start_time::of(pid).map(StartTime::get),
+        process::comm,
+    )
+}
+
+/// `read_process`, on what `start` and `comm` read, so its tests can show it any answer without
+/// a process.
+fn read_process_by(
+    pid: Pid,
+    mut start_of: impl FnMut(Pid) -> Result<u64, start_time::StartTimeError>,
+    comm: impl FnOnce(Pid) -> io::Result<OsString>,
+) -> Reading {
+    let start = match start_of(pid) {
+        Ok(start) => start,
         Err(start_time::StartTimeError::Absent(_)) => return Reading::Absent,
         Err(e) => return Reading::Unreadable(e.to_string()),
     };
-    let comm = process::comm(pid);
-    match (start_time::of(pid), comm) {
-        (Ok(again), Ok(comm)) if again.get() == start => Reading::Running { comm, start },
-        (Ok(again), Err(e)) if again.get() == start => Reading::Nameless {
+    let comm = comm(pid);
+    match (start_of(pid), comm) {
+        (Ok(again), Ok(comm)) if again == start => Reading::Running { comm, start },
+        (Ok(again), Err(e)) if again == start => Reading::Nameless {
             start,
             why: e.to_string(),
         },
@@ -242,8 +256,11 @@ pub fn holder_running(holder: HolderProcess) -> Option<bool> {
 fn running_by(holder: HolderProcess, read: impl FnOnce(Pid) -> Reading) -> Option<bool> {
     match reading_of(holder, read) {
         None => Some(false),
-        // Its start alone shows it isn't the holder, though no signal is sent on that.
-        Some(Reading::Nameless { start, .. }) if start.abs_diff(holder.start) > START_SKEW_S => {
+        // Its start alone shows it isn't the holder, though no signal is sent on that, unless the
+        // holder's own start was never known.
+        Some(Reading::Nameless { start, .. })
+            if holder.start != UNKNOWN_START && start.abs_diff(holder.start) > START_SKEW_S =>
+        {
             Some(false)
         }
         Some(reading) => shown(holder, &reading).ok(),
@@ -1504,10 +1521,69 @@ mod tests {
     #[test]
     fn takes_a_nameless_process_that_started_at_another_time_for_no_holder() {
         let skew = super::START_SKEW_S;
-        let readings = [START, START + skew, START - skew - 1, START + skew + 1].map(nameless);
+        let readings = [
+            START,
+            START - skew,
+            START + skew,
+            START - skew - 1,
+            START + skew + 1,
+        ]
+        .map(nameless);
         assert_eq!(
             readings.map(|reading| super::running_by(holder(), |_| reading)),
-            [None, None, Some(false), Some(false)]
+            [None, None, None, Some(false), Some(false)]
+        );
+    }
+
+    /// A holder recorded under `UNKNOWN_START`, as one whose process couldn't be read as it
+    /// started is, has no start a reading could disprove: a nameless one may still be it.
+    #[test]
+    fn keeps_a_nameless_process_at_a_holder_whose_start_was_never_known() {
+        let unknown = HolderProcess {
+            pid: pid(),
+            start: UNKNOWN_START,
+        };
+        assert_eq!(super::running_by(unknown, |_| nameless(START)), None);
+    }
+
+    /// Its start read twice alike and its name not, a process is nameless; its start changed
+    /// between the reads, it is unreadable, whatever its name; gone by the second, it is absent.
+    #[test]
+    fn reads_a_process_whose_name_alone_cant_be_read_as_nameless_by_its_start() {
+        let esrch = || std::io::Error::from_raw_os_error(3);
+        let read = |again: u64, absent: bool, comm: Option<&str>| {
+            let mut starts = vec![
+                if absent {
+                    Err(bazhen_holder::start_time::StartTimeError::Absent(PID))
+                } else {
+                    Ok(again)
+                },
+                Ok(START),
+            ];
+            let comm = comm.map(OsString::from).ok_or_else(esrch);
+            super::read_process_by(
+                pid(),
+                |at| {
+                    assert_eq!(at, pid());
+                    starts.pop().unwrap()
+                },
+                |_| comm,
+            )
+        };
+        let why = esrch().to_string();
+        assert_eq!(
+            [
+                read(START, false, None),
+                read(START + 1, false, None),
+                read(START, true, None),
+                read(START, false, Some("bazhen-holder")),
+            ],
+            [
+                Reading::Nameless { start: START, why },
+                Reading::Unreadable("its start changed while it was read".to_owned()),
+                Reading::Absent,
+                holder_at(START),
+            ]
         );
     }
 
