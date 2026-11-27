@@ -4593,6 +4593,17 @@ export const OWN_ARGS = "$(value ARGS)";
 export const HELP_COMMAND =
   '@exec awk -F \':.*## \' \'BEGIN { print "make <target> [ARGS=\\"<its arguments>\\"]\\n" } ' +
   '/^[a-z][a-z0-9-]*:.*## / { printf "  %-22s %s\\n", $$1, $$2 }\' Makefile';
+// The only command lines that take no ARGS, by target, each with why. Every other passes the words
+// a person put in ARGS on to its program, so `make <target> ARGS=…` never drops them unseen.
+export const ARGLESS_LINES: Readonly<
+  Record<string, { readonly line: string; readonly why: string }>
+> = {
+  help: { line: HELP_COMMAND, why: "the menu lists every target, and takes nothing" },
+  "web-build": {
+    line: "exec chmod -R g-w,o-w apps/web/dist",
+    why: "it fixes the build's permissions after vite, whose line takes the ARGS",
+  },
+};
 // A target's own command, a line per program: `exec <program>`, after a `cd <dir> &&` at most. make
 // passes a SIGTERM to its children alone, and a shell left between make and the program dies of it
 // and leaves the program running.
@@ -4744,6 +4755,13 @@ export function makefileTargets(text: string): {
             `${makefileAt(line)}: the "${name}" target's command line must be one program, ` +
               "`exec`ed after a `cd <dir> &&` at most: make passes a SIGTERM to its children alone, " +
               "so a shell left between make and the program would leave it running.",
+          );
+        }
+        if (!body.includes(OWN_ARGS) && ARGLESS_LINES[name]?.line !== body) {
+          problems.push(
+            `${makefileAt(line)}: the "${name}" target's command line must take \`${OWN_ARGS}\`, ` +
+              "or make would drop the ARGS a person gives it unseen (ARGLESS_LINES in " +
+              "scripts/check-standards.ts lists the lines that may not).",
           );
         }
         command = command === undefined ? body : `${command} && ${body}`;
