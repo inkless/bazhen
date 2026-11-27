@@ -6479,7 +6479,7 @@ function workflowJobs(text: string): Map<string, string[]> {
   let inJobs = false;
   let current: string[] | undefined;
   for (const line of text.split("\n")) {
-    if (/^\S/.test(line)) {
+    if (/^[^\s#]/.test(line)) {
       inJobs = line.trimEnd() === "jobs:";
       current = undefined;
       continue;
@@ -6506,9 +6506,9 @@ export function partitionFailures(file: string, text: string): string[] {
       const m = /^\s+(?:-\s+)?partition:\s*["']?(\d+)\/(\d+)["']?\s*$/.exec(line);
       return m?.[1] === undefined || m[2] === undefined ? [] : [[Number(m[1]), Number(m[2])]];
     });
-    const usesPartition = lines.some(
-      (line) => !line.trimStart().startsWith("#") && line.includes("--partition"),
-    );
+    const code = lines.filter((line) => !line.trimStart().startsWith("#"));
+    const passing = code.filter((line) => line.includes("--partition"));
+    const usesPartition = passing.length > 0;
     if (given.length === 0) {
       if (usesPartition) {
         out.push(
@@ -6517,6 +6517,20 @@ export function partitionFailures(file: string, text: string): string[] {
         );
       }
       continue;
+    }
+    // The variables the job sets to the leg's partition, which a step may pass as `$NAME`.
+    const carriers = code.flatMap((line) => {
+      const m = /^\s+(\w+):\s*\$\{\{\s*matrix\.partition\s*\}\}\s*$/.exec(line);
+      return m?.[1] === undefined ? [] : [m[1]];
+    });
+    const fromMatrix = (line: string) =>
+      /\$\{\{\s*matrix\.partition\s*\}\}/.test(line) ||
+      carriers.some((name) => new RegExp(`\\$\\{?${name}\\b`).test(line));
+    for (const line of passing.filter((l) => !fromMatrix(l))) {
+      out.push(
+        `${file}: job ${job} passes --partition other than its leg's \`matrix.partition\`: ` +
+          `\`${line.trim()}\`, so every leg could run one slice.`,
+      );
     }
     const counts = new Set(given.map(([, n]) => n));
     const indexes = given.map(([k]) => k).toSorted((a, b) => (a ?? 0) - (b ?? 0));
