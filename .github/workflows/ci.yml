@@ -41,15 +41,7 @@ jobs:
           node-version: ${{ matrix.node != 'pinned' && matrix.node || '' }}
           node-version-file: ${{ matrix.node == 'pinned' && '.nvmrc' || '' }}
           cache: pnpm
-      - name: Install tmux
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
-      - name: Install tmux
-        if: runner.os == 'macOS'
-        run: command -v tmux || brew install tmux
-      # The real-tmux suites refuse to run on any host that is not thrown away after use.
-      - name: Mark the runner disposable
-        run: sudo touch /etc/bazhen-disposable-host
+      # No tmux, shells or disposable marking: check-ts runs no suite that needs them.
       # check-ts runs rustfmt on the crates (crates/), and builds the binaries the medium tests run,
       # on the toolchain rust-toolchain.toml pins.
       - name: Install the pinned Rust toolchain
@@ -86,12 +78,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Each leg installs the one tool it runs: cargo-deny for check-rust, nextest for the tests.
         include:
           - leg: gates
+            tool: cargo-deny@0.20.2
           - leg: tests 1/2
             partition: 1/2
+            tool: cargo-nextest@0.9.152
           - leg: tests 2/2
             partition: 2/2
+            tool: cargo-nextest@0.9.152
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -110,7 +106,7 @@ jobs:
         run: rustup toolchain install
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
+          tool: ${{ matrix.tool }}
       - run: pnpm install --frozen-lockfile
         id: install
       # check's Rust gates: clippy, cargo-deny and the Rust schema. rustfmt runs in `check`.
@@ -146,7 +142,8 @@ jobs:
           node-version-file: .nvmrc
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - if: matrix.partition
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest@0.9.152
       # The suites that signal processes they didn't start run only on a host carrying the marker,
