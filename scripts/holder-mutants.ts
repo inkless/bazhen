@@ -576,6 +576,16 @@ async function runCargoMutants(
 }
 
 /**
+ * `env` less what the make that started this run hands its children: under `make -i` or `-k`, the
+ * suite's own make would pass a failing suite, and read every mutant as missed.
+ */
+export function withoutMake(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const name of ["MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES"]) delete out[name];
+  return out;
+}
+
+/**
  * Applies the mutant whose diff is at `diffFile` to `file` in the working tree, runs the holder
  * suite, and puts the file back as it was. Null when the patch left the file unchanged.
  */
@@ -589,7 +599,7 @@ async function judgeBySuite(file: string, diffFile: string): Promise<boolean | n
     writeFileSync(join(scratch, "mutant.patch"), patch);
     spawnSync("git", ["apply", join(scratch, "mutant.patch")], { env: isolatedEnv() });
     if (readFileSync(file, "utf8") === original) return null;
-    return (await run("make", ["test-holder"], isolatedEnv())) !== 0;
+    return (await run("make", ["test-holder"], withoutMake(isolatedEnv()))) !== 0;
   } finally {
     writeFileSync(file, original);
     rmSync(scratch, { recursive: true, force: true });
