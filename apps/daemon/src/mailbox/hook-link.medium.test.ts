@@ -24,7 +24,8 @@ let dir = "";
 let first = "";
 let second = "";
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bz-hook-link-"));
+  // Resolved, as the links are compared with what realpath gives: macOS's /tmp is /private/tmp.
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "bz-hook-link-")));
   first = join(dir, "first-client");
   second = join(dir, "second-client");
   writeFileSync(first, "");

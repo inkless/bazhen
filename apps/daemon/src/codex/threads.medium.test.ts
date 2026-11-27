@@ -171,6 +171,15 @@ function respawn(s: Awaited<ReturnType<typeof setup>>) {
 /** Above every system's pid limit, so nothing a holder runtime does can reach a process. */
 const FAKE_PID = 2 ** 22 + 1;
 
+/** The most a pid can be here: Linux says; macOS's is fixed, and it has no /proc. */
+function pidLimit(): number {
+  try {
+    return Number(readFileSync("/proc/sys/kernel/pid_max", "utf8").trim());
+  } catch {
+    return 99_999;
+  }
+}
+
 /**
  * A holder runtime over one fake holder of `terminal`, as `agentId`'s, whose `hello` carries
  * `title`: what its title watch reports goes to `report`.
@@ -181,7 +190,7 @@ async function holderReporting(
   title: string,
   report: (...told: [TerminalId]) => void,
 ) {
-  const limit = Number(readFileSync("/proc/sys/kernel/pid_max", "utf8").trim());
+  const limit = pidLimit();
   if (!(FAKE_PID > limit)) throw new Error(`the fake holder's pid isn't above the limit ${limit}`);
   vi.spyOn(process, "kill").mockImplementation((pid) => {
     throw new Error(`a test reached process.kill(${pid})`);

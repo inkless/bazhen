@@ -90,6 +90,12 @@ function script(name: string, body: string): string {
   return path;
 }
 
+/** A reader that exits 1, as `false` does: a script, since `false` isn't at /bin/false on macOS. */
+function failing(): string {
+  dir ||= tempDir();
+  return script("failing", "exit 1");
+}
+
 describe("bazhen-peer, on the socket", () => {
   it("names the process that connected, its session and its parent first among its ancestors", async () => {
     const seen: PeerRead[] = [];
@@ -205,7 +211,7 @@ describe("bazhen-peer, on the socket", () => {
   });
 
   it("refuses a caller whose process the reader can't name, as when it fails", async () => {
-    const socket = await guarded(peerReading("/bin/false", () => none));
+    const socket = await guarded(peerReading(failing(), () => none));
     const [status, body] = await post(socket);
     expect([status, body]).toEqual([403, expect.stringContaining("can't be read for sure")]);
   });
@@ -330,7 +336,7 @@ describe("readPeer", () => {
     const replaced = await connection();
     noteAccepted(replaced, 0);
     const readings = [
-      await readPeer("/bin/false", conn),
+      await readPeer(failing(), conn),
       await readPeer(nonsense, conn),
       await readPeer(join(dir, "absent"), conn),
       await readPeer(PEER_SOURCE, replaced),
