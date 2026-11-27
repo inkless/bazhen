@@ -63,7 +63,10 @@ A guard's break and its `Guard:` line go in a commit of their own.
   `make test-real` runs each in a container), run on its disposable runners. CI reports every
   failing Rust test, not the first. It runs on Linux: `check-ts` on Node 24 and on the pinned Node,
   the rest on the pinned Node alone. On macOS it runs the Rust gates (`make lint-rust`,
-  `make test-rust-all`). A change to the holder or its tests is checked
+  `make test-rust-all`) and the holder suite. On each OS the Rust gates and the holder suite run
+  beside `make check-ts`, and `make test-rust-all` in two halves beside them
+  (`ARGS='--partition 1/2'` and `ARGS='--partition 2/2'`); the checks `rust (linux)` and
+  `rust (macos)` pass when all of an OS's did. A change to the holder or its tests is checked
   with `make test-real ARGS=holder` and `make test-real ARGS=rust`. On a pull request it also
   runs `make test-falsify` against the target branch; run it yourself before pushing.
 - **`make check`'s Rust gates** run rustfmt's check, clippy with pedantic and the restriction

@@ -567,7 +567,7 @@ const CFG_ALLOWED: Record<string, string> = {
     "as-shipped pass (`alone_as_shipped` in crates/bazhen-xtask/src/gate.rs). CFG_VALUES holds " +
     "it to those two",
   target_os:
-    "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
+    "`rust-linux` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
     "CFG_VALUES holds it to those two",
 };
 
