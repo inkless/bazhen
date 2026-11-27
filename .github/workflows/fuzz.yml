@@ -91,8 +91,11 @@ jobs:
         with:
           path: crates/${{ matrix.crate }}/fuzz/target
           key: fuzz-target.${{ matrix.crate }}.${{ env.NIGHTLY }}.cargo-fuzz-${{ env.CARGO_FUZZ }}.${{ hashFiles(format('crates/{0}/fuzz/Cargo.lock', matrix.crate)) }}
-      # Each run starts from the corpus the last one left, so the nightly runs add up.
-      - uses: actions/cache@v6
+      # Each run starts from the corpus the last one left, so the nightly runs add up. A pull
+      # request restores it but saves none: a pull request's save would be seen by that pull
+      # request alone, and each of its runs made one, so they filled the repository's caches.
+      - uses: actions/cache/restore@v6
+        id: corpus
         with:
           path: crates/${{ matrix.crate }}/fuzz/corpus
           key: fuzz-corpus.${{ matrix.crate }}.${{ github.run_id }}
@@ -133,12 +136,50 @@ jobs:
         with:
           path: crates/${{ matrix.crate }}/fuzz/target
           key: ${{ steps.target.outputs.cache-primary-key }}
+      # Saved, off a pull request, when every target ran clean, as actions/cache saved it before.
+      # The run's id keys it, so each run saves one, and `prune` below removes those before it.
+      - if: github.event_name != 'pull_request' && steps.run.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/corpus
+          key: ${{ steps.corpus.outputs.cache-primary-key }}
       - name: Keep what crashed
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts-${{ matrix.crate }}
           path: crates/${{ matrix.crate }}/fuzz/artifacts/
+
+  # Each crate's newest corpus on main is the one a run restores, and it holds what the ones
+  # before it did, since each run starts from the last. So once the crates' jobs are done, this
+  # deletes the older ones, which nothing reads; a crate whose save failed keeps its newest, an
+  # older run's. It alone may write the Actions caches, and only off a pull request, on main.
+  prune:
+    needs: [crates, targets]
+    if: >-
+      always() && needs.crates.result == 'success' &&
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete each crate's corpora but its newest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CRATES: ${{ needs.crates.outputs.crates }}
+        run: |
+          set -euo pipefail
+          for crate in $(jq -r '.[]' <<< "$CRATES"); do
+            # Keys separate the crate with `.`, so one crate's prefix never matches another's.
+            ids=$(gh cache list --ref refs/heads/main --key "fuzz-corpus.$crate." \
+              --sort created_at --order desc --limit 1000 --json id --jq '.[1:][].id')
+            echo "$crate: deleting $(grep -c . <<< "$ids" || true) older corpora"
+            for id in $ids; do
+              gh cache delete "$id"
+            done
+          done
 
   # The one check that stands for every crate's job, so its name stays the same as crates come and
   # go. It runs even when they failed, since a job skipped for a failure before it reads as a pass.
