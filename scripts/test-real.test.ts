@@ -351,6 +351,20 @@ describe("make test-real cleans up after itself", () => {
     ]);
   });
 
+  it("passes any signal on to the running suite as SIGINT, which make leaves to its group", async () => {
+    const stopped = await Promise.all(
+      (["SIGINT", "SIGHUP", "SIGTERM"] as const).map(async (signal) => {
+        const fake = fakeHost(integrationHangs);
+        const exit = run(["integration"], fake.host);
+        await expect.poll(fake.waitingOn).toBe("run --rm");
+        fake.signal(signal);
+        await exit;
+        return fake.stopped;
+      }),
+    );
+    expect(stopped).toEqual([["SIGINT"], ["SIGINT"], ["SIGINT"]]);
+  });
+
   it("gives each suite's container a CPU budget, so the run cannot take the machine", async () => {
     const fake = fakeHost(passing);
     expect(await run(["api"], fake.host)).toBe(0);
@@ -518,7 +532,7 @@ describe("make test-real cleans up after itself", () => {
     await expect.poll(fake.waitingOn).toBe("run --rm");
     fake.signal("SIGTERM");
     expect(await exit).toBe(143);
-    expect(fake.stopped).toEqual(["SIGTERM"]);
+    expect(fake.stopped).toEqual(["SIGINT"]);
     expect(fake.calls.filter(isSuiteRun)).toHaveLength(1);
     expect(cleanup(fake.calls)).toEqual([
       ["rm", "--force", ...PROBES, `${RUN}-integration`],
@@ -546,7 +560,7 @@ describe("make test-real cleans up after itself", () => {
     await expect.poll(fake.waitingOn).toBe("image rm");
     fake.signal("SIGHUP");
     expect(await exit).toBe(129);
-    expect(fake.stopped).toEqual(["SIGHUP"]);
+    expect(fake.stopped).toEqual(["SIGINT"]);
   });
 
   it("abandons the rest of its cleanup on a second signal, and says what it left", async () => {
@@ -557,7 +571,7 @@ describe("make test-real cleans up after itself", () => {
     fake.signal("SIGTERM");
     await expect.poll(fake.waitingOn).toBe("rm --force");
     fake.signal("SIGINT");
-    await expect.poll(() => fake.stopped).toEqual(["SIGTERM", "SIGKILL"]);
+    await expect.poll(() => fake.stopped).toEqual(["SIGINT", "SIGKILL"]);
     expect(await exit).toBe(143);
     expect(fake.calls.some((c) => verb(c) === "image rm")).toBe(false);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);

@@ -7,6 +7,9 @@ import { setup, teardown } from "./medium-setup.ts";
 const KEPT = ["TMPDIR", "TMUX_TMPDIR", "BAZHEN_HOME", "TMUX", "TMUX_PANE"] as const;
 const before = new Map(KEPT.map((name) => [name, process.env[name]]));
 const leftover: string[] = [];
+// The error node's rmSync gives for a file it can't unlink in a read-only directory. Linux's
+// reports the file's EACCES; macOS's drops it and reports the directory it then leaves, not empty.
+const UNREMOVABLE = process.platform === "darwin" ? /^ENOTEMPTY\b/ : /^EACCES\b/;
 
 afterEach(() => {
   try {
@@ -57,7 +60,7 @@ describe("the medium suite's temporary directory", () => {
       leftover.push(root);
 
       try {
-        expect(() => teardown()).toThrow(/EACCES/);
+        expect(() => teardown()).toThrow(UNREMOVABLE);
         expect(tmpdir()).toBe(original);
       } finally {
         chmodSync(locked, 0o700);

@@ -392,7 +392,8 @@ const MAKE_VALUE_FLAGS = new Set(["-C", "-f", "-I", "-o", "-W"]);
 /**
  * The targets a span names when it is a `make` command, as a person would type it: past any
  * variables set for it, its words up to a shell operator, less options and variables. A span whose
- * words after `make` aren't all options, variables and target names is prose, and names none.
+ * words after `make` aren't all options, variables and target names reads on as prose, and names
+ * the first target alone: `make dev exited at start:` names dev, and `make tset-real …` tset-real.
  */
 export function makeTargets(span: string): string[] {
   const command = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*make\b(.*)$/.exec(span);
@@ -403,24 +404,65 @@ export function makeTargets(span: string): string[] {
   const targets: string[] = [];
   for (let i = 0; i < words.length; i++) {
     const word = words[i] ?? "";
+    // A word that ends a clause, as `make check.` does, ends the command too.
+    const bare = word.replace(/[.,:;!?)]+$/, "");
     if (MAKE_VALUE_FLAGS.has(word)) i++;
-    else if (TARGET_NAME.test(word)) targets.push(word);
-    else if (!/^-|^[A-Za-z_]\w*=/.test(word)) return [];
+    else if (TARGET_NAME.test(bare)) {
+      targets.push(bare);
+      if (bare !== word) return targets.slice(0, 1);
+    } else if (!/^-|^[A-Za-z_]\w*=/.test(word)) return targets.slice(0, 1);
   }
   return targets;
 }
 
-// Files whose `make` lines run another project's Makefile, each with why.
-const FOREIGN_MAKE: Record<string, string> = {
-  "tests/real/Dockerfile": "builds tmux with the Makefile of tmux's own release",
+// The lines that run another project's Makefile, by file, each as it reads trimmed, with why. The
+// rest of each file names this repository's targets, and is checked as any other.
+export const FOREIGN_MAKE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "tests/real/Dockerfile": {
+    "&& make install DESTDIR=/tmux-root": "installs tmux with the Makefile of tmux's own release",
+  },
 };
+
+/** Why `foreign` lists a file that isn't among `paths`. */
+export const missingForeignFiles = (
+  paths: readonly string[],
+  foreign: typeof FOREIGN_MAKE = FOREIGN_MAKE,
+): string[] =>
+  Object.keys(foreign)
+    .filter((file) => !paths.includes(file))
+    .map((file) => `scripts/check-standards.ts: FOREIGN_MAKE lists ${file}, which is no file.`);
+
+/**
+ * `text` less the lines `foreign` lists for `file`, which run another project's Makefile, and why
+ * it lists a line `file` no longer holds.
+ */
+export function withoutForeignMake(
+  file: string,
+  text: string,
+  foreign: typeof FOREIGN_MAKE = FOREIGN_MAKE,
+): { text: string; failures: string[] } {
+  const listed = foreign[file] ?? {};
+  const lines = text.split("\n");
+  const held = new Set(lines.map((line) => line.trim()));
+  return {
+    text: lines.map((line) => (listed[line.trim()] === undefined ? line : "")).join("\n"),
+    failures: Object.keys(listed)
+      .filter((line) => !held.has(line))
+      .map(
+        (line) =>
+          `${file}: FOREIGN_MAKE in scripts/check-standards.ts lists \`${line}\`, which it no ` +
+          "longer holds.",
+      ),
+  };
+}
 // Files that name targets that aren't, to check they are refused.
 const PLANTED_MAKE = new Set(["scripts/check-standards.ts", "scripts/check-standards.test.ts"]);
 const NAMES_COMMANDS = /\.(?:md|ts|tsx|rs|sh|ya?ml|toml)$|(?:^|\/)Dockerfile$/;
 const SHELL_TEXT = /\.(?:sh|ya?ml)$|(?:^|\/)Dockerfile$/;
 // Where a shell line starts another command, and the words that run the one after them.
 const SHELL_SEPARATOR = /&&|\|\||[;|&!({]|\$\(|\b(?:then|do|else)\b/;
-const SHELL_PREFIX = /^\s*(?:-\s+)?(?:run:\s*)?(?:(?:nohup|setsid|exec|if|time)\s+)*/;
+const SHELL_PREFIX =
+  /^\s*(?:-\s+)?(?:run:\s*|RUN(?:\s+--\S+)*\s+)?(?:(?:nohup|setsid|exec|if|time)\s+)*/;
 
 /**
  * The text in a file that may be a command: a Markdown file's code spans and fenced lines; any
@@ -4593,12 +4635,27 @@ export const OWN_ARGS = "$(value ARGS)";
 export const HELP_COMMAND =
   '@exec awk -F \':.*## \' \'BEGIN { print "make <target> [ARGS=\\"<its arguments>\\"]\\n" } ' +
   '/^[a-z][a-z0-9-]*:.*## / { printf "  %-22s %s\\n", $$1, $$2 }\' Makefile';
+// The only command lines that take no ARGS, by target, each with why. Every other passes the words
+// a person put in ARGS on to its program, so `make <target> ARGS=…` never drops them unseen.
+export const ARGLESS_LINES: Readonly<
+  Record<string, { readonly line: string; readonly why: string }>
+> = {
+  help: { line: HELP_COMMAND, why: "the menu lists every target, and takes nothing" },
+  "web-build": {
+    line: "exec chmod -R g-w,o-w apps/web/dist",
+    why: "it fixes the build's permissions after vite, whose line takes the ARGS",
+  },
+};
 // A target's own command, a line per program: `exec <program>`, after a `cd <dir> &&` at most. make
 // passes a SIGTERM to its children alone, and a shell left between make and the program dies of it
 // and leaves the program running.
 const EXEC_LINE = /^[@\s+-]*(?:cd [^\s;&|<>()`'"]+ && )?exec \S/;
 // What runs a second program, or one round the exec, once quoted text is left out.
-const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\(/;
+// `$$((`, arithmetic, runs nothing.
+const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\((?!\()/;
+/** The command substitutions in a shell's text, each as the operator that starts it. */
+const substitutions = (text: string) =>
+  [...text.matchAll(/`|\$\$\((?!\()/g)].map(([found]) => found).join(" ");
 // The targets whose deps run at once, each with why. Anywhere else deps run one at a time, in
 // order: a dep may build what the next one runs.
 export const PARALLEL_TARGETS: Record<string, string> = {
@@ -4728,16 +4785,30 @@ export function makefileTargets(text: string): {
             "`$(MAKE) <dep>` line of its own.",
         );
       } else {
+        // A double-quoted string still runs what a backtick or `$(` in it names, so those stay.
         const unquoted = body
           .replace(EXEC_LINE, "")
           .replaceAll(OWN_ARGS, "")
-          .replaceAll(/\$\$\{[^}]*\}/g, "")
-          .replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "");
+          .replaceAll(/\$\$\{[^}`(]*\}/g, "")
+          .replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, (quoted) =>
+            quoted.startsWith("'") ? "" : substitutions(quoted.replaceAll(/\\./g, "")),
+          );
         if (!EXEC_LINE.test(body) || SHELL_OPERATOR.test(unquoted)) {
           problems.push(
             `${makefileAt(line)}: the "${name}" target's command line must be one program, ` +
               "`exec`ed after a `cd <dir> &&` at most: make passes a SIGTERM to its children alone, " +
               "so a shell left between make and the program would leave it running.",
+          );
+        }
+        // Quoted, ARGS would reach the program as one word; after a `#`, as none.
+        const bare = body.replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, " ");
+        const takesArgs = bare.includes(OWN_ARGS) && !/(?:^|\s)#/.test(bare);
+        if (!takesArgs && ARGLESS_LINES[name]?.line !== body) {
+          problems.push(
+            `${makefileAt(line)}: the "${name}" target's command line must take \`${OWN_ARGS}\`, ` +
+              "unquoted, on a line with no `#` comment, or the shell would drop the ARGS a " +
+              "person gives it, or join them (ARGLESS_LINES in scripts/check-standards.ts lists " +
+              "the lines that may not take them).",
           );
         }
         command = command === undefined ? body : `${command} && ${body}`;
@@ -4804,6 +4875,25 @@ export function makefileTargets(text: string): {
     problems.push(`${MAKEFILE}: .PHONY names \`${name}\`, which is no target.`);
   }
   return { targets, failures: problems };
+}
+
+/** Why `argless` lists a line its target doesn't run, or a target that isn't there. */
+export function staleArglessLines(
+  targets: ReadonlyMap<string, MakeTarget>,
+  argless: typeof ARGLESS_LINES = ARGLESS_LINES,
+): string[] {
+  return Object.entries(argless)
+    .filter(([name, { line }]) => {
+      const command = targets.get(name)?.command;
+      if (command === undefined) return true;
+      const runs = ` && ${command} && `;
+      return !runs.includes(` && ${line} && `);
+    })
+    .map(
+      ([name, { line }]) =>
+        `scripts/check-standards.ts: ARGLESS_LINES lists \`${line}\` for the "${name}" ` +
+        `target, which doesn't run it.`,
+    );
 }
 
 /** The targets a person or CI may run: those on `make help`'s menu, which have a `##`. */
@@ -6557,9 +6647,12 @@ function checkMakefile(): void {
   failures.push(...makefileFailures(repoFiles(), readRepoFile));
   const { targets } = menu();
   for (const file of repoFiles().filter((f) => NAMES_COMMANDS.test(f))) {
-    if (FOREIGN_MAKE[file] !== undefined || PLANTED_MAKE.has(file)) continue;
-    failures.push(...makeNameFailures(file, readRepoFile(file), targets));
+    if (PLANTED_MAKE.has(file)) continue;
+    const { text, failures: stale } = withoutForeignMake(file, readRepoFile(file));
+    failures.push(...stale, ...makeNameFailures(file, text, targets));
   }
+  failures.push(...missingForeignFiles(repoFiles()));
+  failures.push(...staleArglessLines(makefileTargets(readRepoFile(MAKEFILE)).targets));
 }
 
 // An api test runs on holders, the default runtime, unless it is about tmux: those cases live in a
