@@ -341,14 +341,25 @@ describe("make test-real cleans up after itself", () => {
     expect(ownerOf(RUN)).toBe(OWN_PID);
   });
 
-  it("has the container's init pass a signal to the suite's whole group, not to make alone", async () => {
+  it("runs each suite under an init that passes a signal to make alone, which passes it on", async () => {
     const fake = fakeHost(passing);
     expect(await run(["api"], fake.host)).toBe(0);
     const suite = fake.calls.find(isSuiteRun);
-    expect([suite?.includes("--init"), valueAfter(suite, "--env")]).toEqual([
-      true,
-      "TINI_KILL_PROCESS_GROUP=1",
-    ]);
+    expect([suite?.includes("--init"), suite?.includes("--env")]).toEqual([true, false]);
+  });
+
+  it("passes any signal on to the running suite as SIGTERM, the one make passes on to its child", async () => {
+    const stopped = await Promise.all(
+      (["SIGINT", "SIGHUP", "SIGTERM"] as const).map(async (signal) => {
+        const fake = fakeHost(integrationHangs);
+        const exit = run(["integration"], fake.host);
+        await expect.poll(fake.waitingOn).toBe("run --rm");
+        fake.signal(signal);
+        await exit;
+        return fake.stopped;
+      }),
+    );
+    expect(stopped).toEqual([["SIGTERM"], ["SIGTERM"], ["SIGTERM"]]);
   });
 
   it("gives each suite's container a CPU budget, so the run cannot take the machine", async () => {
@@ -534,7 +545,7 @@ describe("make test-real cleans up after itself", () => {
     await expect.poll(fake.waitingOn).toBe("build --tag");
     fake.signal("SIGINT");
     expect(await exit).toBe(130);
-    expect(fake.stopped).toEqual(["SIGINT"]);
+    expect(fake.stopped).toEqual(["SIGTERM"]);
     expect(fake.calls.some(isSuiteRun)).toBe(false);
     expect(cleanup(fake.calls)).toEqual([["image", "rm", IMAGE]]);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);
@@ -546,7 +557,7 @@ describe("make test-real cleans up after itself", () => {
     await expect.poll(fake.waitingOn).toBe("image rm");
     fake.signal("SIGHUP");
     expect(await exit).toBe(129);
-    expect(fake.stopped).toEqual(["SIGHUP"]);
+    expect(fake.stopped).toEqual(["SIGTERM"]);
   });
 
   it("abandons the rest of its cleanup on a second signal, and says what it left", async () => {

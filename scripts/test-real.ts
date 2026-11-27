@@ -8,9 +8,9 @@
 //
 // A run removes its containers, image and context on every exit it can observe, a signal
 // included: docker runs asynchronously in a process group of its own, and a signal is forwarded
-// to it rather than ending this process mid-step; a second signal abandons the cleanup. What a run
-// killed outright or abandoned left is removed by the next run's sweep, which goes by the owner
-// pid and host each run's names and labels carry.
+// to it, as a SIGTERM, rather than ending this process mid-step; a second signal abandons the
+// cleanup. What a run killed outright or abandoned left is removed by the next run's sweep, which
+// goes by the owner pid and host each run's names and labels carry.
 
 import { execFileSync, type ChildProcess } from "node:child_process";
 import {
@@ -591,8 +591,8 @@ const exitCodeFor = (signal: NodeJS.Signals) => 128 + constants.signals[signal];
 
 /**
  * Runs the suites in `args`; the exit code, 128 + the signal's number once one arrived. The first
- * signal stops the command in flight and the run cleans up; a second abandons the cleanup, so a
- * wedged Docker can't hold the run, and the next run's sweep removes what was left.
+ * signal stops the command in flight with a SIGTERM, and the run cleans up; a second abandons the
+ * cleanup, so a wedged Docker can't hold the run, and the next run's sweep removes what was left.
  */
 export async function run(args: readonly string[], host: Host): Promise<number> {
   const { suites, base, mutants } = parseArgs(args);
@@ -604,7 +604,12 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
   const unsubscribe = host.onSignal((signal) => {
     if (interrupted === undefined) {
       interrupted = signal;
-      for (const call of inFlight) call.stop(signal);
+      // A SIGTERM, whatever arrived. In a suite's container the init passes it to make alone,
+      // which passes a SIGTERM, and no other signal, on to its child, the suite's capped run: so
+      // each process of the suite gets it once. A SIGINT or SIGHUP make would wait out, and a
+      // signal to the whole group would reach capped from the init and from make both, a second
+      // signal, which vitest and nextest take as one to abandon their cleanup.
+      for (const call of inFlight) call.stop("SIGTERM");
     } else if (!isAbandoned) {
       isAbandoned = true;
       abandon(undefined);
@@ -696,12 +701,8 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
         const passed = await step([
           "run",
           "--rm",
+          // An init that passes a forwarded signal to make alone, which passes it on (`run`).
           "--init",
-          // The init passes a forwarded signal to the suite's whole process group, not to make
-          // alone, which would wait for the suite to end: so Ctrl-C stops the suite, which prints
-          // what it ran, before the client's grace runs out.
-          "--env",
-          "TINI_KILL_PROCESS_GROUP=1",
           "--name",
           container,
           ...labels,
