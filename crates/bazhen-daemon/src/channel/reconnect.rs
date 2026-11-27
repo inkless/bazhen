@@ -7,7 +7,9 @@
 //! server sends to the daemon's queue, picks up every bound session ([`Session::connected`]), and
 //! tells of the connection ending. Forwarding never waits on the server, nor on the session: a
 //! message that comes while the bound sessions are picked up is in the queue at once, as the
-//! TypeScript daemon handled its listener's messages during the resumes.
+//! TypeScript daemon handled its listener's messages during the resumes, but for one that comes
+//! between a reply and the pickup's next step, which waits for that step so the pickup's facts
+//! land where its last reply did (`Driver::serve`).
 
 use std::fmt;
 use std::path::PathBuf;
@@ -25,7 +27,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use super::rpc::{self, Inbound, Rpc};
+use super::rpc::{self, Heard, Inbound, Progress, Rpc};
 
 /// The first wait before connecting again after a connection ends or fails.
 pub const FIRST_RETRY: Duration = Duration::from_secs(1);
@@ -279,6 +281,13 @@ impl ChannelPort for Channel {
     }
 }
 
+/// Whether a message that came at `at` came after one of the pickup's replies while none of its
+/// requests waited, the requests sent before the pickup's own numbering `before`: whether it
+/// came before the pickup's last reply hangs on the pickup's next step.
+fn between(at: Progress, before: u64) -> bool {
+    at.sent > before && at.waiting == 0
+}
+
 /// The channel's task.
 struct Driver {
     shared: Arc<Shared>,
@@ -384,29 +393,58 @@ impl Driver {
     /// picked up, then tells of the end. When they were picked up, from which the connection
     /// counts as held, as the TypeScript daemon counted it.
     ///
-    /// `Connected` comes after everything the server sent before its last reply to the pickup, a
-    /// resumed session's requests asked again among them: the reader queues each message in the
-    /// order it came, and a reply skips the queue, so what came before the reply is already queued
-    /// once the pickup has it.
+    /// `Connected` falls where the pickup's last reply did among what the server sent: after
+    /// everything before it, a resumed session's requests asked again among them, and before
+    /// everything after it, which is newer than the facts the reply gave. The reader queues each
+    /// message in the order it came, with how far the requests had got then, and a reply skips
+    /// the queue, so what came before the reply is already queued once the pickup has it. A
+    /// message that came after a reply while no request waited, once the pickup had asked one,
+    /// waits until the pickup asks another, which puts it before that one's reply, or ends,
+    /// which puts it after `Connected`. Nothing else waits: the pickup's next step after a reply
+    /// is to ask again or end, so it waits on neither the server nor the session.
     async fn serve(&self, on: Rpc, mut inbox: rpc::Inbox, ending: CancellationToken) -> Instant {
+        let mut progress = on.progress();
+        // What was sent before the pickup asked anything: the handshake.
+        let before = progress.borrow().sent;
         let (picked, mut connected) = oneshot::channel();
         let forward = async {
             let mut waiting = true;
+            // The message that waits, and everything queued behind it.
+            let mut held: Option<Heard> = None;
             loop {
+                // The requests sent when the held message came.
+                let then = held.as_ref().map_or(u64::MAX, |heard| heard.at.sent);
                 let told = tokio::select! {
                     // The pickup first, which comes once, so where Connected falls among what
                     // the server sends after it is fixed by what arrived, not by a random pick.
                     biased;
-                    facts = &mut connected, if waiting => {
+                    picked = &mut connected, if waiting => {
                         waiting = false;
-                        match facts {
-                            Ok(facts) => self.tell_connected(&on, &mut inbox, facts).await,
+                        match picked {
+                            Ok((facts, last)) => {
+                                self.tell_connected(&on, &mut inbox, &mut held, facts, before, last)
+                                    .await
+                            }
                             // The connection ended while they were picked up.
-                            Err(_) => true,
+                            Err(_) => match held.take() {
+                                Some(heard) => self.tell_heard(&on, heard).await,
+                                None => true,
+                            },
                         }
                     }
-                    message = inbox.next() => match message {
-                        Some(message) => self.tell(Event::Inbound { message, on: on.clone() }).await,
+                    // The pickup asked again, so the held message came before that reply.
+                    () = progress.wait_for(|now| now.sent > then).map(drop), if held.is_some() => {
+                        match held.take() {
+                            Some(heard) => self.tell_heard(&on, heard).await,
+                            None => true,
+                        }
+                    }
+                    heard = inbox.next(), if held.is_none() => match heard {
+                        Some(heard) if waiting && between(heard.at, before) => {
+                            held = Some(heard);
+                            true
+                        }
+                        Some(heard) => self.tell_heard(&on, heard).await,
                         None => break,
                     },
                 };
@@ -420,6 +458,9 @@ impl Driver {
             let bound = (self.shared.bound)();
             let mut session = self.shared.session.lock().await;
             let facts = session.connected(&on, &bound).await;
+            // The replies read by the last of the pickup's, as no request of its own waits now
+            // and none other is sent before the connection is up.
+            let last = on.progress().borrow().read;
             let picked_up = Instant::now();
             if !on.open() {
                 return picked_up;
@@ -430,7 +471,7 @@ impl Driver {
             // A request that asked for a connection while this one was made has it.
             let _ = self.shared.wanted.notified().now_or_never();
             drop(session);
-            let _ = picked.send(facts);
+            let _ = picked.send((facts, last));
             picked_up
         };
         let ((), picked_up) = tokio::join!(forward, resume);
@@ -443,18 +484,48 @@ impl Driver {
         picked_up
     }
 
-    /// Tells what the server sent that is still queued, then that the connection is up with
-    /// `facts`; false when one of the server's messages couldn't be told.
-    async fn tell_connected(&self, on: &Rpc, inbox: &mut rpc::Inbox, facts: Vec<Keyed>) -> bool {
-        // Out of the task's coop budget, a receive would say there is nothing though there is.
-        while let Some(Some(message)) = unconstrained(inbox.next()).now_or_never() {
-            let on = on.clone();
-            if !self.tell(Event::Inbound { message, on }).await {
-                return false;
+    /// Tells one message of the server's own; false when it couldn't be told.
+    async fn tell_heard(&self, on: &Rpc, heard: Heard) -> bool {
+        let on = on.clone();
+        self.tell(Event::Inbound {
+            message: heard.message,
+            on,
+        })
+        .await
+    }
+
+    /// Tells what the server sent before the pickup's last reply, the `last`th read, or before
+    /// the pickup asked anything, the requests sent then numbering `before`, that is still
+    /// queued, then that the connection is up with `facts`, then the message `held` waiting, or
+    /// the first queued after the reply; false when one of the server's messages couldn't be
+    /// told.
+    async fn tell_connected(
+        &self,
+        on: &Rpc,
+        inbox: &mut rpc::Inbox,
+        held: &mut Option<Heard>,
+        facts: Vec<Keyed>,
+        before: u64,
+        last: u64,
+    ) -> bool {
+        // A message held came after the last reply: none was read after it, as none was asked.
+        if held.is_none() {
+            // Out of the task's coop budget, a receive would say there is nothing though there is.
+            while let Some(Some(heard)) = unconstrained(inbox.next()).now_or_never() {
+                if heard.at.sent > before && heard.at.read >= last {
+                    *held = Some(heard);
+                    break;
+                }
+                if !self.tell_heard(on, heard).await {
+                    return false;
+                }
             }
         }
         self.tell(Event::Connected(facts)).await;
-        true
+        match held.take() {
+            Some(heard) => self.tell_heard(on, heard).await,
+            None => true,
+        }
     }
 }
 
@@ -989,6 +1060,83 @@ mod tests {
                 at,
                 Some(told.len() - 1),
                 "Connected told before the last request"
+            );
+        }));
+    }
+
+    /// A notification of the server's own, to tell one message from another.
+    fn note(n: u64) -> Value {
+        json!({ "method": "note", "params": n })
+    }
+
+    fn noted(n: u64) -> Told {
+        Told::Inbound(Inbound::Notification {
+            method: "note".to_owned(),
+            params: Some(json!(n)),
+        })
+    }
+
+    #[test]
+    fn tells_what_the_server_sent_after_the_pickup_ended_behind_connected() {
+        let dir = TempDir::new("channel-after");
+        paused().block_on(within(LIMIT, async {
+            let listener = listen(&dir);
+            let mut rig = rig(&dir, vec![bound("s1")], never_started());
+            let mut server = accepted(&listener).await;
+            handshake(&mut server, None).await;
+            let resume = heard(&mut server).await;
+            say(&mut server, note(1)).await;
+            // The pickup's facts hold as of its reply: what the server says after it is newer.
+            say(&mut server, json!({ "id": resume["id"], "result": {} })).await;
+            say(&mut server, note(2)).await;
+            say(&mut server, note(3)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            let mut told = Vec::new();
+            for _ in 0..5 {
+                let next = tokio::time::timeout(PROMPTLY, rig.told()).await;
+                told.push(next.expect("the channel told fewer than five events"));
+            }
+            assert_eq!(
+                told,
+                [
+                    Told::Version(None),
+                    noted(1),
+                    Told::Connected(vec![resumed("s1")]),
+                    noted(2),
+                    noted(3),
+                ]
+            );
+        }));
+    }
+
+    #[test]
+    fn tells_what_the_server_sent_between_two_pickups_ahead_of_connected() {
+        let dir = TempDir::new("channel-between");
+        paused().block_on(within(LIMIT, async {
+            let listener = listen(&dir);
+            let mut rig = rig(&dir, vec![bound("s1"), bound("s2")], never_started());
+            let mut server = accepted(&listener).await;
+            handshake(&mut server, None).await;
+            let first = heard(&mut server).await;
+            // Sent before the second resume is asked, so it may come while none waits.
+            say(&mut server, json!({ "id": first["id"], "result": {} })).await;
+            say(&mut server, note(1)).await;
+            answer(&mut server, "resume", json!({})).await;
+            say(&mut server, note(2)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            let mut told = Vec::new();
+            for _ in 0..4 {
+                let next = tokio::time::timeout(PROMPTLY, rig.told()).await;
+                told.push(next.expect("the channel told fewer than four events"));
+            }
+            assert_eq!(
+                told,
+                [
+                    Told::Version(None),
+                    noted(1),
+                    Told::Connected(vec![resumed("s1"), resumed("s2")]),
+                    noted(2),
+                ]
             );
         }));
     }

@@ -16,7 +16,7 @@ use bazhen_harness::{BoxFuture, ChannelError, ChannelErrorKind, ChannelPort};
 use futures_util::{SinkExt as _, StreamExt as _};
 use serde_json::{Map, Number, Value};
 use tokio::net::UnixStream;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -223,12 +223,38 @@ impl From<OpenError> for ChannelError {
     }
 }
 
+/// How far the connection's requests have got: how many were sent, how many of their replies
+/// were read, and how many still wait for one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Progress {
+    pub sent: u64,
+    pub read: u64,
+    pub waiting: usize,
+}
+
 /// The requests waiting for their replies, while the connection is open.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Waiting {
     open: bool,
     next_id: u64,
+    read: u64,
     replies: HashMap<u64, oneshot::Sender<Result<Value, ServerError>>>,
+    /// Told each change of [`Waiting::progress`].
+    progress: watch::Sender<Progress>,
+}
+
+impl Waiting {
+    fn progress(&self) -> Progress {
+        Progress {
+            sent: self.next_id,
+            read: self.read,
+            waiting: self.replies.len(),
+        }
+    }
+
+    fn changed(&self) {
+        self.progress.send_replace(self.progress());
+    }
 }
 
 fn lock(waiting: &Mutex<Waiting>) -> MutexGuard<'_, Waiting> {
@@ -246,7 +272,10 @@ struct Place<'a> {
 
 impl Drop for Place<'_> {
     fn drop(&mut self) {
-        lock(self.waiting).replies.remove(&self.id);
+        let mut waiting = lock(self.waiting);
+        if waiting.replies.remove(&self.id).is_some() {
+            waiting.changed();
+        }
     }
 }
 
@@ -261,11 +290,19 @@ pub struct Rpc {
 /// The server's own requests and notifications, in the order it sent them, at most
 /// [`INBOX_CAPACITY`] unread. A reply never waits behind them: it settles its request directly.
 #[derive(Debug)]
-pub struct Inbox(mpsc::Receiver<Inbound>);
+pub struct Inbox(mpsc::Receiver<Heard>);
+
+/// One message of the server's own, and how far the daemon's requests had got as it came: the
+/// replies read before it, and the requests still waiting then.
+#[derive(Debug)]
+pub struct Heard {
+    pub message: Inbound,
+    pub at: Progress,
+}
 
 impl Inbox {
     /// The next message, or `None` once the connection has ended and every message is read.
-    pub async fn next(&mut self) -> Option<Inbound> {
+    pub async fn next(&mut self) -> Option<Heard> {
         self.0.recv().await
     }
 }
@@ -307,7 +344,10 @@ pub async fn connect(
         .map_err(|_| refused(format!("no WebSocket in {} s", OPEN_TIMEOUT.as_secs())))??;
     let waiting = Arc::new(Mutex::new(Waiting {
         open: true,
-        ..Waiting::default()
+        next_id: 0,
+        read: 0,
+        replies: HashMap::new(),
+        progress: watch::Sender::new(Progress::default()),
     }));
     let (outbox, sending) = mpsc::unbounded_channel();
     let (heard, inbox) = mpsc::channel(INBOX_CAPACITY);
@@ -323,7 +363,7 @@ async fn own(
     ws: WebSocketStream<UnixStream>,
     waiting: Arc<Mutex<Waiting>>,
     mut sending: mpsc::UnboundedReceiver<String>,
-    heard: mpsc::Sender<Inbound>,
+    heard: mpsc::Sender<Heard>,
     stop: CancellationToken,
 ) {
     let (mut sink, mut stream) = ws.split();
@@ -359,13 +399,18 @@ async fn own(
     waiting.open = false;
     // Dropping each reply's sender fails its request as ended.
     waiting.replies.clear();
+    waiting.changed();
 }
 
 /// Takes one text frame; false when the server has filled the inbox, which disconnects it.
-fn receive(waiting: &Mutex<Waiting>, heard: &mpsc::Sender<Inbound>, text: &str) -> bool {
+fn receive(waiting: &Mutex<Waiting>, heard: &mpsc::Sender<Heard>, text: &str) -> bool {
     match decode(text) {
         Some(Frame::Reply { id, outcome }) => {
-            if let Some(reply) = lock(waiting).replies.remove(&id) {
+            let mut waiting = lock(waiting);
+            if let Some(reply) = waiting.replies.remove(&id) {
+                // Counted before it settles, so the request's caller finds it read.
+                waiting.read += 1;
+                waiting.changed();
                 // A request that stopped waiting wants no reply.
                 let _ = reply.send(outcome);
             }
@@ -373,10 +418,13 @@ fn receive(waiting: &Mutex<Waiting>, heard: &mpsc::Sender<Inbound>, text: &str) 
         }
         // An inbox nobody holds hears nothing: the server's message goes unread, as it would
         // with no one listening.
-        Some(Frame::Inbound(message)) => !matches!(
-            heard.try_send(message),
-            Err(mpsc::error::TrySendError::Full(_))
-        ),
+        Some(Frame::Inbound(message)) => {
+            let at = lock(waiting).progress();
+            !matches!(
+                heard.try_send(Heard { message, at }),
+                Err(mpsc::error::TrySendError::Full(_))
+            )
+        }
         None => true,
     }
 }
@@ -412,6 +460,7 @@ impl Rpc {
             waiting.next_id = id.wrapping_add(1);
             let (sender, reply) = oneshot::channel();
             waiting.replies.insert(id, sender);
+            waiting.changed();
             (id, reply)
         };
         let _place = Place {
@@ -460,6 +509,11 @@ impl Rpc {
     /// Whether the connection is still open.
     pub fn open(&self) -> bool {
         lock(&self.waiting).open
+    }
+
+    /// How far the connection's requests have got now, and each change after.
+    pub fn progress(&self) -> watch::Receiver<Progress> {
+        lock(&self.waiting).progress.subscribe()
     }
 
     fn send(&self, text: String) {
@@ -619,7 +673,7 @@ mod tests {
                     method: "a/slow".to_owned()
                 })
             );
-            assert_eq!(inbox.next().await, None);
+            assert_eq!(inbox.next().await.map(|heard| heard.message), None);
             assert_eq!(
                 rpc.request("a/later", Value::Null).await,
                 Err(RpcError::NotOpen {
@@ -650,7 +704,7 @@ mod tests {
             let ended = tokio::time::timeout(Duration::from_secs(1), tasks.wait()).await;
             assert!(ended.is_ok(), "the owner still runs after its stop");
             assert!(matches!(request.await, Err(RpcError::Ended { .. })));
-            assert_eq!(inbox.next().await, None);
+            assert_eq!(inbox.next().await.map(|heard| heard.message), None);
             // The owner is gone, and the socket with it.
             assert!(!matches!(server.next().await, Some(Ok(Message::Text(_)))));
         }));
@@ -676,18 +730,20 @@ mod tests {
             .await;
             say(&mut server, json!({ "id": 7, "method": "a/ask" })).await;
             assert_eq!(
-                inbox.next().await,
+                inbox.next().await.map(|heard| heard.message),
                 Some(Inbound::Notification {
                     method: "a/started".to_owned(),
                     params: Some(json!({ "n": 1 })),
                 })
             );
-            let Some(Inbound::Request { id: text, .. }) = inbox.next().await else {
+            let Some(Inbound::Request { id: text, .. }) =
+                inbox.next().await.map(|heard| heard.message)
+            else {
                 panic!("not a request");
             };
             let Some(Inbound::Request {
                 id: number, params, ..
-            }) = inbox.next().await
+            }) = inbox.next().await.map(|heard| heard.message)
             else {
                 panic!("not a request");
             };
