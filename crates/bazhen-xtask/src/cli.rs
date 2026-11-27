@@ -306,13 +306,58 @@ mod tests {
         }
     }
 
+    /// A host on which the schema's example prints a schema of nothing and judges its empty
+    /// corpus, every file is written, and every tool succeeds: a test gate gets as far as nextest.
+    #[derive(Default)]
+    struct Passing {
+        calls: Vec<String>,
+    }
+
+    impl Host for Passing {
+        fn sandboxed(&self) -> bool {
+            true
+        }
+        fn read(&self, _: &Path) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn run(&mut self, argv: &[&str], _: &Env, _: bool) -> std::io::Result<Status> {
+            self.calls.push(argv.join(" "));
+            Ok(Some(0))
+        }
+        fn output(&mut self, argv: &[&str], _: &Env) -> std::io::Result<Option<String>> {
+            self.calls.push(argv.join(" "));
+            Ok(if argv.contains(&"verdicts") {
+                Some("[]".to_owned())
+            } else if !argv.contains(&"emit_schema") {
+                Some(String::new())
+            } else {
+                Some(
+                    r#"{"$defs":{},"x-bazhen-events":{},"x-bazhen-semantics":{"revision":1}}"#
+                        .to_owned(),
+                )
+            })
+        }
+        fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn remove(&mut self, _: &Path) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[test]
-    fn takes_a_partition_for_a_test_gate_and_refuses_one_for_any_other_before_any_tool_runs() {
-        for args in [
-            &["gate", "test", "--partition", "1/2"][..],
-            &["gate", "test-all", "--partition=2/2", "a_test"],
+    fn hands_a_test_gates_partition_to_nextest_and_refuses_one_for_any_other_gate() {
+        for (args, want) in [
+            (
+                &["gate", "test", "--partition", "1/2"][..],
+                " --partition count:1/2",
+            ),
+            (
+                &["gate", "test-all", "--partition=2/2", "a_test"],
+                " --partition count:2/2 a_test",
+            ),
         ] {
-            let mut host = Recording::default();
+            let mut host = Passing::default();
             let world = World {
                 env: Env::new(),
                 places: Places {
@@ -321,23 +366,38 @@ mod tests {
                 },
                 host: &mut host,
             };
+            let mut err = Vec::new();
             let exit = run(
                 args.iter().map(OsString::from),
                 world,
                 &mut Vec::new(),
-                &mut Vec::new(),
+                &mut err,
             );
-            assert_eq!(exit, Exit::Failed, "{args:?}");
-            assert!(!host.calls.is_empty(), "{args:?}");
+            let err = String::from_utf8(err).unwrap();
+            assert_eq!(exit, Exit::Done, "{args:?}: {err}");
+            let nextest = host.calls.last().unwrap();
+            assert!(
+                nextest.starts_with("cargo-nextest nextest run ") && nextest.ends_with(want),
+                "{args:?}: {nextest}"
+            );
         }
-        for args in [
-            &["gate", "lint", "--partition", "1/2"][..],
-            &["gate", "test", "--partition", "3/2"],
-            &["gate", "test", "--partition"],
+        for (args, why) in [
+            (
+                &["gate", "lint", "--partition", "1/2"][..],
+                "Only test and test-all take --partition",
+            ),
+            (
+                &["gate", "test", "--partition", "3/2"],
+                "--partition takes <k>/<n>, two numbers with 1 <= k <= n, not \"3/2\"",
+            ),
+            (
+                &["gate", "test", "--partition"],
+                "a value is required for '--partition",
+            ),
         ] {
             let (exit, out, err) = call(args);
             assert_eq!((exit, out.as_str()), (Exit::Usage, ""), "{args:?}");
-            assert!(err.contains("partition"), "{args:?}: {err}");
+            assert!(err.contains(why), "{args:?}: {err}");
         }
     }
 

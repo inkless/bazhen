@@ -222,14 +222,26 @@ pub(crate) fn partition(gate: Gate, given: Option<&OsStr>) -> Result<Option<Part
             .then(|| text.parse::<u32>().ok())
             .flatten()
     };
+    if !gate.takes_tests() {
+        return Err(format!(
+            "Only test and test-all take --partition: no other gate runs tests. {}",
+            usage()
+        ));
+    }
+    let malformed = || {
+        format!(
+            "--partition takes <k>/<n>, two numbers with 1 <= k <= n, not \"{}\". {}",
+            given.display(),
+            usage()
+        )
+    };
     let (index, count) = given
         .to_str()
-        .filter(|_| gate.takes_tests())
         .and_then(|text| text.split_once('/'))
         .and_then(|(k, n)| number(k).zip(number(n)))
-        .ok_or_else(usage)?;
+        .ok_or_else(malformed)?;
     if index == 0 || index > count {
-        return Err(usage());
+        return Err(malformed());
     }
     Ok(Some(Partition { index, count }))
 }
