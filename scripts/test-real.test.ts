@@ -4,6 +4,7 @@ import { RUST_TOOLS } from "./rust-gate.ts";
 import { GROUPS } from "./holder-mutants.ts";
 import {
   MUTANT_GROUPS,
+  SUITE_NAMES,
   suiteCommand,
   looksSecret,
   ownerOf,
@@ -254,6 +255,8 @@ const isSuiteRun = (args: readonly string[]) => args[0] === "run" && !args.inclu
 const valueAfter = (args: readonly string[] | undefined, flag: string) =>
   args?.[args.indexOf(flag) + 1];
 const passing = (): Answer => result(0);
+/** tini's setting that passes a signal to the whole process group of the command it runs. */
+const GROUP_SIGNAL = "--env TINI_KILL_PROCESS_GROUP=1";
 const uid = process.getuid?.() ?? -1;
 const userSlice = `/user.slice/user-${uid}.slice/user@${uid}.service/bazhen.slice/${SLICE}`;
 /** The memory a suite's container gets when the probe lands in `cgroup`. */
@@ -341,14 +344,18 @@ describe("make test-real cleans up after itself", () => {
     expect(ownerOf(RUN)).toBe(OWN_PID);
   });
 
-  it("has the container's init pass a signal to the suite's whole group, not to make alone", async () => {
+  it("has every suite's init pass a signal to the suite's whole group, not to make or a shell alone", async () => {
     const fake = fakeHost(passing);
-    expect(await run(["api"], fake.host)).toBe(0);
-    const suite = fake.calls.find(isSuiteRun);
-    expect([suite?.includes("--init"), valueAfter(suite, "--env")]).toEqual([
-      true,
-      "TINI_KILL_PROCESS_GROUP=1",
-    ]);
+    expect(await run([...SUITE_NAMES, "--group", "signal"], fake.host)).toBe(0);
+    expect(
+      fake.calls
+        .filter(isSuiteRun)
+        .map((c) => [
+          valueAfter(c, "--name"),
+          c.includes("--init"),
+          c.join(" ").includes(GROUP_SIGNAL),
+        ]),
+    ).toEqual(SUITE_NAMES.map((suite) => [`${RUN}-${suite}`, true, true]));
   });
 
   it("passes any signal on to the running suite as SIGINT, which make leaves to its group", async () => {
