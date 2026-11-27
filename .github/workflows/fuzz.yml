@@ -100,8 +100,10 @@ jobs:
           path: crates/${{ matrix.crate }}/fuzz/corpus
           key: fuzz-corpus.${{ matrix.crate }}.${{ github.run_id }}
           restore-keys: fuzz-corpus.${{ matrix.crate }}.
-      - name: Run the crate's targets
-        id: run
+      # Every target built before any runs, so the build is saved below even when the runs
+      # outlast the job: nightly, a crate of 6 targets at 10 minutes each does.
+      - name: Build the crate's targets
+        id: build
         run: |
           set -euo pipefail
           cd "$CRATE"
@@ -111,6 +113,21 @@ jobs:
             echo "$CRATE/fuzz has no targets" >&2
             exit 1
           fi
+          node ../../scripts/capped.ts --memory 4G --time 15m -- cargo "+$NIGHTLY" fuzz build
+      # Saved off a pull request once it built, on a miss: the build is good whatever the runs find.
+      - if: >-
+          !cancelled() && github.event_name != 'pull_request' &&
+          steps.target.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/target
+          key: ${{ steps.target.outputs.cache-primary-key }}
+      - name: Run the crate's targets
+        id: run
+        run: |
+          set -euo pipefail
+          cd "$CRATE"
+          targets=$(cargo "+$NIGHTLY" fuzz list)
           for target in $targets; do
             echo "::group::$target"
             mkdir -p "fuzz/corpus/$target" "fuzz/seeds/$target"
@@ -127,15 +144,6 @@ jobs:
               -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 "${max_len[@]}"
             echo "::endgroup::"
           done
-      # Saved once the targets ran, even when one crashed, since the build itself is still good.
-      - if: >-
-          !cancelled() && github.event_name != 'pull_request' &&
-          steps.target.outputs.cache-hit != 'true' &&
-          (steps.run.outcome == 'success' || steps.run.outcome == 'failure')
-        uses: actions/cache/save@v6
-        with:
-          path: crates/${{ matrix.crate }}/fuzz/target
-          key: ${{ steps.target.outputs.cache-primary-key }}
       # Saved, off a pull request, when every target ran clean, as actions/cache saved it before.
       # The run's id keys it, so each run saves one, and `prune` below removes those before it.
       - if: github.event_name != 'pull_request' && steps.run.outcome == 'success'
