@@ -22,9 +22,12 @@ on:
       - "scripts/is-main.ts"
       - "packages/host-guard/src/**"
 
+# A pull request's runs share a group, and a newer one cancels the one running. Every other run
+# shares one group and waits its turn, so no two restore the same corpus and save beside each other,
+# where `prune` would keep one run's finds and delete the other's.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -34,8 +37,6 @@ env:
   NIGHTLY: nightly-2026-11-01
   CARGO_FUZZ: 0.13.2
   SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '60' || '600' }}
-  # What a target's build takes inside its time cap: the slowest one measured on CI took 37 s.
-  BUILD_MINUTES: 2
 
 jobs:
   crates:
@@ -58,7 +59,8 @@ jobs:
     needs: crates
     name: fuzz ${{ matrix.crate }}
     runs-on: ubuntu-latest
-    # The most a crate takes nightly: 3 targets, each capped at 17 minutes, is 51.
+    # Nightly, each target runs for 10 minutes after the crate's build, so a crate of up to 5
+    # targets fits; bazhen-daemon, with 6, doesn't yet.
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -114,9 +116,10 @@ jobs:
             exit 1
           fi
           node ../../scripts/capped.ts --memory 4G --time 15m -- cargo "+$NIGHTLY" fuzz build
-      # Saved off a pull request once it built, on a miss: the build is good whatever the runs find.
+      # Saved on main once it built, on a miss: the build is good whatever the runs find. Not by a
+      # pull request, whose save only it could read, nor by a run on another branch.
       - if: >-
-          !cancelled() && github.event_name != 'pull_request' &&
+          !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
           steps.target.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
         uses: actions/cache/save@v6
         with:
@@ -138,15 +141,17 @@ jobs:
             fi
             # libFuzzer's own limits are given, not left to its defaults, inside a cap of the run's.
             node ../../scripts/capped.ts --memory 4G \
-              --time "$((SECONDS_PER_TARGET / 60 + BUILD_MINUTES + 5))m" -- \
+              --time "$((SECONDS_PER_TARGET / 60 + 5))m" -- \
               cargo "+$NIGHTLY" fuzz run "$target" \
               "fuzz/corpus/$target" "fuzz/seeds/$target" \
               -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 "${max_len[@]}"
             echo "::endgroup::"
           done
-      # Saved, off a pull request, when every target ran clean, as actions/cache saved it before.
-      # The run's id keys it, so each run saves one, and `prune` below removes those before it.
-      - if: github.event_name != 'pull_request' && steps.run.outcome == 'success'
+      # Saved on main, off a pull request, when every target ran clean, as actions/cache saved it
+      # before. The run's id keys it, so each run saves one, and `prune` below removes those before.
+      - if: >-
+          github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+          steps.run.outcome == 'success'
         uses: actions/cache/save@v6
         with:
           path: crates/${{ matrix.crate }}/fuzz/corpus
@@ -161,11 +166,12 @@ jobs:
   # Each crate's newest corpus on main is the one a run restores, and it holds what the ones
   # before it did, since each run starts from the last. So once the crates' jobs are done, this
   # deletes the older ones, which nothing reads; a crate whose save failed keeps its newest, an
-  # older run's. It alone may write the Actions caches, and only off a pull request, on main.
+  # older run's. It alone may write the Actions caches, and only off a pull request, on main. It
+  # prunes the crates that have a fuzz crate now: a removed one's corpora stay until deleted by hand.
   prune:
     needs: [crates, targets]
     if: >-
-      always() && needs.crates.result == 'success' &&
+      !cancelled() && needs.crates.result == 'success' &&
       github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -179,15 +185,24 @@ jobs:
           CRATES: ${{ needs.crates.outputs.crates }}
         run: |
           set -euo pipefail
+          failed=0
           for crate in $(jq -r '.[]' <<< "$CRATES"); do
             # Keys separate the crate with `.`, so one crate's prefix never matches another's.
             ids=$(gh cache list --ref refs/heads/main --key "fuzz-corpus.$crate." \
               --sort created_at --order desc --limit 1000 --json id --jq '.[1:][].id')
             echo "$crate: deleting $(grep -c . <<< "$ids" || true) older corpora"
             for id in $ids; do
-              gh cache delete "$id"
+              # One already gone, evicted or deleted by hand, is done. Any other failure is kept
+              # for the end, so it doesn't stop the crates after it being pruned.
+              if ! out=$(gh api --method DELETE "repos/$GH_REPO/actions/caches/$id" 2>&1); then
+                case $out in
+                  *"HTTP 404"*) echo "$crate: cache $id was already gone" ;;
+                  *) echo "::error::$crate: couldn't delete cache $id: $out"; failed=1 ;;
+                esac
+              fi
             done
           done
+          exit "$failed"
 
   # The one check that stands for every crate's job, so its name stays the same as crates come and
   # go. It runs even when they failed, since a job skipped for a failure before it reads as a pass.
