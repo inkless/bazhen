@@ -28,11 +28,12 @@ on:
       - "scripts/is-main.ts"
       - "packages/host-guard/src/**"
 
-# A pull request's runs share a group, and a newer one cancels the one running. Every other run
-# shares one group and waits its turn, so no two restore the same corpus and save beside each other,
-# where `prune` would keep one run's finds and delete the other's.
+# Runs on one ref share a group. A pull request's newer run cancels the one running. Any other run
+# waits for the one running, so no two on main restore the same corpus and save beside each other,
+# where `prune` would keep one run's finds and delete the other's. Of several waiting, GitHub keeps
+# only the newest. Keyed by the ref, so a dispatch on another branch never displaces main's nightly.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
