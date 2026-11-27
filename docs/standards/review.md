@@ -53,14 +53,17 @@ A guard's break and its `Guard:` line go in a commit of their own.
 
 - **pre-commit** runs oxfmt and oxlint (with the `make lint` flags) on the staged files,
   through lint-staged.
-- **CI** runs `make check`, the full gate: the standards check (sibling tests, agent context,
-  skills, signal chokepoints), the protocol schema drift check, lint (including the import matrix,
-  the test rules and `any`), the format check, types for sources, tests and scripts, and the small
-  and medium tests. CI then runs, on its disposable runners, the suites no workstation runs: the
-  holder suite and the Rust tests ignored as signalling processes (`make test-holder`,
-  `make test-rust-all`), and the integration, api and e2e suites; `make test-real` runs
-  each in a container. CI reports every failing Rust test, not the first. It runs on Linux, on Node 24 and 26; on macOS it runs the Rust gates
-  (`make lint-rust`, `make test-rust-all`). A change to the holder or its tests is checked
+- **CI** runs the full gate, `make check`, as its two halves: `make check-ts` (the standards
+  check: sibling tests, agent context, skills, signal chokepoints; the protocol schema drift check;
+  lint, including the import matrix, the test rules and `any`; the format check; types for sources,
+  tests and scripts; and the small and medium tests) and `make check-rust` (clippy, cargo-deny and
+  the Rust schema). In place of check's `make test-rust` it runs `make test-rust-all`, the same
+  nextest run with the tests ignored as signalling processes too. That, and the other suites no
+  workstation runs (the holder suite, `make test-holder`, and the integration, api and e2e suites;
+  `make test-real` runs each in a container), run on its disposable runners. CI reports every
+  failing Rust test, not the first. It runs on Linux: `check-ts` on Node 24 and on the pinned Node,
+  the rest on the pinned Node alone. On macOS it runs the Rust gates (`make lint-rust`,
+  `make test-rust-all`). A change to the holder or its tests is checked
   with `make test-real ARGS=holder` and `make test-real ARGS=rust`. On a pull request it also
   runs `make test-falsify` against the target branch; run it yourself before pushing.
 - **`make check`'s Rust gates** run rustfmt's check, clippy with pedantic and the restriction
