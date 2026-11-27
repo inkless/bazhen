@@ -410,17 +410,44 @@ export function makeTargets(span: string): string[] {
   return targets;
 }
 
-// Files whose `make` lines run another project's Makefile, each with why.
-const FOREIGN_MAKE: Record<string, string> = {
-  "tests/real/Dockerfile": "builds tmux with the Makefile of tmux's own release",
+// The lines that run another project's Makefile, by file, each as it reads trimmed, with why. The
+// rest of each file names this repository's targets, and is checked as any other.
+export const FOREIGN_MAKE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "tests/real/Dockerfile": {
+    "&& make install DESTDIR=/tmux-root": "installs tmux with the Makefile of tmux's own release",
+  },
 };
+
+/**
+ * `text` less the lines `foreign` lists for `file`, which run another project's Makefile, and why
+ * it lists a line `file` no longer holds.
+ */
+export function withoutForeignMake(
+  file: string,
+  text: string,
+  foreign: typeof FOREIGN_MAKE = FOREIGN_MAKE,
+): { text: string; failures: string[] } {
+  const listed = foreign[file] ?? {};
+  const lines = text.split("\n");
+  const held = new Set(lines.map((line) => line.trim()));
+  return {
+    text: lines.map((line) => (listed[line.trim()] === undefined ? line : "")).join("\n"),
+    failures: Object.keys(listed)
+      .filter((line) => !held.has(line))
+      .map(
+        (line) =>
+          `${file}: FOREIGN_MAKE in scripts/check-standards.ts lists \`${line}\`, which it no ` +
+          "longer holds.",
+      ),
+  };
+}
 // Files that name targets that aren't, to check they are refused.
 const PLANTED_MAKE = new Set(["scripts/check-standards.ts", "scripts/check-standards.test.ts"]);
 const NAMES_COMMANDS = /\.(?:md|ts|tsx|rs|sh|ya?ml|toml)$|(?:^|\/)Dockerfile$/;
 const SHELL_TEXT = /\.(?:sh|ya?ml)$|(?:^|\/)Dockerfile$/;
 // Where a shell line starts another command, and the words that run the one after them.
 const SHELL_SEPARATOR = /&&|\|\||[;|&!({]|\$\(|\b(?:then|do|else)\b/;
-const SHELL_PREFIX = /^\s*(?:-\s+)?(?:run:\s*)?(?:(?:nohup|setsid|exec|if|time)\s+)*/;
+const SHELL_PREFIX = /^\s*(?:-\s+)?(?:run:\s*|RUN\s+)?(?:(?:nohup|setsid|exec|if|time)\s+)*/;
 
 /**
  * The text in a file that may be a command: a Markdown file's code spans and fenced lines; any
@@ -6581,8 +6608,12 @@ function checkMakefile(): void {
   failures.push(...makefileFailures(repoFiles(), readRepoFile));
   const { targets } = menu();
   for (const file of repoFiles().filter((f) => NAMES_COMMANDS.test(f))) {
-    if (FOREIGN_MAKE[file] !== undefined || PLANTED_MAKE.has(file)) continue;
-    failures.push(...makeNameFailures(file, readRepoFile(file), targets));
+    if (PLANTED_MAKE.has(file)) continue;
+    const { text, failures: stale } = withoutForeignMake(file, readRepoFile(file));
+    failures.push(...stale, ...makeNameFailures(file, text, targets));
+  }
+  for (const file of Object.keys(FOREIGN_MAKE).filter((f) => !repoFiles().includes(f))) {
+    failures.push(`scripts/check-standards.ts: FOREIGN_MAKE lists ${file}, which is no file.`);
   }
 }
 

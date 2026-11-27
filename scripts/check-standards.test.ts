@@ -25,6 +25,7 @@ import {
   makeNameFailures,
   partitionFailures,
   makeTargets,
+  withoutForeignMake,
   menuTargets,
   GATE_STEPS,
   CHECK_HALVES,
@@ -1880,6 +1881,42 @@ describe("makeNameFailures", () => {
       [expect.stringContaining("names `make gone`")],
       [expect.stringContaining("names `make gone`")],
       [],
+    ]);
+  });
+});
+
+describe("withoutForeignMake", () => {
+  const menu = new Set(["test-real"]);
+  const foreign = { "x/Dockerfile": { "&& make install DESTDIR=/r": "tmux's own" } };
+  const dockerfile = [
+    "# Built by `make tset-real`.",
+    "RUN cd /tmp/src \\",
+    "  && make install DESTDIR=/r",
+    "RUN make gone",
+  ].join("\n");
+  const named = (file: string, text: string) => {
+    const left = withoutForeignMake(file, text, foreign);
+    return [...left.failures, ...makeNameFailures(file, left.text, menu)];
+  };
+  it("passes the lines it lists alone, and checks the rest of their file as any other", () => {
+    expect([
+      named("x/Dockerfile", dockerfile),
+      named("x/Dockerfile", "RUN make test-real\n"),
+      named("y/Dockerfile", dockerfile),
+    ]).toEqual([
+      [
+        expect.stringContaining("names `make tset-real`"),
+        expect.stringContaining("names `make gone`"),
+      ],
+      [
+        "x/Dockerfile: FOREIGN_MAKE in scripts/check-standards.ts lists " +
+          "`&& make install DESTDIR=/r`, which it no longer holds.",
+      ],
+      [
+        expect.stringContaining("names `make tset-real`"),
+        expect.stringContaining("names `make install`"),
+        expect.stringContaining("names `make gone`"),
+      ],
     ]);
   });
 });
