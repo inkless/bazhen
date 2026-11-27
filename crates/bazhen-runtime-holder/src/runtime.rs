@@ -2502,6 +2502,68 @@ mod tests {
         });
     }
 
+    /// The runtime's watches ask the host as `gone` does: a holder whose process can't be read
+    /// may still run, so one that hangs up on a hello is asked again, not told lost.
+    #[test]
+    fn watches_a_holder_whose_process_cannot_be_read_on_past_a_refused_hello() {
+        let (fixture, _) = Fixture::new(
+            FakeHost {
+                running: None,
+                ..FakeHost::default()
+            },
+            |_| {},
+        );
+        let terminal_id = id(1);
+        let seen = block_on(async {
+            let listener = UnixListener::bind(fixture.socket(&terminal_id)).unwrap();
+            let mut told = fixture.runtime.events();
+            let hello = hello_of(&terminal_id);
+            let accepted = async {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut holder = FakeHolder::new(stream);
+                drop(holder.answer_hello_with(|h| *h = hello.clone()).await);
+                holder
+            };
+            let (made, holder) =
+                futures_util::future::join(fixture.runtime.create(spec(&terminal_id)), accepted)
+                    .await;
+            made.unwrap();
+            assert_eq!(
+                told.recv().await.unwrap(),
+                RuntimeEvent::Title {
+                    terminal_id: terminal_id.clone()
+                }
+            );
+            drop(holder);
+            // Hung up on unanswered, as a holder serving all it can does.
+            drop(listener.accept().await.unwrap());
+            // A watch that gave up asks no more: what it told instead is what it saw.
+            let again = tokio::time::timeout(Duration::from_secs(10), listener.accept()).await;
+            let seen = match again {
+                Ok(accepted) => {
+                    let mut holder = FakeHolder::new(accepted.unwrap().0);
+                    drop(holder.answer_hello_with(|h| *h = hello.clone()).await);
+                    let exited = bazhen_holder_proto::body::Exited {
+                        generation: Generation::new(0).unwrap(),
+                        status: bazhen_holder_proto::body::ExitStatus::Unknown,
+                    };
+                    holder.send(&[Reply::Exited(exited)]).await;
+                    tokio::time::timeout(Duration::from_secs(10), told.recv())
+                        .await
+                        .ok()
+                        .map(Result::unwrap)
+                }
+                Err(_) => told.try_recv().ok(),
+            };
+            fixture.runtime.shutdown().await;
+            seen
+        });
+        assert!(
+            matches!(&seen, Some(RuntimeEvent::Exited { terminal_id: told, .. }) if *told == terminal_id),
+            "{seen:?}"
+        );
+    }
+
     #[test]
     fn is_unreachable_while_a_recorded_holder_runs_with_its_socket_gone_and_tells_it_to_bind_again()
     {

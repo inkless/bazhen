@@ -520,7 +520,7 @@ mod tests {
     use super::*;
     use crate::fake_holder::FakeHolder;
     use crate::fake_host::FakeHost;
-    use crate::host::Host as _;
+    use crate::host::Host;
     use crate::locator::HolderLocator;
     use crate::test_support::{TempDir, block_on};
 
@@ -785,10 +785,10 @@ mod tests {
             .map(|(times_out, running)| {
                 block_on(async {
                     let hello = Duration::from_millis(300);
-                    let host = FakeHost {
+                    let host: Box<dyn Host> = Box::new(FakeHost {
                         running,
                         ..FakeHost::default()
-                    };
+                    });
                     let watches = Arc::new(Watches::new(
                         hello,
                         Running::new(move |holder| host.may_run(holder)),
