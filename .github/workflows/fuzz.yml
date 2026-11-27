@@ -143,7 +143,9 @@ jobs:
   build:
     needs: crates
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    name: build ${{ matrix.crate }}
+    # A static name, to which GitHub adds the crate when the matrix runs: skipped, as on a pull
+    # request, the matrix isn't expanded, and a template in the name would show as written.
+    name: build
     runs-on: ubuntu-latest
     # The build's own cap is 15 minutes; the rest is the toolchain and the save.
     timeout-minutes: 30
@@ -169,14 +171,23 @@ jobs:
       - if: steps.target.outputs.cache-hit != 'true'
         name: Install nightly
         run: rustup toolchain install "$NIGHTLY" --profile minimal
+      # cargo-fuzz itself: restored on every run, saved on main alone, off a pull request, as the
+      # build and the corpus are.
       - if: steps.target.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
+        id: cargo-fuzz
         with:
           path: ~/.cargo/bin/cargo-fuzz
           key: cargo-fuzz-${{ env.CARGO_FUZZ }}-${{ runner.os }}
       - if: steps.target.outputs.cache-hit != 'true'
         name: Install cargo-fuzz
         run: command -v cargo-fuzz || cargo "+$NIGHTLY" install --locked "cargo-fuzz@$CARGO_FUZZ"
+      - if: >-
+          steps.target.outputs.cache-hit != 'true' && steps.cargo-fuzz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: ${{ steps.cargo-fuzz.outputs.cache-primary-key }}
       - if: steps.target.outputs.cache-hit != 'true'
         name: Build the crate's targets
         run: |
@@ -216,12 +227,22 @@ jobs:
           node-version-file: .nvmrc
       - name: Install nightly
         run: rustup toolchain install "$NIGHTLY" --profile minimal
-      - uses: actions/cache@v6
+      # cargo-fuzz itself: restored on every run, saved on main alone, off a pull request, as the
+      # build and the corpus are.
+      - uses: actions/cache/restore@v6
+        id: cargo-fuzz
         with:
           path: ~/.cargo/bin/cargo-fuzz
           key: cargo-fuzz-${{ env.CARGO_FUZZ }}-${{ runner.os }}
       - name: Install cargo-fuzz
         run: command -v cargo-fuzz || cargo "+$NIGHTLY" install --locked "cargo-fuzz@$CARGO_FUZZ"
+      - if: >-
+          github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+          steps.cargo-fuzz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: ${{ steps.cargo-fuzz.outputs.cache-primary-key }}
       # Each crate's build and corpus, one step a crate, up to MAX_CRATES in the `crates` job. A pull
       # request restores them but saves none: a pull request's save would be seen by that pull
       # request alone, and each of its runs made one, so they filled the repository's caches.
@@ -307,11 +328,13 @@ jobs:
             done
             return "$failed"
           }
+          # The crates are read on fd 3, which no child gets, and the children's stdin is
+          # /dev/null, so none of them can read the list and leave its crates unfuzzed.
           failed=()
-          while read -r crate rest; do
+          while read -r crate rest <&3; do
             read -ra crate_targets <<< "$rest"
-            (fuzz_crate "$crate" "${crate_targets[@]}") || failed+=("$crate")
-          done < <(jq -r '.[] | "\(.crate) \(.targets)"' <<< "$CRATES")
+            (fuzz_crate "$crate" "${crate_targets[@]}") 3<&- < /dev/null || failed+=("$crate")
+          done 3< <(jq -r '.[] | "\(.crate) \(.targets)"' <<< "$CRATES")
           if [ "${#failed[@]}" -gt 0 ]; then
             echo "::error::Failed: ${failed[*]}"
             exit 1
@@ -354,7 +377,7 @@ jobs:
     if: >-
       !cancelled() && needs.crates.result == 'success' &&
       github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    name: corpus ${{ matrix.crate }}
+    name: corpus
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -371,8 +394,13 @@ jobs:
           pattern: fuzz-corpus.*
           path: corpus-in
           merge-multiple: true
+      # A target job that failed or never ran leaves its marks out, and the crate saves nothing.
+      # When every target job passed, each left its marks, so one missing means the path from
+      # `collect` to here is broken, and this fails instead of never saving a corpus again.
       - name: Check that every target ran clean
         id: check
+        env:
+          TARGETS_RESULT: ${{ needs.targets.result }}
         run: |
           set -euo pipefail
           missing=""
@@ -380,7 +408,11 @@ jobs:
             [ -f "corpus-in/$CRATE/ran/$target" ] || missing="$missing $target"
           done
           if [ -n "$missing" ]; then
-            echo "Not saved: no clean run of$missing"
+            if [ "$TARGETS_RESULT" = success ]; then
+              echo "::error::Every target job passed, but no mark came for$missing"
+              exit 1
+            fi
+            echo "Not saved: no clean run of$missing (targets: $TARGETS_RESULT)"
             exit 0
           fi
           mkdir -p "corpus-in/$CRATE/corpus" "crates/$CRATE/fuzz"
@@ -417,8 +449,13 @@ jobs:
           failed=0
           for crate in $(jq -r '.[]' <<< "$CRATES"); do
             # Keys separate the crate with `.`, so one crate's prefix never matches another's.
-            ids=$(gh cache list --ref refs/heads/main --key "fuzz-corpus.$crate." \
-              --sort created_at --order desc --limit 1000 --json id --jq '.[1:][].id')
+            # A listing that fails is kept for the end too, and the crates after it are pruned.
+            if ! ids=$(gh cache list --ref refs/heads/main --key "fuzz-corpus.$crate." \
+              --sort created_at --order desc --limit 1000 --json id --jq '.[1:][].id'); then
+              echo "::error::$crate: couldn't list its corpora"
+              failed=1
+              continue
+            fi
             echo "$crate: deleting $(grep -c . <<< "$ids" || true) older corpora"
             for id in $ids; do
               # One already gone, evicted or deleted by hand, is done. Any other failure is kept
