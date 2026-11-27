@@ -112,7 +112,7 @@ jobs:
         env:
           TOOL: ${{ matrix.tool }}
         run: test -n "$TOOL" || { echo "::error::this leg's matrix entry names no tool"; exit 1; }
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: ${{ matrix.tool }}
       - run: pnpm install --frozen-lockfile
@@ -151,7 +151,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - if: matrix.partition
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-nextest@0.9.152
       # The suites that signal processes they didn't start run only on a host carrying the marker,
@@ -370,7 +370,7 @@ jobs:
       # and runs them against the mutants cargo-mutants lists in the code the branch changed.
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
       - run: pnpm install --frozen-lockfile
