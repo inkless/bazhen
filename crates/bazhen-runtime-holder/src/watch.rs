@@ -71,8 +71,8 @@ pub enum RuntimeEvent {
     Lost { terminal: HolderRef },
 }
 
-/// Whether the holder a watch records still runs, as the host shows it: the runtime's
-/// `Host::may_run`, asked while that holder won't answer.
+/// Whether the holder a watch records still runs, as the host shows it: the `may_run`
+/// of the runtime's host, asked while that holder won't answer.
 #[derive(Clone)]
 pub(crate) struct Running(Arc<dyn Fn(HolderProcess) -> bool + Send + Sync>);
 
@@ -520,7 +520,7 @@ mod tests {
     use super::*;
     use crate::fake_holder::FakeHolder;
     use crate::fake_host::FakeHost;
-    use crate::host::Host as _;
+    use crate::host::Host;
     use crate::locator::HolderLocator;
     use crate::test_support::{TempDir, block_on};
 
@@ -785,10 +785,10 @@ mod tests {
             .map(|(times_out, running)| {
                 block_on(async {
                     let hello = Duration::from_millis(300);
-                    let host = FakeHost {
+                    let host: Box<dyn Host> = Box::new(FakeHost {
                         running,
                         ..FakeHost::default()
-                    };
+                    });
                     let watches = Arc::new(Watches::new(
                         hello,
                         Running::new(move |holder| host.may_run(holder)),

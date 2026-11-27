@@ -39,16 +39,22 @@ pub(crate) trait Host: Send + Sync + fmt::Debug {
     fn probe(&self, caps: TerminalCaps) -> Boxed<Result<Containment, CapsRefused>>;
     /// SIGUSR1 to a holder whose socket is gone, through host-guard's check of it.
     fn rebind(&self, holder: HolderProcess) -> Boxed<Result<bool, bazhen_host_guard::Error>>;
-    /// Whether the pid still belongs to the holder. A failed read leaves it unknown.
+    /// host-guard's `holder_running`: whether the pid still belongs to the holder, or `None` when
+    /// the read can't tell. This and the reads below are a few `/proc` or `libproc` reads, made
+    /// inline.
     fn running(&self, holder: HolderProcess) -> Option<bool>;
-    /// Keep an unreadable holder until the host can show that it is gone.
-    fn may_run(&self, holder: HolderProcess) -> bool {
-        self.running(holder).unwrap_or(true)
-    }
     fn leader(&self, pid: Pid) -> Option<Leader>;
     fn in_scope(&self, pid: Pid) -> Option<bool>;
     /// When `pid` started, and its arguments.
     fn process(&self, pid: Pid) -> Option<(u64, Vec<OsString>)>;
+}
+
+impl dyn Host + '_ {
+    /// Whether the holder may still own its pid: an unreadable one is kept until the host can
+    /// show that it is gone. Not a method of the trait, so no host can answer it otherwise.
+    pub(crate) fn may_run(&self, holder: HolderProcess) -> bool {
+        self.running(holder).unwrap_or(true)
+    }
 }
 
 /// This machine.
