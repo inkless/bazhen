@@ -4599,6 +4599,9 @@ export const HELP_COMMAND =
 const EXEC_LINE = /^[@\s+-]*(?:cd [^\s;&|<>()`'"]+ && )?exec \S/;
 // What runs a second program, or one round the exec, once quoted text is left out.
 const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\(/;
+/** The command substitutions in a shell's text, each as the operator that starts it. */
+const substitutions = (text: string) =>
+  [...text.matchAll(/`|\$\$\(/g)].map(([found]) => found).join(" ");
 // The targets whose deps run at once, each with why. Anywhere else deps run one at a time, in
 // order: a dep may build what the next one runs.
 export const PARALLEL_TARGETS: Record<string, string> = {
@@ -4728,11 +4731,14 @@ export function makefileTargets(text: string): {
             "`$(MAKE) <dep>` line of its own.",
         );
       } else {
+        // A double-quoted string still runs what a backtick or `$(` in it names, so those stay.
         const unquoted = body
           .replace(EXEC_LINE, "")
           .replaceAll(OWN_ARGS, "")
-          .replaceAll(/\$\$\{[^}]*\}/g, "")
-          .replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "");
+          .replaceAll(/\$\$\{[^}`(]*\}/g, "")
+          .replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, (quoted) =>
+            quoted.startsWith("'") ? "" : substitutions(quoted.replaceAll(/\\./g, "")),
+          );
         if (!EXEC_LINE.test(body) || SHELL_OPERATOR.test(unquoted)) {
           problems.push(
             `${makefileAt(line)}: the "${name}" target's command line must be one program, ` +

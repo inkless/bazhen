@@ -1506,15 +1506,21 @@ describe("makefileFailures", () => {
       failures(withTarget("exec vite build | tee x")),
       failures(withTarget("cd apps/web && exec vite build && exec chmod -R g-w dist")),
       failures(withTarget("exec node x.ts $$(cat y)")),
+      failures(withTarget('exec tsc -b "`true`"')),
+      failures(withTarget('exec tsc -b "x $$(true)"')),
+      failures(withTarget("exec env A=$${A:-`true`} node x.ts")),
+      failures(withTarget("exec env A=$${A:-$$(true)} node x.ts")),
       failures(withTarget("exec sh -c 'a && b'")),
       failures(
         withTarget(`cd apps/web && exec vite build ${OWN_ARGS} < /dev/null`, "exec chmod x"),
       ),
       failures(withTarget("exec env A=$${A:-1} node x.ts")),
+      failures(withTarget("exec node x.ts \"a \\` b\" '`'")),
     ]).toEqual([
-      ...Array.from({ length: 5 }, () => [
+      ...Array.from({ length: 9 }, () => [
         expect.stringContaining('the "t" target\'s command line must be one program'),
       ]),
+      [],
       [],
       [],
       [],
