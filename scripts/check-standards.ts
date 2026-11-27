@@ -404,9 +404,13 @@ export function makeTargets(span: string): string[] {
   const targets: string[] = [];
   for (let i = 0; i < words.length; i++) {
     const word = words[i] ?? "";
+    // A word that ends a clause, as `make check.` does, ends the command too.
+    const bare = word.replace(/[.,:;!?)]+$/, "");
     if (MAKE_VALUE_FLAGS.has(word)) i++;
-    else if (TARGET_NAME.test(word)) targets.push(word);
-    else if (!/^-|^[A-Za-z_]\w*=/.test(word)) return targets.slice(0, 1);
+    else if (TARGET_NAME.test(bare)) {
+      targets.push(bare);
+      if (bare !== word) return targets.slice(0, 1);
+    } else if (!/^-|^[A-Za-z_]\w*=/.test(word)) return targets.slice(0, 1);
   }
   return targets;
 }
@@ -418,6 +422,15 @@ export const FOREIGN_MAKE: Readonly<Record<string, Readonly<Record<string, strin
     "&& make install DESTDIR=/tmux-root": "installs tmux with the Makefile of tmux's own release",
   },
 };
+
+/** Why `foreign` lists a file that isn't among `paths`. */
+export const missingForeignFiles = (
+  paths: readonly string[],
+  foreign: typeof FOREIGN_MAKE = FOREIGN_MAKE,
+): string[] =>
+  Object.keys(foreign)
+    .filter((file) => !paths.includes(file))
+    .map((file) => `scripts/check-standards.ts: FOREIGN_MAKE lists ${file}, which is no file.`);
 
 /**
  * `text` less the lines `foreign` lists for `file`, which run another project's Makefile, and why
@@ -448,7 +461,8 @@ const NAMES_COMMANDS = /\.(?:md|ts|tsx|rs|sh|ya?ml|toml)$|(?:^|\/)Dockerfile$/;
 const SHELL_TEXT = /\.(?:sh|ya?ml)$|(?:^|\/)Dockerfile$/;
 // Where a shell line starts another command, and the words that run the one after them.
 const SHELL_SEPARATOR = /&&|\|\||[;|&!({]|\$\(|\b(?:then|do|else)\b/;
-const SHELL_PREFIX = /^\s*(?:-\s+)?(?:run:\s*|RUN\s+)?(?:(?:nohup|setsid|exec|if|time)\s+)*/;
+const SHELL_PREFIX =
+  /^\s*(?:-\s+)?(?:run:\s*|RUN(?:\s+--\S+)*\s+)?(?:(?:nohup|setsid|exec|if|time)\s+)*/;
 
 /**
  * The text in a file that may be a command: a Markdown file's code spans and fenced lines; any
@@ -4637,10 +4651,11 @@ export const ARGLESS_LINES: Readonly<
 // and leaves the program running.
 const EXEC_LINE = /^[@\s+-]*(?:cd [^\s;&|<>()`'"]+ && )?exec \S/;
 // What runs a second program, or one round the exec, once quoted text is left out.
-const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\(/;
+// `$$((`, arithmetic, runs nothing.
+const SHELL_OPERATOR = /&&|\|\||[;&|`]|\$\$\((?!\()/;
 /** The command substitutions in a shell's text, each as the operator that starts it. */
 const substitutions = (text: string) =>
-  [...text.matchAll(/`|\$\$\(/g)].map(([found]) => found).join(" ");
+  [...text.matchAll(/`|\$\$\((?!\()/g)].map(([found]) => found).join(" ");
 // The targets whose deps run at once, each with why. Anywhere else deps run one at a time, in
 // order: a dep may build what the next one runs.
 export const PARALLEL_TARGETS: Record<string, string> = {
@@ -4785,11 +4800,15 @@ export function makefileTargets(text: string): {
               "so a shell left between make and the program would leave it running.",
           );
         }
-        if (!body.includes(OWN_ARGS) && ARGLESS_LINES[name]?.line !== body) {
+        // Quoted, ARGS would reach the program as one word; after a `#`, as none.
+        const bare = body.replaceAll(/'[^']*'|"(?:[^"\\]|\\.)*"/g, " ");
+        const takesArgs = bare.includes(OWN_ARGS) && !/(?:^|\s)#/.test(bare);
+        if (!takesArgs && ARGLESS_LINES[name]?.line !== body) {
           problems.push(
             `${makefileAt(line)}: the "${name}" target's command line must take \`${OWN_ARGS}\`, ` +
-              "or make would drop the ARGS a person gives it unseen (ARGLESS_LINES in " +
-              "scripts/check-standards.ts lists the lines that may not).",
+              "unquoted, on a line with no `#` comment, or the shell would drop the ARGS a " +
+              "person gives it, or join them (ARGLESS_LINES in scripts/check-standards.ts lists " +
+              "the lines that may not take them).",
           );
         }
         command = command === undefined ? body : `${command} && ${body}`;
@@ -4856,6 +4875,25 @@ export function makefileTargets(text: string): {
     problems.push(`${MAKEFILE}: .PHONY names \`${name}\`, which is no target.`);
   }
   return { targets, failures: problems };
+}
+
+/** Why `argless` lists a line its target doesn't run, or a target that isn't there. */
+export function staleArglessLines(
+  targets: ReadonlyMap<string, MakeTarget>,
+  argless: typeof ARGLESS_LINES = ARGLESS_LINES,
+): string[] {
+  return Object.entries(argless)
+    .filter(([name, { line }]) => {
+      const command = targets.get(name)?.command;
+      if (command === undefined) return true;
+      const runs = ` && ${command} && `;
+      return !runs.includes(` && ${line} && `);
+    })
+    .map(
+      ([name, { line }]) =>
+        `scripts/check-standards.ts: ARGLESS_LINES lists \`${line}\` for the "${name}" ` +
+        `target, which doesn't run it.`,
+    );
 }
 
 /** The targets a person or CI may run: those on `make help`'s menu, which have a `##`. */
@@ -6613,9 +6651,8 @@ function checkMakefile(): void {
     const { text, failures: stale } = withoutForeignMake(file, readRepoFile(file));
     failures.push(...stale, ...makeNameFailures(file, text, targets));
   }
-  for (const file of Object.keys(FOREIGN_MAKE).filter((f) => !repoFiles().includes(f))) {
-    failures.push(`scripts/check-standards.ts: FOREIGN_MAKE lists ${file}, which is no file.`);
-  }
+  failures.push(...missingForeignFiles(repoFiles()));
+  failures.push(...staleArglessLines(makefileTargets(readRepoFile(MAKEFILE)).targets));
 }
 
 // An api test runs on holders, the default runtime, unless it is about tmux: those cases live in a

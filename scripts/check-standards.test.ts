@@ -26,6 +26,8 @@ import {
   partitionFailures,
   makeTargets,
   withoutForeignMake,
+  missingForeignFiles,
+  staleArglessLines,
   menuTargets,
   GATE_STEPS,
   CHECK_HALVES,
@@ -1554,6 +1556,48 @@ describe("makefileFailures", () => {
     ]);
   });
 
+  it("passes ARGS on as words of their own: unquoted, on a line with no comment", () => {
+    const refused = [expect.stringContaining('the "t" target\'s command line must take')];
+    expect([
+      failures(withTarget(`exec tsc -b # ${OWN_ARGS}`)),
+      failures(withTarget(`exec tsc -b ${OWN_ARGS} # a note`)),
+      failures(withTarget(`exec x '${OWN_ARGS}'`)),
+      failures(withTarget(`exec x "${OWN_ARGS}"`)),
+      failures(withTarget(`exec x '#' "a # b" ${OWN_ARGS}`)),
+      failures(withTarget(`exec x a#b ${OWN_ARGS}`)),
+    ]).toEqual([refused, refused, refused, refused, [], []]);
+  });
+
+  it("takes `$$((…))` on a command line as arithmetic, which runs nothing", () => {
+    expect([
+      failures(withTarget(`exec x $$((1+2)) ${OWN_ARGS}`)),
+      failures(withTarget(`exec x "$$((1+2))" ${OWN_ARGS}`)),
+      failures(withTarget(`exec x "$$( (true) )" ${OWN_ARGS}`)),
+    ]).toEqual([
+      [],
+      [],
+      [expect.stringContaining('the "t" target\'s command line must be one program')],
+    ]);
+  });
+
+  it("lists in ARGLESS_LINES only lines their targets run", () => {
+    const { targets } = makefileTargets(
+      makeRule("web-build", [`exec vite build ${OWN_ARGS}`, "exec chmod x"], "Build"),
+    );
+    expect([
+      staleArglessLines(targets, { "web-build": { line: "exec chmod x", why: "" } }),
+      staleArglessLines(targets, { "web-build": { line: "exec chmod y", why: "" } }),
+      staleArglessLines(targets, { gone: { line: "exec chmod x", why: "" } }),
+    ]).toEqual([
+      [],
+      [
+        'scripts/check-standards.ts: ARGLESS_LINES lists `exec chmod y` for the "web-build" ' +
+          "target, which doesn't run it.",
+      ],
+      [expect.stringContaining('for the "gone" target, which doesn\'t run it')],
+    ]);
+  });
+
   it("lets only the targets PARALLEL_TARGETS lists run their deps at once, a job each", () => {
     expect(Object.keys(PARALLEL_TARGETS)).toEqual(["dev"]);
     expect([
@@ -1781,6 +1825,18 @@ describe("makeTargets", () => {
       [],
     ]);
   });
+
+  it("ends a command at a word that ends a clause, and names that word's target", () => {
+    expect(
+      [
+        "make tset-real.",
+        "make tset-real,",
+        "make tset-real:",
+        "make check. Then make tset-real",
+        "make check test-rust.",
+      ].map(makeTargets),
+    ).toEqual([["tset-real"], ["tset-real"], ["tset-real"], ["check"], ["check"]]);
+  });
 });
 
 /** A job whose matrix legs name `legs` as their partitions, and whose step passes one on. */
@@ -1922,6 +1978,25 @@ describe("withoutForeignMake", () => {
         expect.stringContaining("names `make gone`"),
       ],
     ]);
+  });
+
+  it("refuses a file FOREIGN_MAKE lists that isn't there", () => {
+    expect([
+      missingForeignFiles(["x/Dockerfile", "y"], foreign),
+      missingForeignFiles(["y"], foreign),
+    ]).toEqual([
+      [],
+      ["scripts/check-standards.ts: FOREIGN_MAKE lists x/Dockerfile, which is no file."],
+    ]);
+  });
+
+  it("reads a Dockerfile's RUN line, its flags and all, as a command", () => {
+    expect(
+      named(
+        "y/Dockerfile",
+        "RUN --mount=type=cache,target=/c make gone\nRUN --network=none make test-real\n",
+      ),
+    ).toEqual([expect.stringContaining("names `make gone`")]);
   });
 });
 
