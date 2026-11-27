@@ -171,16 +171,18 @@ impl Gate {
     }
 }
 
+fn usage() -> String {
+    format!(
+        "usage: cargo xtask gate <{}>, or test [--partition <k>/<n>] <name>... test-all takes \
+         them too. A gate takes no other arguments: its command is fixed in \
+         crates/bazhen-xtask/src/gate.rs.",
+        NAMES.join("|")
+    )
+}
+
 /// The gate `args` name, and for `test` and `test-all` the names of the tests to run. Anything else
 /// is refused, so no flag reaches the tool: a test name is a plain path, never an option.
 pub(crate) fn parse(name: &str, tests: &[OsString]) -> Result<(Gate, Vec<String>), String> {
-    let usage = || {
-        format!(
-            "usage: cargo xtask gate <{}>, or test <name>... test-all takes names too. A gate \
-             takes no other arguments: its command is fixed in crates/bazhen-xtask/src/gate.rs.",
-            NAMES.join("|")
-        )
-    };
     let gate = Gate::named(name).ok_or_else(usage)?;
     if !tests.is_empty() && !gate.takes_tests() {
         return Err(usage());
@@ -190,6 +192,46 @@ pub(crate) fn parse(name: &str, tests: &[OsString]) -> Result<(Gate, Vec<String>
         .map(|t| t.to_str().filter(|t| is_test_name(t)).map(str::to_owned))
         .collect();
     names.map(|names| (gate, names)).ok_or_else(usage)
+}
+
+/// The `index`th of `count` slices of a test gate's run: nextest runs every `count`th test of each
+/// test binary, from its `index`th. CI spreads one run over runners side by side with it, a slice
+/// each, which between them run every test once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Partition {
+    index: u32,
+    count: u32,
+}
+
+impl Partition {
+    /// What nextest's `--partition` takes for this slice.
+    fn arg(self) -> String {
+        format!("count:{}/{}", self.index, self.count)
+    }
+}
+
+/// The partition `given` names for `gate`, as `<k>/<n>` in decimal digits with 1 <= k <= n, `None`
+/// when none is given. Refused for a gate that runs no tests, and in any other form, so what
+/// reaches nextest is only ever the argument `Partition::arg` writes.
+pub(crate) fn partition(gate: Gate, given: Option<&OsStr>) -> Result<Option<Partition>, String> {
+    let Some(given) = given else {
+        return Ok(None);
+    };
+    let number = |text: &str| {
+        (!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| text.parse::<u32>().ok())
+            .flatten()
+    };
+    let (index, count) = given
+        .to_str()
+        .filter(|_| gate.takes_tests())
+        .and_then(|text| text.split_once('/'))
+        .and_then(|(k, n)| number(k).zip(number(n)))
+        .ok_or_else(usage)?;
+    if index == 0 || index > count {
+        return Err(usage());
+    }
+    Ok(Some(Partition { index, count }))
 }
 
 /// `name::path::to_test`: words of letters, digits and `_`, joined by `::`.
@@ -343,10 +385,12 @@ pub(crate) struct Places {
     pub(crate) cargo_home: PathBuf,
 }
 
-/// Runs `gate` with `tests`, in `env` cleaned of every flag a caller could pass.
+/// Runs `gate` with `tests`, in `partition` if one is given, in `env` cleaned of every flag a caller
+/// could pass.
 pub(crate) fn run(
     gate: Gate,
     tests: &[String],
+    partition: Option<Partition>,
     env: Env,
     places: &Places,
     host: &mut impl Host,
@@ -372,9 +416,14 @@ pub(crate) fn run(
         let _ = writeln!(err, "{}", gate.hint());
         return Exit::Failed;
     }
+    let slice: Vec<String> = partition
+        .into_iter()
+        .flat_map(|p| ["--partition".to_owned(), p.arg()])
+        .collect();
     for command in gate.commands() {
         let argv: Vec<&str> = command
             .into_iter()
+            .chain(slice.iter().map(String::as_str))
             .chain(report_every_failure.then_some(NO_FAIL_FAST))
             .chain(tests.iter().map(String::as_str))
             .collect();
@@ -709,6 +758,7 @@ mod tests {
         let exit = run(
             Gate::named(name).unwrap(),
             &tests,
+            None,
             env,
             &places,
             host,
@@ -841,6 +891,86 @@ mod tests {
             assert_eq!(exit, Exit::Failed, "{metadata:?}");
             assert_eq!(runs.len(), 3, "{metadata:?}");
             assert!(err.starts_with("cargo metadata"), "{err}");
+        }
+    }
+
+    #[test]
+    fn takes_a_partition_only_as_k_of_n_and_only_for_a_gate_that_runs_tests() {
+        let given =
+            |gate: &str, text: &str| partition(Gate::named(gate).unwrap(), Some(text.as_ref()));
+        for gate in ["test", "test-all"] {
+            assert_eq!(
+                given(gate, "2/3").unwrap().map(Partition::arg).as_deref(),
+                Some("count:2/3")
+            );
+            assert_eq!(
+                given(gate, "1/1").unwrap().map(Partition::arg).as_deref(),
+                Some("count:1/1")
+            );
+            assert_eq!(partition(Gate::named(gate).unwrap(), None), Ok(None));
+            for bad in [
+                "0/2",
+                "3/2",
+                "1/0",
+                "",
+                "/",
+                "1",
+                "1/",
+                "/2",
+                "a/2",
+                "+1/2",
+                "1/2/3",
+                " 1/2",
+                "1/2 ",
+                "hash:1/2",
+                "1/4294967296",
+            ] {
+                let why = given(gate, bad).unwrap_err();
+                assert!(
+                    why.contains("takes no other arguments"),
+                    "{gate} {bad:?}: {why}"
+                );
+            }
+        }
+        for gate in ["fmt", "lint", "deny"] {
+            assert!(given(gate, "1/2").is_err(), "{gate}");
+        }
+    }
+
+    #[test]
+    fn hands_nextest_the_partition_before_the_ci_flag_and_the_tests_and_no_partition_unasked() {
+        let places = Places {
+            root: "/a/repo".into(),
+            cargo_home: "/home/u/.cargo".into(),
+        };
+        let ci = env(&[("CI", "true")]);
+        for (name, command) in [("test", TEST), ("test-all", TEST_ALL)] {
+            let gate = Gate::named(name).unwrap();
+            let sliced = partition(gate, Some("2/3".as_ref())).unwrap();
+            for (slice, want) in [(sliced, &["--partition", "count:2/3"][..]), (None, &[])] {
+                let mut host = Fake::new(true);
+                let tests = ["a".to_owned()];
+                let exit = run(
+                    gate,
+                    &tests,
+                    slice,
+                    ci.clone(),
+                    &places,
+                    &mut host,
+                    &mut Vec::new(),
+                );
+                let argv: Vec<&str> = command
+                    .iter()
+                    .copied()
+                    .chain(want.iter().copied())
+                    .chain([NO_FAIL_FAST, "a"])
+                    .collect();
+                assert_eq!(
+                    (exit, host.runs.last().unwrap()),
+                    (Exit::Done, &argv.iter().map(|a| (*a).to_owned()).collect()),
+                    "{name} {slice:?}"
+                );
+            }
         }
     }
 

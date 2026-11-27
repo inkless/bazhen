@@ -42,6 +42,11 @@ fn command() -> Command {
                         .value_parser(value_parser!(OsString)),
                 )
                 .arg(
+                    Arg::new("partition")
+                        .long("partition")
+                        .value_parser(value_parser!(OsString)),
+                )
+                .arg(
                     Arg::new("tests")
                         .action(ArgAction::Append)
                         .value_parser(value_parser!(OsString)),
@@ -112,8 +117,13 @@ pub(crate) fn run<H: Host>(
         .flatten()
         .cloned()
         .collect();
-    match gate::parse(name, &tests) {
-        Ok((gate, tests)) => {
+    let given = matches
+        .get_one::<OsString>("partition")
+        .map(OsString::as_os_str);
+    match gate::parse(name, &tests).and_then(|(gate, tests)| {
+        gate::partition(gate, given).map(|partition| (gate, tests, partition))
+    }) {
+        Ok((gate, tests, partition)) => {
             // The daemon's router test reads the corpus the schema's run writes.
             if gate.takes_tests() {
                 let known = schema::KNOWN_MISMATCHES;
@@ -129,7 +139,15 @@ pub(crate) fn run<H: Host>(
                     return written;
                 }
             }
-            gate::run(gate, &tests, world.env, &world.places, world.host, err)
+            gate::run(
+                gate,
+                &tests,
+                partition,
+                world.env,
+                &world.places,
+                world.host,
+                err,
+            )
         }
         Err(usage) => {
             let _ = writeln!(err, "{usage}");
@@ -285,6 +303,41 @@ mod tests {
             let (exit, out, err) = call(args);
             assert_eq!((exit, out.as_str()), (Exit::Usage, ""), "{args:?}");
             assert!(err.contains("sage"), "{args:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn takes_a_partition_for_a_test_gate_and_refuses_one_for_any_other_before_any_tool_runs() {
+        for args in [
+            &["gate", "test", "--partition", "1/2"][..],
+            &["gate", "test-all", "--partition=2/2", "a_test"],
+        ] {
+            let mut host = Recording::default();
+            let world = World {
+                env: Env::new(),
+                places: Places {
+                    root: "/a/repo".into(),
+                    cargo_home: "/home/u/.cargo".into(),
+                },
+                host: &mut host,
+            };
+            let exit = run(
+                args.iter().map(OsString::from),
+                world,
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
+            assert_eq!(exit, Exit::Failed, "{args:?}");
+            assert!(!host.calls.is_empty(), "{args:?}");
+        }
+        for args in [
+            &["gate", "lint", "--partition", "1/2"][..],
+            &["gate", "test", "--partition", "3/2"],
+            &["gate", "test", "--partition"],
+        ] {
+            let (exit, out, err) = call(args);
+            assert_eq!((exit, out.as_str()), (Exit::Usage, ""), "{args:?}");
+            assert!(err.contains("partition"), "{args:?}: {err}");
         }
     }
 
