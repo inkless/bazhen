@@ -1804,7 +1804,7 @@ describe("makeTargets", () => {
         "run make check",
         "make",
         "make $TASK",
-        "make dev exited at start:",
+        "make dev exited at start:\\n${run.text}",
         "make tset-real # a typo, then a comment",
         "make tset-real …",
         "make $TASK runs it",
@@ -1826,7 +1826,7 @@ describe("makeTargets", () => {
     ]);
   });
 
-  it("ends a command at a word that ends a clause, and names that word's target", () => {
+  it("ends a command at a word that ends a clause, and names that word's target with the rest", () => {
     expect(
       [
         "make tset-real.",
@@ -1834,8 +1834,18 @@ describe("makeTargets", () => {
         "make tset-real:",
         "make check. Then make tset-real",
         "make check test-rust.",
+        "make check tset-real.",
+        "make check tset-real, then more",
       ].map(makeTargets),
-    ).toEqual([["tset-real"], ["tset-real"], ["tset-real"], ["check"], ["check"]]);
+    ).toEqual([
+      ["tset-real"],
+      ["tset-real"],
+      ["tset-real"],
+      ["check"],
+      ["check", "test-rust"],
+      ["check", "tset-real"],
+      ["check", "tset-real"],
+    ]);
   });
 });
 
