@@ -57,7 +57,9 @@ describe("the medium suite's temporary directory", () => {
       leftover.push(root);
 
       try {
-        expect(() => teardown()).toThrow(/EACCES/);
+        // Linux's rm reports the file it can't unlink; macOS's the directory it then leaves, not
+        // empty, and its EACCES not at all.
+        expect(() => teardown()).toThrow(/^EACCES\b|^ENOTEMPTY\b/);
         expect(tmpdir()).toBe(original);
       } finally {
         chmodSync(locked, 0o700);
