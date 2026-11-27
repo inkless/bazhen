@@ -392,7 +392,8 @@ const MAKE_VALUE_FLAGS = new Set(["-C", "-f", "-I", "-o", "-W"]);
 /**
  * The targets a span names when it is a `make` command, as a person would type it: past any
  * variables set for it, its words up to a shell operator, less options and variables. A span whose
- * words after `make` aren't all options, variables and target names is prose, and names none.
+ * words after `make` aren't all options, variables and target names reads on as prose, and names
+ * the first target alone: `make dev exited at start:` names dev, and `make tset-real …` tset-real.
  */
 export function makeTargets(span: string): string[] {
   const command = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*make\b(.*)$/.exec(span);
@@ -405,7 +406,7 @@ export function makeTargets(span: string): string[] {
     const word = words[i] ?? "";
     if (MAKE_VALUE_FLAGS.has(word)) i++;
     else if (TARGET_NAME.test(word)) targets.push(word);
-    else if (!/^-|^[A-Za-z_]\w*=/.test(word)) return [];
+    else if (!/^-|^[A-Za-z_]\w*=/.test(word)) return targets.slice(0, 1);
   }
   return targets;
 }

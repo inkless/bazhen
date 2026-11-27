@@ -1748,7 +1748,7 @@ describe("menuTargets", () => {
 });
 
 describe("makeTargets", () => {
-  it("reads the targets a make command names, past the variables set for it and its options, and none in prose", () => {
+  it("reads the targets a make command names, past the variables set for it and its options, and the first alone where prose follows", () => {
     expect(
       [
         "make check",
@@ -1762,6 +1762,8 @@ describe("makeTargets", () => {
         "make $TASK",
         "make dev exited at start:",
         "make tset-real # a typo, then a comment",
+        "make tset-real …",
+        "make $TASK runs it",
       ].map(makeTargets),
     ).toEqual([
       ["check"],
@@ -1773,8 +1775,10 @@ describe("makeTargets", () => {
       [],
       [],
       [],
-      [],
+      ["dev"],
       ["tset-real"],
+      ["tset-real"],
+      [],
     ]);
   });
 });
