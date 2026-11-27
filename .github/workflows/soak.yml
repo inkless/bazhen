@@ -55,9 +55,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: ./.github/actions/apt-update
+        if: runner.os == 'Linux'
       - name: Install tmux
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        run: sudo apt-get install -y tmux
       - name: Install tmux
         if: runner.os == 'macOS'
         run: command -v tmux || brew install tmux
