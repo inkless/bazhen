@@ -6473,6 +6473,72 @@ function checkSignalChokepoints(): void {
   failures.push(...cargoManifestFailures(repoFiles(), readRepoFile));
 }
 
+/** A workflow's jobs, by name: each `jobs:` entry's lines, up to the next. */
+function workflowJobs(text: string): Map<string, string[]> {
+  const jobs = new Map<string, string[]>();
+  let inJobs = false;
+  let current: string[] | undefined;
+  for (const line of text.split("\n")) {
+    if (/^\S/.test(line)) {
+      inJobs = line.trimEnd() === "jobs:";
+      current = undefined;
+      continue;
+    }
+    const job = inJobs ? /^ {2}([\w-]+):\s*$/.exec(line) : null;
+    if (job?.[1] !== undefined) {
+      current = [];
+      jobs.set(job[1], current);
+    } else current?.push(line);
+  }
+  return jobs;
+}
+
+/**
+ * Why a workflow job's legs would not run each of its test partitions once. A job whose matrix
+ * names `partition: <k>/<n>` hands each leg's to `--partition`, which runs that slice alone, so
+ * between them its legs must name each of 1..n for one n, once: a leg left out drops its slice
+ * of the tests, with every check still green.
+ */
+export function partitionFailures(file: string, text: string): string[] {
+  const out: string[] = [];
+  for (const [job, lines] of workflowJobs(text)) {
+    const given = lines.flatMap((line) => {
+      const m = /^\s+(?:-\s+)?partition:\s*["']?(\d+)\/(\d+)["']?\s*$/.exec(line);
+      return m?.[1] === undefined || m[2] === undefined ? [] : [[Number(m[1]), Number(m[2])]];
+    });
+    const usesPartition = lines.some(
+      (line) => !line.trimStart().startsWith("#") && line.includes("--partition"),
+    );
+    if (given.length === 0) {
+      if (usesPartition) {
+        out.push(
+          `${file}: job ${job} passes --partition but its matrix names no \`partition: <k>/<n>\`, ` +
+            "so nothing shows its legs run every slice.",
+        );
+      }
+      continue;
+    }
+    const counts = new Set(given.map(([, n]) => n));
+    const indexes = given.map(([k]) => k).toSorted((a, b) => (a ?? 0) - (b ?? 0));
+    const [count] = counts;
+    const whole = Array.from({ length: count ?? 0 }, (_, i) => i + 1);
+    if (counts.size !== 1 || indexes.join(",") !== whole.join(",")) {
+      out.push(
+        `${file}: job ${job}'s legs name the partitions ` +
+          `${given.map(([k, n]) => `${k}/${n}`).join(", ")}: they must be 1/n to n/n for one n, ` +
+          "each once, or a slice of the tests runs nowhere.",
+      );
+    }
+  }
+  return out;
+}
+
+function checkWorkflowPartitions(): void {
+  for (const file of repoFiles().filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f))) {
+    failures.push(...partitionFailures(file, readRepoFile(file)));
+  }
+}
+
 function checkMakefile(): void {
   failures.push(...makefileFailures(repoFiles(), readRepoFile));
   const { targets } = menu();
@@ -7007,6 +7073,7 @@ export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkWebTokens,
   checkRust,
   checkMakefile,
+  checkWorkflowPartitions,
   checkTmuxPins,
   checkSignalChokepoints,
   checkMigrations,
