@@ -341,14 +341,17 @@ describe("make test-real cleans up after itself", () => {
     expect(ownerOf(RUN)).toBe(OWN_PID);
   });
 
-  it("runs each suite under an init that passes a signal to make alone, which passes it on", async () => {
+  it("has every suite's init pass a signal to the suite's whole group, falsify's shell's included", async () => {
     const fake = fakeHost(passing);
-    expect(await run(["api"], fake.host)).toBe(0);
-    const suite = fake.calls.find(isSuiteRun);
-    expect([suite?.includes("--init"), suite?.includes("--env")]).toEqual([true, false]);
+    expect(await run(["api", "falsify"], fake.host)).toBe(0);
+    const suites = fake.calls.filter(isSuiteRun);
+    expect(suites.map((suite) => [suite.includes("--init"), valueAfter(suite, "--env")])).toEqual([
+      [true, "TINI_KILL_PROCESS_GROUP=1"],
+      [true, "TINI_KILL_PROCESS_GROUP=1"],
+    ]);
   });
 
-  it("passes any signal on to the running suite as SIGTERM, the one make passes on to its child", async () => {
+  it("passes any signal on to the running suite as SIGINT, which make leaves to its group", async () => {
     const stopped = await Promise.all(
       (["SIGINT", "SIGHUP", "SIGTERM"] as const).map(async (signal) => {
         const fake = fakeHost(integrationHangs);
@@ -359,7 +362,7 @@ describe("make test-real cleans up after itself", () => {
         return fake.stopped;
       }),
     );
-    expect(stopped).toEqual([["SIGTERM"], ["SIGTERM"], ["SIGTERM"]]);
+    expect(stopped).toEqual([["SIGINT"], ["SIGINT"], ["SIGINT"]]);
   });
 
   it("gives each suite's container a CPU budget, so the run cannot take the machine", async () => {
@@ -529,7 +532,7 @@ describe("make test-real cleans up after itself", () => {
     await expect.poll(fake.waitingOn).toBe("run --rm");
     fake.signal("SIGTERM");
     expect(await exit).toBe(143);
-    expect(fake.stopped).toEqual(["SIGTERM"]);
+    expect(fake.stopped).toEqual(["SIGINT"]);
     expect(fake.calls.filter(isSuiteRun)).toHaveLength(1);
     expect(cleanup(fake.calls)).toEqual([
       ["rm", "--force", ...PROBES, `${RUN}-integration`],
@@ -545,7 +548,7 @@ describe("make test-real cleans up after itself", () => {
     await expect.poll(fake.waitingOn).toBe("build --tag");
     fake.signal("SIGINT");
     expect(await exit).toBe(130);
-    expect(fake.stopped).toEqual(["SIGTERM"]);
+    expect(fake.stopped).toEqual(["SIGINT"]);
     expect(fake.calls.some(isSuiteRun)).toBe(false);
     expect(cleanup(fake.calls)).toEqual([["image", "rm", IMAGE]]);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);
@@ -557,7 +560,7 @@ describe("make test-real cleans up after itself", () => {
     await expect.poll(fake.waitingOn).toBe("image rm");
     fake.signal("SIGHUP");
     expect(await exit).toBe(129);
-    expect(fake.stopped).toEqual(["SIGTERM"]);
+    expect(fake.stopped).toEqual(["SIGINT"]);
   });
 
   it("abandons the rest of its cleanup on a second signal, and says what it left", async () => {
@@ -568,7 +571,7 @@ describe("make test-real cleans up after itself", () => {
     fake.signal("SIGTERM");
     await expect.poll(fake.waitingOn).toBe("rm --force");
     fake.signal("SIGINT");
-    await expect.poll(() => fake.stopped).toEqual(["SIGTERM", "SIGKILL"]);
+    await expect.poll(() => fake.stopped).toEqual(["SIGINT", "SIGKILL"]);
     expect(await exit).toBe(143);
     expect(fake.calls.some((c) => verb(c) === "image rm")).toBe(false);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);
