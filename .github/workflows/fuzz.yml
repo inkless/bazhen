@@ -1,8 +1,11 @@
 name: Fuzz
 
-# Runs the cargo-fuzz targets in crates/*/fuzz (docs/standards/rust.md § Tests), one job per crate,
-# side by side: nightly for long, building on the corpus earlier runs kept; on a pull request that
-# changes the Rust, briefly, so a broken target or a decoder it breaks is seen before it merges.
+# Runs the cargo-fuzz targets in crates/*/fuzz (docs/standards/rust.md § Tests) side by side:
+# nightly for long, building on the corpus earlier runs kept; on a pull request that changes the
+# Rust, briefly, so a broken target or a decoder it breaks is seen before it merges. A pull request
+# fuzzes its crates in a few jobs of several crates each (`PR_JOBS` below), and a draft none: it
+# runs once marked ready. Nightly, a crate's targets are split across jobs of at most
+# `TARGETS_PER_JOB`, so that none outlasts its timeout, and each crate is built once, before them.
 # Which pull requests run it is the `paths` filter below, not a choice of crates: every crate runs.
 # Nightly, it also runs the property tests on random seeds: everywhere else they run on fixed ones.
 on:
@@ -10,23 +13,27 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
   pull_request:
+    # `ready_for_review` too, so a draft, which runs nothing, is fuzzed once it's marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
       - ".github/workflows/fuzz.yml"
+      - ".github/actions/fuzz-restore/**"
       - ".nvmrc"
       # capped.ts and what it imports.
       - "scripts/capped.ts"
       - "scripts/is-main.ts"
       - "packages/host-guard/src/**"
 
-# A pull request's runs share a group, and a newer one cancels the one running. Every other run
-# shares one group and waits its turn, so no two restore the same corpus and save beside each other,
-# where `prune` would keep one run's finds and delete the other's.
+# Runs on one ref share a group. A pull request's newer run cancels the one running. Any other run
+# waits for the one running, so no two on main restore the same corpus and save beside each other,
+# where `prune` would keep one run's finds and delete the other's. Of several waiting, GitHub keeps
+# only the newest. Keyed by the ref, so a dispatch on another branch never displaces main's nightly.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -37,37 +44,169 @@ env:
   NIGHTLY: nightly-2026-11-01
   CARGO_FUZZ: 0.13.2
   SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '60' || '600' }}
+  # The most targets one nightly job runs. Each target runs 10 minutes, capped at 15, so 3 of them
+  # are 45 of a job's 60, with room for a build the job couldn't restore.
+  TARGETS_PER_JOB: 3
 
 jobs:
+  # A draft runs nothing, and so neither does any job after this one.
   crates:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       crates: ${{ steps.list.outputs.crates }}
+      targets: ${{ steps.list.outputs.targets }}
+      jobs: ${{ steps.list.outputs.jobs }}
     steps:
       - uses: actions/checkout@v7
-      # Every crate with a fuzz crate, so one added later runs without editing this file. `ls`
-      # fails when none match, which fails the job instead of passing with nothing fuzzed.
-      - name: List the crates with a fuzz crate
+      # Every crate with a fuzz crate, so one added later runs without editing this file, and its
+      # targets, the `[[bin]]`s `cargo fuzz list` reads; each target job checks that list against
+      # cargo-fuzz's own. No crate, or a crate without targets, fails the job, instead of passing
+      # with nothing fuzzed.
+      #
+      # Nightly, a crate's targets are dealt round the fewest jobs that hold them, so the jobs come
+      # out even. On a pull request, each of `PR_JOBS` fuzzes its crates in turn, after one setup,
+      # so a push starts 4 fuzz jobs, not one per crate: GitHub runs 20 of a repository's jobs at
+      # once, and the rest queue. A crate's minutes on a pull request, measured on run 45927952316,
+      # are beside it; each job's add up to no more than bazhen-daemon's alone. A crate not listed
+      # runs in a job of its own, and one listed with no fuzz crate fails this job.
+      - name: List the crates with a fuzz crate, and split their targets into jobs
         id: list
+        env:
+          PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
-          crates=$(ls crates/*/fuzz/Cargo.toml | cut -d/ -f2 | jq -Rnc '[inputs]')
-          echo "crates=$crates" | tee -a "$GITHUB_OUTPUT"
+          python3 - <<'EOF'
+          import glob, json, math, os, tomllib
 
-  targets:
+          PR_JOBS = [
+              ["bazhen-daemon"],  # 13.1
+              ["bazhen-protocol", "bazhen-hook", "bazhen"],  # 5.1, 3.6, 3.4
+              ["bazhen-harness", "bazhen-holder-proto", "bazhen-store", "bazhen-host-guard"],
+              # 2.8, 2.7, 1.9, 1.8
+              ["bazhen-holder", "bazhen-holder-engine", "bazhen-peer", "bazhen-core", "bazhen-client"],
+              # 2.7, 2.0, 1.7, 1.6, 1.5
+          ]
+          # The most crates in one job: the target job restores each one's caches in a step of
+          # its own, since a step can't loop, and it has this many.
+          MAX_CRATES = 5
+
+          per_job = int(os.environ["TARGETS_PER_JOB"])
+          crates, targets = [], {}
+          for manifest in sorted(glob.glob("crates/*/fuzz/Cargo.toml")):
+              crate = manifest.split("/")[1]
+              with open(manifest, "rb") as f:
+                  names = sorted(b["name"] for b in tomllib.load(f).get("bin", []))
+              if not names:
+                  raise SystemExit(f"{manifest} has no targets")
+              crates.append(crate)
+              targets[crate] = names
+          if not crates:
+              raise SystemExit("no crate has a fuzz crate")
+
+          # Each job's name, and its crates with the targets it runs of each.
+          groups = []
+          if os.environ["PULL_REQUEST"] == "true":
+              listed = [crate for job in PR_JOBS for crate in job]
+              if gone := sorted(set(listed) - set(crates)):
+                  raise SystemExit(f"PR_JOBS lists crates without a fuzz crate: {gone}")
+              for job in PR_JOBS + [[crate] for crate in crates if crate not in listed]:
+                  groups.append((", ".join(job), [(crate, targets[crate]) for crate in job]))
+          else:
+              for crate in crates:
+                  count = math.ceil(len(targets[crate]) / per_job)
+                  for i in range(count):
+                      name = crate if count == 1 else f"{crate} {i + 1}/{count}"
+                      groups.append((name, [(crate, targets[crate][i::count])]))
+
+          jobs = []
+          for number, (name, group) in enumerate(groups, 1):
+              if len(group) > MAX_CRATES:
+                  raise SystemExit(f"{name}: more than {MAX_CRATES} crates in one job")
+              jobs.append({
+                  "id": number,
+                  "name": name,
+                  "crates": [{"crate": c, "targets": " ".join(n)} for c, n in group],
+              })
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              all_targets = {crate: " ".join(names) for crate, names in targets.items()}
+              for key, value in (("crates", crates), ("targets", all_targets), ("jobs", jobs)):
+                  print(f"{key}={json.dumps(value, separators=(',', ':'))}", file=out)
+                  print(f"{key}={json.dumps(value, indent=2)}")
+          EOF
+
+  # A crate's build, saved once per lockfile on main, before any of the crate's target jobs start,
+  # so that each of them restores it instead of building it again. A pull request runs each crate
+  # in one job, which builds it, and saves no build: its save would be seen by that pull request
+  # alone. Nor does a run on another branch, whose target jobs build what they don't restore.
+  build:
     needs: crates
-    name: fuzz ${{ matrix.crate }}
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    name: build ${{ matrix.crate }}
     runs-on: ubuntu-latest
-    # Nightly, each target runs for 10 minutes after the crate's build, so a crate of up to 5
-    # targets fits; bazhen-daemon, with 6, doesn't yet.
-    timeout-minutes: 60
+    # The build's own cap is 15 minutes; the rest is the toolchain and the save.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         crate: ${{ fromJSON(needs.crates.outputs.crates) }}
     env:
       CRATE: crates/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v7
+      # Looked up first, so that a crate whose build is saved installs nothing.
+      - uses: actions/cache/restore@v6
+        id: target
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/target
+          key: fuzz-target.${{ matrix.crate }}.${{ env.NIGHTLY }}.cargo-fuzz-${{ env.CARGO_FUZZ }}.${{ hashFiles(format('crates/{0}/fuzz/Cargo.lock', matrix.crate)) }}
+          lookup-only: true
+      - if: steps.target.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - if: steps.target.outputs.cache-hit != 'true'
+        name: Install nightly
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - if: steps.target.outputs.cache-hit != 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ env.CARGO_FUZZ }}-${{ runner.os }}
+      - if: steps.target.outputs.cache-hit != 'true'
+        name: Install cargo-fuzz
+        run: command -v cargo-fuzz || cargo "+$NIGHTLY" install --locked "cargo-fuzz@$CARGO_FUZZ"
+      - if: steps.target.outputs.cache-hit != 'true'
+        name: Build the crate's targets
+        run: |
+          set -euo pipefail
+          cd "$CRATE"
+          node ../../scripts/capped.ts --memory 4G --time 15m -- cargo "+$NIGHTLY" fuzz build
+      - if: steps.target.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/target
+          key: ${{ steps.target.outputs.cache-primary-key }}
+
+  # A job of several crates on a pull request, and of a crate's targets nightly. It runs even when
+  # a crate's build job failed, and builds what it didn't restore, so a crate whose build is broken
+  # fails here, by its targets.
+  targets:
+    needs: [crates, build]
+    if: ${{ !cancelled() && needs.crates.result == 'success' }}
+    name: fuzz ${{ matrix.job.name }}
+    runs-on: ubuntu-latest
+    # Nightly, a job runs at most 3 targets of 10 minutes each (TARGETS_PER_JOB). On a pull request,
+    # a job's crates take no longer than bazhen-daemon's 13 minutes (PR_JOBS).
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(needs.crates.outputs.jobs) }}
+    env:
+      CRATES: ${{ toJSON(matrix.job.crates) }}
+      ALL_TARGETS: ${{ needs.crates.outputs.targets }}
     steps:
       - uses: actions/checkout@v7
       # scripts/capped.ts caps each target's memory and time, and needs only Node and the source it
@@ -83,93 +222,183 @@ jobs:
           key: cargo-fuzz-${{ env.CARGO_FUZZ }}-${{ runner.os }}
       - name: Install cargo-fuzz
         run: command -v cargo-fuzz || cargo "+$NIGHTLY" install --locked "cargo-fuzz@$CARGO_FUZZ"
-      # The build, saved once per lockfile by a run off a pull request, so a pull request starts
-      # from it and rebuilds only the workspace's own crates; a pull request's own save would be
-      # seen by that pull request alone. Restored on an exact key only, so a build saved for an
-      # older lockfile never carries its artifacts into the next. Keys separate the crate with
-      # `.`, which a package name can't hold, so one crate's key is never a prefix of another's.
-      - uses: actions/cache/restore@v6
-        id: target
-        with:
-          path: crates/${{ matrix.crate }}/fuzz/target
-          key: fuzz-target.${{ matrix.crate }}.${{ env.NIGHTLY }}.cargo-fuzz-${{ env.CARGO_FUZZ }}.${{ hashFiles(format('crates/{0}/fuzz/Cargo.lock', matrix.crate)) }}
-      # Each run starts from the corpus the last one left, so the nightly runs add up. A pull
-      # request restores it but saves none: a pull request's save would be seen by that pull
+      # Each crate's build and corpus, one step a crate, up to MAX_CRATES in the `crates` job. A pull
+      # request restores them but saves none: a pull request's save would be seen by that pull
       # request alone, and each of its runs made one, so they filled the repository's caches.
-      - uses: actions/cache/restore@v6
-        id: corpus
+      - if: matrix.job.crates[0]
+        uses: ./.github/actions/fuzz-restore
         with:
-          path: crates/${{ matrix.crate }}/fuzz/corpus
-          key: fuzz-corpus.${{ matrix.crate }}.${{ github.run_id }}
-          restore-keys: fuzz-corpus.${{ matrix.crate }}.
-      # Every target built before any runs, so the build is saved below even when the runs
-      # outlast the job: nightly, a crate of 6 targets at 10 minutes each does.
-      - name: Build the crate's targets
-        id: build
-        run: |
-          set -euo pipefail
-          cd "$CRATE"
-          # Listed first, so a crate whose targets can't be listed fails the job.
-          targets=$(cargo "+$NIGHTLY" fuzz list)
-          if [ -z "$targets" ]; then
-            echo "$CRATE/fuzz has no targets" >&2
-            exit 1
-          fi
-          node ../../scripts/capped.ts --memory 4G --time 15m -- cargo "+$NIGHTLY" fuzz build
-      # Saved on main once it built, on a miss: the build is good whatever the runs find. Not by a
-      # pull request, whose save only it could read, nor by a run on another branch.
-      - if: >-
-          !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
-          steps.target.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
-        uses: actions/cache/save@v6
+          crate: ${{ matrix.job.crates[0].crate }}
+          nightly: ${{ env.NIGHTLY }}
+          cargo-fuzz: ${{ env.CARGO_FUZZ }}
+      - if: matrix.job.crates[1]
+        uses: ./.github/actions/fuzz-restore
         with:
-          path: crates/${{ matrix.crate }}/fuzz/target
-          key: ${{ steps.target.outputs.cache-primary-key }}
-      - name: Run the crate's targets
+          crate: ${{ matrix.job.crates[1].crate }}
+          nightly: ${{ env.NIGHTLY }}
+          cargo-fuzz: ${{ env.CARGO_FUZZ }}
+      - if: matrix.job.crates[2]
+        uses: ./.github/actions/fuzz-restore
+        with:
+          crate: ${{ matrix.job.crates[2].crate }}
+          nightly: ${{ env.NIGHTLY }}
+          cargo-fuzz: ${{ env.CARGO_FUZZ }}
+      - if: matrix.job.crates[3]
+        uses: ./.github/actions/fuzz-restore
+        with:
+          crate: ${{ matrix.job.crates[3].crate }}
+          nightly: ${{ env.NIGHTLY }}
+          cargo-fuzz: ${{ env.CARGO_FUZZ }}
+      - if: matrix.job.crates[4]
+        uses: ./.github/actions/fuzz-restore
+        with:
+          crate: ${{ matrix.job.crates[4].crate }}
+          nightly: ${{ env.NIGHTLY }}
+          cargo-fuzz: ${{ env.CARGO_FUZZ }}
+      # Crate by crate: its targets built before any runs, so that a target's time cap holds its run
+      # alone (on a restored build, this builds only what changed), then its targets run. A crate
+      # or target that fails is reported, and the job goes on to the next, so that one broken crate
+      # doesn't leave the others in its job unfuzzed; the step fails at the end.
+      - name: Build and run each crate's targets
         id: run
         run: |
-          set -euo pipefail
-          cd "$CRATE"
-          targets=$(cargo "+$NIGHTLY" fuzz list)
-          for target in $targets; do
-            echo "::group::$target"
-            mkdir -p "fuzz/corpus/$target" "fuzz/seeds/$target"
-            # A target whose input can be longer than libFuzzer's guess names its own longest.
-            max_len=()
-            if [ -f "fuzz/max_len/$target" ]; then
-              max_len=("-max_len=$(cat "fuzz/max_len/$target")")
+          set -uo pipefail
+          fuzz_crate() {
+            local crate=$1 failed=0 listed all target
+            shift
+            cd "crates/$crate" || return 1
+            # Listed first, so a crate whose targets can't be listed fails, and checked against
+            # the list the jobs were split from, so that no target goes unrun.
+            listed=$(cargo "+$NIGHTLY" fuzz list | LC_ALL=C sort | xargs) || return 1
+            all=$(jq -r --arg crate "$crate" '.[$crate]' <<< "$ALL_TARGETS")
+            if [ "$listed" != "$all" ]; then
+              echo "::error::$crate: cargo fuzz list gives '$listed', but the jobs were split from '$all'"
+              return 1
             fi
-            # libFuzzer's own limits are given, not left to its defaults, inside a cap of the run's.
-            node ../../scripts/capped.ts --memory 4G \
-              --time "$((SECONDS_PER_TARGET / 60 + 5))m" -- \
-              cargo "+$NIGHTLY" fuzz run "$target" \
-              "fuzz/corpus/$target" "fuzz/seeds/$target" \
-              -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 "${max_len[@]}"
+            echo "::group::$crate: build"
+            node ../../scripts/capped.ts --memory 4G --time 15m -- cargo "+$NIGHTLY" fuzz build
+            local built=$?
             echo "::endgroup::"
-          done
-      # Saved on main, off a pull request, when every target ran clean, as actions/cache saved it
-      # before. The run's id keys it, so each run saves one, and `prune` below removes those before.
-      - if: >-
+            if [ "$built" -ne 0 ]; then
+              echo "::error::$crate: its targets didn't build"
+              return 1
+            fi
+            for target in "$@"; do
+              echo "::group::$crate: $target"
+              mkdir -p "fuzz/corpus/$target" "fuzz/seeds/$target" || return 1
+              # A target whose input can be longer than libFuzzer's guess names its own longest.
+              local max_len=()
+              if [ -f "fuzz/max_len/$target" ]; then
+                max_len=("-max_len=$(cat "fuzz/max_len/$target")")
+              fi
+              # libFuzzer's own limits are given, not left to its defaults, inside a cap of the
+              # run's.
+              node ../../scripts/capped.ts --memory 4G \
+                --time "$((SECONDS_PER_TARGET / 60 + 5))m" -- \
+                cargo "+$NIGHTLY" fuzz run "$target" \
+                "fuzz/corpus/$target" "fuzz/seeds/$target" \
+                -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 "${max_len[@]}"
+              local ran=$?
+              echo "::endgroup::"
+              if [ "$ran" -ne 0 ]; then
+                echo "::error::$crate: $target failed"
+                failed=1
+              fi
+            done
+            return "$failed"
+          }
+          failed=()
+          while read -r crate rest; do
+            read -ra crate_targets <<< "$rest"
+            (fuzz_crate "$crate" "${crate_targets[@]}") || failed+=("$crate")
+          done < <(jq -r '.[] | "\(.crate) \(.targets)"' <<< "$CRATES")
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed: ${failed[*]}"
+            exit 1
+          fi
+      # On main, off a pull request, when every target ran clean, the job hands its targets' corpora
+      # to the `corpus` job, with a mark for each target that ran, since a corpus can be empty.
+      - name: Collect the job's corpora
+        id: collect
+        if: >-
           github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
           steps.run.outcome == 'success'
-        uses: actions/cache/save@v6
+        run: |
+          set -euo pipefail
+          while read -r crate crate_targets; do
+            mkdir -p "corpus-out/$crate/corpus" "corpus-out/$crate/ran"
+            for target in $crate_targets; do
+              cp -R "crates/$crate/fuzz/corpus/$target" "corpus-out/$crate/corpus/"
+              touch "corpus-out/$crate/ran/$target"
+            done
+          done < <(jq -r '.[] | "\(.crate) \(.targets)"' <<< "$CRATES")
+      - if: steps.collect.outcome == 'success'
+        uses: actions/upload-artifact@v7
         with:
-          path: crates/${{ matrix.crate }}/fuzz/corpus
-          key: ${{ steps.corpus.outputs.cache-primary-key }}
+          name: fuzz-corpus.${{ matrix.job.id }}
+          path: corpus-out/
+          retention-days: 1
+          if-no-files-found: error
       - name: Keep what crashed
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-artifacts-${{ matrix.crate }}
-          path: crates/${{ matrix.crate }}/fuzz/artifacts/
+          name: fuzz-artifacts.${{ matrix.job.id }}
+          path: crates/*/fuzz/artifacts/
+
+  # On main, off a pull request, a crate's corpus is saved, once its target jobs are done, when
+  # every one of them ran clean, as one cache keyed by the run's id, which `prune` below keeps the
+  # newest of. A crate a target job failed for saves none, and the next run restores the one before.
+  corpus:
+    needs: [crates, targets]
+    if: >-
+      !cancelled() && needs.crates.result == 'success' &&
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    name: corpus ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJSON(needs.crates.outputs.crates) }}
+    env:
+      CRATE: ${{ matrix.crate }}
+      ALL_TARGETS: ${{ fromJSON(needs.crates.outputs.targets)[matrix.crate] }}
+    steps:
+      # Every job's corpora, a few MB, since a job's artifact is named by its number, not its crate.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: fuzz-corpus.*
+          path: corpus-in
+          merge-multiple: true
+      - name: Check that every target ran clean
+        id: check
+        run: |
+          set -euo pipefail
+          missing=""
+          for target in $ALL_TARGETS; do
+            [ -f "corpus-in/$CRATE/ran/$target" ] || missing="$missing $target"
+          done
+          if [ -n "$missing" ]; then
+            echo "Not saved: no clean run of$missing"
+            exit 0
+          fi
+          mkdir -p "corpus-in/$CRATE/corpus" "crates/$CRATE/fuzz"
+          mv "corpus-in/$CRATE/corpus" "crates/$CRATE/fuzz/corpus"
+          echo "complete=true" >> "$GITHUB_OUTPUT"
+      - if: steps.check.outputs.complete == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/corpus
+          key: fuzz-corpus.${{ matrix.crate }}.${{ github.run_id }}
 
   # Each crate's newest corpus on main is the one a run restores, and it holds what the ones
-  # before it did, since each run starts from the last. So once the crates' jobs are done, this
+  # before it did, since each run starts from the last. So once the crates' corpora are saved, this
   # deletes the older ones, which nothing reads; a crate whose save failed keeps its newest, an
   # older run's. It alone may write the Actions caches, and only off a pull request, on main. It
   # prunes the crates that have a fuzz crate now: a removed one's corpora stay until deleted by hand.
   prune:
-    needs: [crates, targets]
+    needs: [crates, corpus]
     if: >-
       !cancelled() && needs.crates.result == 'success' &&
       github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -204,21 +433,31 @@ jobs:
           done
           exit "$failed"
 
-  # The one check that stands for every crate's job, so its name stays the same as crates come and
-  # go. It runs even when they failed, since a job skipped for a failure before it reads as a pass.
+  # The one check that stands for every fuzz job, so its name stays the same as crates and their
+  # jobs come and go. It runs even when they failed, since a job skipped for a failure before it
+  # reads as a pass. `build` and `corpus` run on main alone, off a pull request.
   fuzz:
-    needs: [crates, targets]
-    if: always()
+    needs: [crates, build, targets, corpus]
+    # Not on a draft, which runs nothing: skipped, not failed, until it's marked ready.
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every crate's targets passed
+      - name: Every fuzz job passed
         env:
           CRATES: ${{ needs.crates.result }}
+          BUILD: ${{ needs.build.result }}
           TARGETS: ${{ needs.targets.result }}
+          CORPUS: ${{ needs.corpus.result }}
+          ON_MAIN: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
         run: |
-          echo "crates: $CRATES; targets: $TARGETS"
-          [ "$CRATES" = success ] && [ "$TARGETS" = success ]
+          echo "crates: $CRATES; build: $BUILD; targets: $TARGETS; corpus: $CORPUS"
+          [ "$CRATES" = success ] && [ "$TARGETS" = success ] || exit 1
+          if [ "$ON_MAIN" = true ]; then
+            [ "$BUILD" = success ] && [ "$CORPUS" = success ]
+          else
+            [ "$BUILD" = skipped ] && [ "$CORPUS" = skipped ]
+          fi
 
   # A pull request runs every property test on one fixed seed (`cargo xtask gate` and
   # tests/support/fast-check-seed.ts), so it fails only for what it changed. This job draws new
