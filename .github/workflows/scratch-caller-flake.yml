@@ -1,0 +1,88 @@
+name: scratch caller flake
+
+# A throwaway reproduction for fix/caller-flake: runs the two bazhen-daemon tests that flaked in
+# `rust (linux, tests 1/2)` with a process of a chosen pid among their ancestors, in a pid
+# namespace of their own, at the base (main, the fix reverted) and with the fix.
+
+on:
+  push:
+    branches: [scratch/caller-flake-repro]
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: repro (${{ matrix.tree }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [base, fixed]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Revert the fix for the base
+        if: matrix.tree == 'base'
+        run: |
+          git fetch --depth=1 origin 1c7dd3c62420e10f403617d7a9e360be73192bc6
+          git checkout FETCH_HEAD -- crates/bazhen-daemon/src/terminals.rs
+          git diff --stat HEAD
+          grep -n "HOLDER_PID: u64\|childPid" crates/bazhen-daemon/src/terminals.rs
+      - run: rustup toolchain install
+      - name: Build the daemon's unit tests
+        run: |
+          cargo test -p bazhen-daemon --lib --no-run --message-format=json \
+            | jq -r 'select(.reason == "compiler-artifact" and .profile.test and .executable != null
+                     and (.target.kind | index("lib"))) | .executable' > bin.txt
+          cat bin.txt
+          test "$(wc -l < bin.txt)" = 1
+      - name: Run each test from under a process of a chosen pid
+        env:
+          TREE: ${{ matrix.tree }}
+        run: |
+          bin=$(cat bin.txt)
+          # As root in the new namespace: the next pid handed out is $1, to the parent below.
+          cat > "$RUNNER_TEMP/from.sh" <<'SH'
+          #!/bin/bash
+          echo $(( $1 - 1 )) > /proc/sys/kernel/ns_last_pid || exit 90
+          setpriv --reuid="$2" --regid="$3" --init-groups bash "$RUNNER_TEMP/parent.sh" "$4" "$5"
+          SH
+          # The test's parent: a bash of the chosen pid, as a long-lived ancestor of CI's test is.
+          cat > "$RUNNER_TEMP/parent.sh" <<'SH'
+          #!/bin/bash
+          echo "parent pid $$"
+          out=$(mktemp)
+          "$1" --exact "$2" --test-threads 1 > "$out" 2>&1
+          status=$?
+          tail -n 12 "$out"
+          exit $status
+          SH
+          from() {
+            sudo --preserve-env=PATH,HOME,CARGO_HOME,RUSTUP_HOME,RUNNER_TEMP \
+              unshare --pid --fork --mount-proc \
+              bash "$RUNNER_TEMP/from.sh" "$1" "$(id -u)" "$(id -g)" "$bin" "$2"
+          }
+          tests=(
+            shell_routes::tests::takes_a_shell_s_reports_over_the_socket_by_its_own_token_held_to_their_bounds
+            serve::tests::reads_its_shells_foregrounds_each_tick_and_stops_at_once_amid_a_read_that_hangs
+          )
+          declare -A failed=([4243]=0 [4300]=0)
+          for pid in 4243 4300; do
+            for t in "${tests[@]}"; do
+              for i in 1 2 3 4 5; do
+                echo "::group::$TREE: run $i of $t from under pid $pid"
+                if from "$pid" "$t"; then echo PASS; else echo FAIL; failed[$pid]=$(( failed[$pid] + 1 )); fi
+                echo "::endgroup::"
+              done
+            done
+          done
+          echo "$TREE: failed ${failed[4243]}/10 from under pid 4243, ${failed[4300]}/10 from under pid 4300"
+          # The fake's pids now start at 4194304, Linux's PID_MAX_LIMIT: pid_max can't exceed it.
+          echo "pid_max: $(cat /proc/sys/kernel/pid_max)"
+          test "$(cat /proc/sys/kernel/pid_max)" -le 4194304
+          if [ "$TREE" = fixed ]; then
+            test "${failed[4243]}" = 0 && test "${failed[4300]}" = 0
+          else
+            test "${failed[4243]}" = 10 && test "${failed[4300]}" = 0
+          fi
