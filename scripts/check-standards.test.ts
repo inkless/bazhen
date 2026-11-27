@@ -23,6 +23,7 @@ import {
   makefileFailures,
   makefileTargets,
   makeNameFailures,
+  partitionFailures,
   makeTargets,
   menuTargets,
   GATE_STEPS,
@@ -1734,6 +1735,85 @@ describe("makeTargets", () => {
       [],
       [],
       ["tset-real"],
+    ]);
+  });
+});
+
+/** A job whose matrix legs name `legs` as their partitions, and whose step passes one on. */
+const job = (name: string, legs: string[], run = 'make test-rust-all ARGS="--partition $P"') =>
+  `  ${name}:\n    strategy:\n      matrix:\n        include:\n` +
+  legs.map((leg) => `          - leg: x\n            partition: ${leg}\n`).join("") +
+  `    steps:\n      - env:\n          P: \${{ matrix.partition }}\n        run: ${run}\n`;
+/** A workflow of `jobs`. */
+const workflow = (...jobs: string[]) => `name: CI\non: push\njobs:\n${jobs.join("\n")}`;
+
+describe("partitionFailures", () => {
+  it("passes jobs whose legs name each partition 1/n to n/n once, in any order", () => {
+    expect(
+      partitionFailures(
+        "ci.yml",
+        workflow(job("a", ["1/2", "2/2"]), job("b", ["3/3", "1/3", "2/3"])),
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a job whose legs leave a partition out, repeat one or mix two counts", () => {
+    expect(
+      partitionFailures(
+        "ci.yml",
+        workflow(
+          job("left-out", ["1/3", "2/3"]),
+          job("twice", ["1/2", "1/2", "2/2"]),
+          job("mixed", ["1/2", "2/3"]),
+          job("zero", ["0/1", "1/1"]),
+          job("fine", ["1/1"]),
+        ),
+      ),
+    ).toEqual([
+      expect.stringContaining("job left-out's legs name the partitions 1/3, 2/3"),
+      expect.stringContaining("job twice's legs"),
+      expect.stringContaining("job mixed's legs"),
+      expect.stringContaining("job zero's legs"),
+    ]);
+  });
+
+  it("reads a quoted partition, and a comment at column 0 inside jobs as no end to them", () => {
+    expect(
+      partitionFailures(
+        "ci.yml",
+        workflow(
+          job("quoted", ['"1/2"', "'2/2'"]),
+          "# a note between jobs\n",
+          job("after", ["1/2"]),
+        ),
+      ),
+    ).toEqual([expect.stringContaining("job after's legs name the partitions 1/2")]);
+  });
+
+  it("flags a step that passes a partition other than its leg's", () => {
+    expect(
+      partitionFailures(
+        "ci.yml",
+        workflow(
+          job("fixed", ["1/2", "2/2"], 'make test-rust-all ARGS="--partition 1/2"'),
+          job("direct", ["1/2", "2/2"], "make x ARGS='--partition ${{ matrix.partition }}'"),
+        ),
+      ),
+    ).toEqual([expect.stringContaining("job fixed passes --partition other than its leg's")]);
+  });
+
+  it("takes a comment naming --partition for no step that passes one", () => {
+    expect(
+      partitionFailures(
+        "ci.yml",
+        workflow(job("noted", [], "make x\n      # --partition k/n later")),
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a job that passes --partition with no partition in its matrix", () => {
+    expect(partitionFailures("ci.yml", workflow(job("bare", [])))).toEqual([
+      expect.stringContaining("job bare passes --partition"),
     ]);
   });
 });

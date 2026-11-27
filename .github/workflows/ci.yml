@@ -26,7 +26,7 @@ jobs:
       matrix:
         # Linux only: the real-tmux suites refuse any host but a marked Linux one, so on macOS they
         # need a Linux container or a change to tests/support/disposable-host.ts. The Rust crates
-        # run on macOS in `rust-macos`.
+        # run in `rust-linux` and `rust-macos`.
         os: [ubuntu-latest]
         # "pinned" is the version in .nvmrc, so a bump never renames the check.
         node: ["24", "pinned"]
@@ -41,53 +41,107 @@ jobs:
           node-version: ${{ matrix.node != 'pinned' && matrix.node || '' }}
           node-version-file: ${{ matrix.node == 'pinned' && '.nvmrc' || '' }}
           cache: pnpm
-      - name: Install tmux
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
-      - name: Install tmux
-        if: runner.os == 'macOS'
-        run: command -v tmux || brew install tmux
-      # The real-tmux suites refuse to run on any host that is not thrown away after use.
+      # No tmux or shells: check-ts runs no suite that starts them. The marker stays: the medium
+      # tests of falsify-base and falsify that run only on a sandbox run here and nowhere else.
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      # The Rust crates (crates/) build on the toolchain rust-toolchain.toml pins; the steps below
-      # run rustfmt (check-ts), clippy and cargo-deny (check-rust) and nextest (test-rust-all) on them.
+      # check-ts runs rustfmt on the crates (crates/), and builds the binaries the medium tests run,
+      # on the toolchain rust-toolchain.toml pins.
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
       - run: pnpm install --frozen-lockfile
         id: install
       # `make check` in its halves (CHECK_HALVES in scripts/check-standards.ts), less test-rust:
-      # test-rust-all, below, runs the same nextest run and the tests ignored as signalling too.
-      # The Rust gates and the holder suite don't depend on the Node version, so only the pinned
-      # job runs them; node 24, which goes at the Rust daemon's cutover, runs the TypeScript half.
+      # check-ts here, and check-rust in `rust-linux`, beside this job, which runs test-rust-all in
+      # test-rust's place, the same nextest run and the tests ignored as signalling too. The Rust
+      # gates don't depend on the Node version, and the holder suite runs there on the pinned Node
+      # alone; node 24, which goes at the Rust daemon's cutover, runs the TypeScript half.
       - run: make check-ts
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.node == 'pinned' }}
-        run: make check-rust
       # shellcheck is on the runner image, not on every developer's machine, so it runs here.
+      # It runs after an earlier gate has failed, so one red gate doesn't hide what the others
+      # find, but not after a setup step has, which would only add red steps that aren't test failures.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: make lint-shell
+
+  # The Rust gates, the holder suite and the Rust tests, on Linux and on macOS, where code behind
+  # `cfg(target_os = "macos")` is built and tested. Each OS's work is spread over legs side by side,
+  # so none waits on another: the gates and the holder suite in one, and test-rust-all in two
+  # halves (`--partition`, crates/bazhen-xtask/src/gate.rs), which between them run each test once.
+  # Each leg builds what it runs afresh. `rust (linux)` and `rust (macos)` below pass only when
+  # every leg of their OS did, so the legs can change without the checks' names changing.
+  # macOS runs clippy alone of the gates: tmux isn't run there, and rustfmt, cargo-deny and the
+  # Rust schema don't depend on the OS (deny.toml checks every target triple), so Linux covers them.
+  # Like `check`, they run on every pull request, so a change to a crate, Cargo.*,
+  # rust-toolchain.toml or a gate script is always covered. No pnpm cache is saved on macOS: the
+  # cache is large enough to push the repo's other caches out.
+  rust-linux:
+    name: rust (linux, ${{ matrix.leg }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each leg installs the one tool it runs: cargo-deny for check-rust, nextest for the tests.
+        include:
+          - leg: gates
+            tool: cargo-deny@0.20.2
+          - leg: tests 1/2
+            partition: 1/2
+            tool: cargo-nextest@0.9.152
+          - leg: tests 2/2
+            partition: 2/2
+            tool: cargo-nextest@0.9.152
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # The real-shell tests run zsh, bash and fish.
+      - name: Install the shells the real-shell tests run
+        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       # The suites that signal processes they didn't start, which run only on a sandbox: this
-      # runner, marked disposable above, or the test container. `make check` leaves them out.
+      # runner, marked disposable here, or the test container. `make check` leaves them out.
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      # A leg with no tool would hand install-action an empty list, which it takes as nothing to do.
+      - name: Check the leg names its tool
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: test -n "$TOOL" || { echo "::error::this leg's matrix entry names no tool"; exit 1; }
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: ${{ matrix.tool }}
+      - run: pnpm install --frozen-lockfile
+        id: install
+      # check's Rust gates: clippy, cargo-deny and the Rust schema. rustfmt runs in `check`.
+      - if: matrix.leg == 'gates'
+        run: make check-rust
       # Each runs after an earlier gate has failed, so one red gate doesn't hide what the others
       # find, but not after a setup step has, which would only add red steps that aren't test failures.
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.node == 'pinned' }}
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.leg == 'gates' }}
         run: make test-holder
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.node == 'pinned' }}
-        run: make test-rust-all
+      - if: matrix.partition
+        env:
+          PARTITION: ${{ matrix.partition }}
+        run: make test-rust-all ARGS="--partition $PARTITION"
 
-  # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested.
-  # Only clippy and nextest: tmux isn't run here, and rustfmt and cargo-deny don't depend on the
-  # OS (deny.toml checks every target triple), so `check` covers them. Like `check`, it runs on
-  # every pull request, so a change to a crate, Cargo.*, rust-toolchain.toml or a gate script is
-  # always covered. No pnpm cache is saved: the cache is large enough to push the repo's other
-  # caches out.
   rust-macos:
-    name: rust (macos)
+    name: rust (macos, ${{ matrix.leg }})
     runs-on: macos-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: gates
+          - leg: tests 1/2
+            partition: 1/2
+          - leg: tests 2/2
+            partition: 2/2
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -96,11 +150,12 @@ jobs:
           node-version-file: .nvmrc
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - if: matrix.partition
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest@0.9.152
       # The suites that signal processes they didn't start run only on a host carrying the marker,
-      # and this runner is the only macOS place they run.
+      # and these runners are the only macOS places they run.
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       # The real-shell tests run zsh, bash and fish, and the integration takes bash 4.4 or later:
@@ -111,13 +166,47 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: 1
       - run: pnpm install --frozen-lockfile
         id: install
-      - run: make lint-rust
-      # Each runs after an earlier gate has failed, so one red gate doesn't hide what the others
-      # find, but not after a setup step has, which would only add red steps that aren't test failures.
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: make test-rust-all
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - if: matrix.leg == 'gates'
+        run: make lint-rust
+      # It runs after the gate has failed, so one red gate doesn't hide what the other finds, but
+      # not after a setup step has, which would only add red steps that aren't test failures.
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.leg == 'gates' }}
         run: make test-holder
+      - if: matrix.partition
+        env:
+          PARTITION: ${{ matrix.partition }}
+        run: make test-rust-all ARGS="--partition $PARTITION"
+
+  # The checks that stand for each OS's legs. Each runs whatever became of them, because a skipped
+  # check counts as passed, and passes only when every leg succeeded: a failed, timed-out or
+  # cancelled leg fails it.
+  rust-linux-passed:
+    name: rust (linux)
+    needs: rust-linux
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every leg passed
+        env:
+          RESULT: ${{ needs.rust-linux.result }}
+        run: |
+          echo "rust (linux, gates), (linux, tests 1/2) and (linux, tests 2/2): $RESULT"
+          test "$RESULT" = success
+
+  rust-macos-passed:
+    name: rust (macos)
+    needs: rust-macos
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every leg passed
+        env:
+          RESULT: ${{ needs.rust-macos.result }}
+        run: |
+          echo "rust (macos, gates), (macos, tests 1/2) and (macos, tests 2/2): $RESULT"
+          test "$RESULT" = success
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `make check`, so it is a job of its own.

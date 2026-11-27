@@ -42,6 +42,11 @@ fn command() -> Command {
                         .value_parser(value_parser!(OsString)),
                 )
                 .arg(
+                    Arg::new("partition")
+                        .long("partition")
+                        .value_parser(value_parser!(OsString)),
+                )
+                .arg(
                     Arg::new("tests")
                         .action(ArgAction::Append)
                         .value_parser(value_parser!(OsString)),
@@ -112,8 +117,13 @@ pub(crate) fn run<H: Host>(
         .flatten()
         .cloned()
         .collect();
-    match gate::parse(name, &tests) {
-        Ok((gate, tests)) => {
+    let given = matches
+        .get_one::<OsString>("partition")
+        .map(OsString::as_os_str);
+    match gate::parse(name, &tests).and_then(|(gate, tests)| {
+        gate::partition(gate, given).map(|partition| (gate, tests, partition))
+    }) {
+        Ok((gate, tests, partition)) => {
             // The daemon's router test reads the corpus the schema's run writes.
             if gate.takes_tests() {
                 let known = schema::KNOWN_MISMATCHES;
@@ -129,7 +139,15 @@ pub(crate) fn run<H: Host>(
                     return written;
                 }
             }
-            gate::run(gate, &tests, world.env, &world.places, world.host, err)
+            gate::run(
+                gate,
+                &tests,
+                partition,
+                world.env,
+                &world.places,
+                world.host,
+                err,
+            )
         }
         Err(usage) => {
             let _ = writeln!(err, "{usage}");
@@ -285,6 +303,101 @@ mod tests {
             let (exit, out, err) = call(args);
             assert_eq!((exit, out.as_str()), (Exit::Usage, ""), "{args:?}");
             assert!(err.contains("sage"), "{args:?}: {err}");
+        }
+    }
+
+    /// A host on which the schema's example prints a schema of nothing and judges its empty
+    /// corpus, every file is written, and every tool succeeds: a test gate gets as far as nextest.
+    #[derive(Default)]
+    struct Passing {
+        calls: Vec<String>,
+    }
+
+    impl Host for Passing {
+        fn sandboxed(&self) -> bool {
+            true
+        }
+        fn read(&self, _: &Path) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn run(&mut self, argv: &[&str], _: &Env, _: bool) -> std::io::Result<Status> {
+            self.calls.push(argv.join(" "));
+            Ok(Some(0))
+        }
+        fn output(&mut self, argv: &[&str], _: &Env) -> std::io::Result<Option<String>> {
+            self.calls.push(argv.join(" "));
+            Ok(if argv.contains(&"verdicts") {
+                Some("[]".to_owned())
+            } else if !argv.contains(&"emit_schema") {
+                Some(String::new())
+            } else {
+                Some(
+                    r#"{"$defs":{},"x-bazhen-events":{},"x-bazhen-semantics":{"revision":1}}"#
+                        .to_owned(),
+                )
+            })
+        }
+        fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn remove(&mut self, _: &Path) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn hands_a_test_gates_partition_to_nextest_and_refuses_one_for_any_other_gate() {
+        for (args, want) in [
+            (
+                &["gate", "test", "--partition", "1/2"][..],
+                " --partition count:1/2",
+            ),
+            (
+                &["gate", "test-all", "--partition=2/2", "a_test"],
+                " --partition count:2/2 a_test",
+            ),
+        ] {
+            let mut host = Passing::default();
+            let world = World {
+                env: Env::new(),
+                places: Places {
+                    root: "/a/repo".into(),
+                    cargo_home: "/home/u/.cargo".into(),
+                },
+                host: &mut host,
+            };
+            let mut err = Vec::new();
+            let exit = run(
+                args.iter().map(OsString::from),
+                world,
+                &mut Vec::new(),
+                &mut err,
+            );
+            let err = String::from_utf8(err).unwrap();
+            assert_eq!(exit, Exit::Done, "{args:?}: {err}");
+            let nextest = host.calls.last().unwrap();
+            assert!(
+                nextest.starts_with("cargo-nextest nextest run ") && nextest.ends_with(want),
+                "{args:?}: {nextest}"
+            );
+        }
+        for (args, why) in [
+            (
+                &["gate", "lint", "--partition", "1/2"][..],
+                "Only test and test-all take --partition",
+            ),
+            (
+                &["gate", "test", "--partition", "3/2"],
+                "--partition takes <k>/<n>, two numbers with 1 <= k <= n, not \"3/2\"",
+            ),
+            (
+                &["gate", "test", "--partition"],
+                "a value is required for '--partition",
+            ),
+        ] {
+            let (exit, out, err) = call(args);
+            assert_eq!((exit, out.as_str()), (Exit::Usage, ""), "{args:?}");
+            assert!(err.contains(why), "{args:?}: {err}");
         }
     }
 

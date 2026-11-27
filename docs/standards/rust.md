@@ -182,7 +182,7 @@ source with comments and strings set aside, and fails on:
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins
   the list with why the gates build it: a `target_os` joins only with a CI job in the same pull
   request that runs `make lint-rust` and `make test-rust` on that OS, as the PTY holder's
-  `linux` and `macos` code will need (CI's `rust-macos` job runs them on macOS);
+  `linux` and `macos` code will need (on macOS, the gates and tests legs of CI's `rust-macos` run them);
 - a test harness of a member's own (`harness = false`), which could run nothing.
 
 The targets themselves are read from Cargo, not from the manifests' text, so no spelling of a
@@ -249,13 +249,20 @@ outlive the run, and `cargo clean` removes it.
 
 `scripts/check-standards.ts` pins the script's text. xtask holds the
 gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses
-any option after the gate (`make test-rust ARGS='<name>'` may name tests), removes the variables
-that change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks
+any option after the gate but `--partition` (`make test-rust ARGS='<name>'` may name tests),
+removes the variables that change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks
 every other source of rustflags), and overrides any configured compiler or wrapper.
 
 `CI`, set and non-empty, is the one variable that changes a gate's arguments: `test` and `test-all`
 then pass `--no-fail-fast`, so a CI run reports every failing test, not the first. It only widens
 the run, so it can't make a gate pass. A local run stops at the first failure.
+
+`--partition <k>/<n>`, given to `test` or `test-all`, runs the `k`th of `n` slices of the tests:
+nextest's `--partition count:<k>/<n>`, every `n`th test of each test binary. It is the one option
+a gate takes, and it narrows the run, so CI runs every slice of `test-all` side by side, each a
+leg of the check `rust (linux)` or `rust (macos)` that passes only when all of them did, and
+between them they run each test once. xtask takes it only as two numbers with `1 <= k <= n`, and
+writes the argument nextest gets itself.
 
 Every gate, fmt and deny too, refuses to run under a cargo config that sets what it can't override:
 
