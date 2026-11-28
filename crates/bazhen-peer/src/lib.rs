@@ -99,7 +99,8 @@ pub enum Refused {
     #[error("the caller runs as uid {uid}, another user")]
     Foreign { uid: u32 },
     /// The pid's process started after the connection was accepted, so it took a pid its caller
-    /// gave up.
+    /// gave up; or isn't the one that held it when the connection was accepted (`Connector`). Both
+    /// times are in `started_by`'s unit.
     #[error(
         "the caller's pid is held by a process that started at {started}, \
          after the connection was accepted at {accepted}"
@@ -145,29 +146,99 @@ impl Refused {
     }
 }
 
-/// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
-/// it (`bazhen_pid::peer_pid`). Its start is read again once the walk is done: a process that started
-/// since the connection was accepted holds a pid its caller gave up.
+/// Whether the kernel's name for a Unix socket's peer can be a process other than the one that
+/// connected, so that a reader pins the one it names when the connection is accepted (`connector`)
+/// and reads that one on every call after (`of`). macOS's `LOCAL_PEERPID` names the peer socket's
+/// last user: XNU sets it on every bind, connect, send, receive, poll and kqueue registration, so a
+/// process the connection is handed to is named once it touches it. Linux's `SO_PEERCRED` names
+/// the process that connected, for as long as the connection lasts.
+pub const PINS_CONNECTOR: bool = cfg!(target_os = "macos");
+
+/// The process the kernel names at the other end of a connection as it is accepted, and when it
+/// started, in `started_by`'s unit: what every call on the connection is read as, as Linux reads
+/// one as the process that connected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Connector {
+    pub pid: Pid,
+    pub started: u64,
+}
+
+/// The process at the other end of `socket`, accepted at `accepted` (epoch microseconds), as the
+/// kernel names it now, which the daemon reads as the connection is accepted, before it reads a
+/// request on it.
+///
+/// On macOS that is the peer socket's last user (`PINS_CONNECTOR`), the process that connected
+/// unless another touched the socket first, before the daemon accepted it. A process that started
+/// after `accepted` is refused; one that already ran, and that the connector handed the socket
+/// to before the daemon accepted it, is named. That is the assumption left: a connection is
+/// accepted before any process but its connector touches it.
+///
+/// # Errors
+///
+/// As `of`.
+pub fn connector(socket: BorrowedFd<'_>, accepted: u64) -> Result<Connector, Refused> {
+    own_user(socket)?;
+    let pid = bazhen_pid::peer_pid(socket)?;
+    Ok(Connector {
+        pid,
+        started: started(pid, accepted)?,
+    })
+}
+
+/// Who is at the other end of `socket`, accepted at `accepted` (epoch microseconds): `connector`,
+/// as it was pinned when the connection was accepted, else as the kernel names the peer
+/// (`bazhen_pid::peer_pid`). Where that name may be another process than the connector's
+/// (`PINS_CONNECTOR`), a call with none pinned is refused. The process's start is read again once
+/// the walk is done: a process that started since the connection was accepted, or since its
+/// connector was pinned, holds a pid its caller gave up.
 ///
 /// # Errors
 ///
 /// As `Refused` says.
-pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
+pub fn of(
+    socket: BorrowedFd<'_>,
+    accepted: u64,
+    connector: Option<Connector>,
+) -> Result<Peer, Refused> {
+    own_user(socket)?;
+    match connector {
+        Some(Connector { pid, started }) => of_pinned(pid, accepted, Some(started)),
+        None if PINS_CONNECTOR => Err(Refused::Unreadable(io::Error::other(
+            "the process that connected wasn't read when the connection was accepted",
+        ))),
+        None => of_pid(bazhen_pid::peer_pid(socket)?, accepted),
+    }
+}
+
+/// Refuses a socket whose peer is another user: the one the kernel recorded when it connected.
+fn own_user(socket: BorrowedFd<'_>) -> Result<(), Refused> {
     let uid = bazhen_pid::peer_uid(socket)?;
     if uid != geteuid().as_raw() {
         return Err(Refused::Foreign { uid });
     }
-    of_pid(bazhen_pid::peer_pid(socket)?, accepted)
+    Ok(())
 }
 
 /// Who `pid` is, as `of` reads a socket's peer: its session, its line and what that says of
-/// Codex, with its start pinned across the walk and no later than `accepted`.
+/// Codex, with its start pinned across the walk and no later than `accepted` (epoch microseconds).
 ///
 /// # Errors
 ///
 /// As `Refused` says.
 pub fn of_pid(pid: Pid, accepted: u64) -> Result<Peer, Refused> {
+    of_pinned(pid, accepted, None)
+}
+
+/// `of_pid`, where `pid`'s start must also be `pinned`, when it is given.
+fn of_pinned(pid: Pid, accepted: u64, pinned: Option<u64>) -> Result<Peer, Refused> {
     let started = started(pid, accepted)?;
+    let replaced = || Refused::Replaced {
+        started,
+        accepted: started_by(accepted),
+    };
+    if pinned.is_some_and(|pinned| pinned != started) {
+        return Err(replaced());
+    }
     let (ancestors, names, codex) = line_of(pid, step, own_args, own_environ, thread::sleep)?;
     let peer = Peer {
         pid,
@@ -178,7 +249,7 @@ pub fn of_pid(pid: Pid, accepted: u64) -> Result<Peer, Refused> {
         names,
     };
     if self::started(pid, accepted)? != started {
-        return Err(Refused::Replaced { started, accepted });
+        return Err(replaced());
     }
     Ok(peer)
 }
@@ -226,14 +297,38 @@ pub fn candidate_of(candidate: tcp::Candidate) -> Result<Peer, Refused> {
     })
 }
 
-/// When `pid`'s process started, refused when that was after `accepted`.
+/// `accepted`, in epoch microseconds, in the unit a process's start is compared with it: whole
+/// seconds on Linux, rounded up, since the start the kernel gives there is the boot time in whole
+/// seconds plus clock ticks since; microseconds on macOS, which keeps a start to the microsecond.
+#[must_use]
+pub fn started_by(accepted: u64) -> u64 {
+    if cfg!(target_os = "macos") {
+        accepted
+    } else {
+        accepted.div_ceil(1_000_000)
+    }
+}
+
+/// When `pid`'s process started, in `started_by`'s unit, refused when that was after `accepted`.
 fn started(pid: Pid, accepted: u64) -> Result<u64, Refused> {
-    let started =
-        u64::from(start_time::of(pid).map_err(|e| Refused::Unreadable(io::Error::other(e)))?);
+    let started = start_of(pid).map_err(|e| Refused::Unreadable(io::Error::other(e)))?;
+    let accepted = started_by(accepted);
     if started > accepted {
         return Err(Refused::Replaced { started, accepted });
     }
     Ok(started)
+}
+
+/// When `pid`'s process started, in epoch seconds.
+#[cfg(target_os = "linux")]
+fn start_of(pid: Pid) -> Result<u64, start_time::StartTimeError> {
+    start_time::of(pid).map(u64::from)
+}
+
+/// When `pid`'s process started, in epoch microseconds.
+#[cfg(target_os = "macos")]
+fn start_of(pid: Pid) -> Result<u64, start_time::StartTimeError> {
+    start_time::epoch_micros(pid)
 }
 
 /// What one read of a process says of its place on a line: its parent, when it started, in the
@@ -328,13 +423,12 @@ fn step(pid: Pid) -> io::Result<Step> {
     })
 }
 
-/// `pid`'s parent, its start in epoch seconds, the finest that macOS's readers here keep, and its
-/// name.
+/// `pid`'s parent, its start in epoch microseconds, the finest that macOS keeps, and its name.
 #[cfg(target_os = "macos")]
 fn step(pid: Pid) -> io::Result<Step> {
     Ok(Step {
         parent: process::parent(pid)?,
-        started: u64::from(start_time::of(pid).map_err(io::Error::other)?),
+        started: start_of(pid).map_err(io::Error::other)?,
         name: name_of(pid)?,
     })
 }
@@ -593,7 +687,7 @@ fn own_args(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
 mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::os::fd::AsFd as _;
+    use std::os::fd::{AsFd as _, OwnedFd};
     use std::os::unix::net::UnixStream;
     use std::rc::Rc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -606,11 +700,13 @@ mod tests {
         Pid::from_raw(raw).unwrap()
     }
 
+    /// Now, in epoch microseconds, rounded up, as a connection accepted now was accepted by.
     fn now() -> u64 {
-        SystemTime::now()
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs()
+            .as_nanos();
+        u64::try_from(nanos.div_ceil(1000)).unwrap()
     }
 
     /// A parent table: a pid not in it can't be read, and one mapped to 0 has no parent.
@@ -697,7 +793,10 @@ mod tests {
     #[test]
     fn names_this_process_its_session_and_parent_at_the_other_end_of_its_own_pair() {
         let (ours, _theirs) = UnixStream::pair().unwrap();
-        let peer = of(ours.as_fd(), now()).unwrap();
+        let accepted = now();
+        let connector = connector(ours.as_fd(), accepted).unwrap();
+        let peer = of(ours.as_fd(), accepted, Some(connector)).unwrap();
+        assert_eq!(connector.pid, getpid());
         assert_eq!(
             (peer.pid, peer.session, peer.ancestors.first().copied()),
             (getpid(), Some(getsid(None).unwrap()), getppid()),
@@ -705,13 +804,67 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_kernel_s_peer_with_no_connector_pinned_only_where_it_names_the_one_that_connected()
+    {
+        let (ours, _theirs) = UnixStream::pair().unwrap();
+        let read = of(ours.as_fd(), now(), None);
+        if PINS_CONNECTOR {
+            assert!(matches!(read, Err(Refused::Unreadable(_))), "{read:?}");
+        } else {
+            assert_eq!(read.unwrap().pid, getpid());
+        }
+    }
+
+    #[test]
     fn refuses_a_peer_whose_process_started_after_the_connection_was_accepted() {
         let (ours, _theirs) = UnixStream::pair().unwrap();
         let before_this_process = 0;
         assert!(matches!(
-            of(ours.as_fd(), before_this_process),
+            connector(ours.as_fd(), before_this_process),
             Err(Refused::Replaced { .. })
         ));
+        assert!(matches!(
+            of_pid(getpid(), before_this_process),
+            Err(Refused::Replaced { .. })
+        ));
+    }
+
+    #[test]
+    fn refuses_a_connector_whose_pid_is_held_by_a_process_that_started_at_another_time() {
+        let (ours, _theirs) = UnixStream::pair().unwrap();
+        let accepted = now();
+        let pinned = connector(ours.as_fd(), accepted).unwrap();
+        let another = Connector {
+            started: pinned.started - 1,
+            ..pinned
+        };
+        assert!(matches!(
+            of(ours.as_fd(), accepted, Some(another)),
+            Err(Refused::Replaced { .. })
+        ));
+    }
+
+    /// The child ran before the connection was accepted, so no start time tells it from the
+    /// connector: only the pin does. On macOS the kernel names the child once it writes to its end.
+    #[test]
+    fn reads_a_call_as_the_process_that_connected_though_it_handed_its_end_to_another_since() {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "read _; printf x; read _"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(OwnedFd::from(theirs))
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let accepted = now();
+        let pinned = connector(ours.as_fd(), accepted).unwrap();
+        std::io::Write::write_all(&mut stdin, b"\n").unwrap();
+        let mut byte = [0u8];
+        std::io::Read::read_exact(&mut (&ours), &mut byte).unwrap();
+        let read = of(ours.as_fd(), accepted, Some(pinned));
+        drop(stdin);
+        child.wait().unwrap();
+        assert_eq!(read.unwrap().pid, getpid());
     }
 
     #[test]

@@ -42,6 +42,25 @@ const LIST_TRIES: usize = 4;
 /// the `p_un` union, whose `timeval` begins with `tv_sec`, a 64-bit `time_t`: the struct's first
 /// 8 bytes. A zombie still answers `KERN_PROC_PID`, where `proc_pidinfo` answers `ESRCH`.
 pub(crate) fn start_seconds(pid: Pid) -> Result<u64, StartTimeError> {
+    start(pid).map(|(seconds, _)| seconds)
+}
+
+/// `kp_proc.p_un.__p_starttime`, whole, in microseconds since the epoch: `tv_sec`, then `tv_usec`,
+/// a 32-bit `suseconds_t`, in the 4 bytes after it, which the kernel keeps below 1,000,000.
+pub(crate) fn start_micros(pid: Pid) -> Result<u64, StartTimeError> {
+    let raw = pid.as_raw_nonzero().get();
+    let (seconds, micros) = start(pid)?;
+    seconds
+        .checked_mul(1_000_000)
+        .and_then(|whole| whole.checked_add(micros))
+        .ok_or_else(|| StartTimeError::Unreadable {
+            pid: raw,
+            source: io::Error::other(format!("a start of {seconds} s and {micros} us")),
+        })
+}
+
+/// `pid`'s start, its `tv_sec` and its `tv_usec`.
+fn start(pid: Pid) -> Result<(u64, u64), StartTimeError> {
     let raw = pid.as_raw_nonzero().get();
     let unreadable = |source: io::Error| StartTimeError::Unreadable { pid: raw, source };
     let info = kinfo(pid)?;
@@ -49,7 +68,17 @@ pub(crate) fn start_seconds(pid: Pid) -> Result<u64, StartTimeError> {
         .first_chunk::<8>()
         .map(|bytes| i64::from_ne_bytes(*bytes))
         .ok_or_else(|| unreadable(io::Error::other("no start time")))?;
-    u64::try_from(seconds).map_err(|e| unreadable(io::Error::other(e)))
+    let micros = info
+        .get(8..12)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(i32::from_ne_bytes)
+        .ok_or_else(|| unreadable(io::Error::other("no start time")))?;
+    let micros = u64::try_from(micros)
+        .ok()
+        .filter(|&micros| micros < 1_000_000)
+        .ok_or_else(|| unreadable(io::Error::other(format!("a start of {micros} us"))))?;
+    let seconds = u64::try_from(seconds).map_err(|e| unreadable(io::Error::other(e)))?;
+    Ok((seconds, micros))
 }
 
 /// `pid`'s `kinfo_proc`, as bytes.

@@ -38,6 +38,18 @@ pub fn of(pid: Pid) -> Result<StartTime, StartTimeError> {
     })
 }
 
+/// When `pid` started, in microseconds since the epoch, as macOS keeps it, whose start in whole
+/// seconds `of` answers. As for `of`, only for a pid the caller holds, or one whose start it
+/// compares with a start it read before.
+///
+/// # Errors
+///
+/// As `of`.
+#[cfg(target_os = "macos")]
+pub fn epoch_micros(pid: Pid) -> Result<u64, StartTimeError> {
+    crate::macos::start_micros(pid)
+}
+
 #[cfg(target_os = "linux")]
 fn read(pid: Pid) -> Result<u64, StartTimeError> {
     let raw = pid.as_raw_nonzero().get();
@@ -286,6 +298,30 @@ mod tests {
         let exited = of(pid).unwrap();
         child.wait().unwrap();
         assert_eq!(exited, running);
+    }
+
+    /// The microseconds are the start's own: a child started between two readings of the clock
+    /// started between them, which its whole second alone wouldn't show.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn says_in_microseconds_when_a_child_started_between_two_readings_of_the_clock() {
+        let clock = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+        };
+        let before = u64::try_from(clock().as_micros()).unwrap();
+        let mut child = Command::new("true").spawn().unwrap();
+        let after = u64::try_from(clock().as_nanos().div_ceil(1000)).unwrap();
+        let pid = pid_of(&child);
+        let micros = epoch_micros(pid).unwrap();
+        let seconds = of(pid).unwrap().get();
+        child.wait().unwrap();
+        assert!(
+            (before..=after).contains(&micros),
+            "{before} <= {micros} <= {after}"
+        );
+        assert_eq!(micros / 1_000_000, seconds);
     }
 
     #[test]

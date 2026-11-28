@@ -796,7 +796,7 @@ const socketListener = getRequestListener(
   }).fetch,
 );
 const socketServer = hearConnections(createServer((req, res) => void socketListener(req, res)));
-socketServer.on("connection", (connection) => noteAccepted(connection));
+socketServer.on("connection", (connection) => noteAccepted(connection, peerBinary ?? undefined));
 socketServer.on("upgrade", socketUpgrades(agentTokens, streams, peer));
 socketServer.requestTimeout = 0;
 rmSync(paths.socket, { force: true });

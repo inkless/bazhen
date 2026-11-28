@@ -13,6 +13,7 @@ import {
   MAX_READING,
   noteAccepted,
   PEER_SOURCE,
+  PINS_CONNECTOR,
   peerReading,
   readPeer,
   type PeerChain,
@@ -59,7 +60,7 @@ async function guarded(peer: (connection: Socket) => Promise<PeerReading>) {
   const socket = join(dir, "bazhen.sock");
   const listener = getRequestListener(app.fetch);
   server = createServer((req, res) => void listener(req, res));
-  server.on("connection", (connection) => noteAccepted(connection));
+  server.on("connection", (connection) => noteAccepted(connection, PEER_SOURCE));
   await new Promise<void>((resolve) => server?.listen(socket, resolve));
   return socket;
 }
@@ -274,6 +275,7 @@ const connections = (count: number) =>
     const held = createServer();
     listeners.push(held);
     held.on("connection", (conn) => {
+      noteAccepted(conn, PEER_SOURCE);
       if (accepted.push(conn) === count) resolve(accepted);
     });
     held.listen(socket, () => {
@@ -329,12 +331,18 @@ const TURNS_PER_WAVE = 4;
 /** Opening the connections and spawning the readers, on a loaded runner. */
 const STARTUP_MS = 2000;
 
+/**
+ * A connection accepted in epoch millisecond 0 was accepted by microsecond 999, which the reader
+ * compares in whole seconds on Linux, rounded up.
+ */
+const ACCEPTED_IN_MS_0 = PINS_CONNECTOR ? 999 : 1;
+
 describe("readPeer", () => {
   it("says why it read nobody when the reader refuses, exits otherwise than cleanly, or can't start", async () => {
     const conn = await connection();
     const nonsense = script("nonsense", "echo nonsense");
     const replaced = await connection();
-    noteAccepted(replaced, 0);
+    noteAccepted(replaced, PEER_SOURCE, 0);
     const readings = [
       await readPeer(failing(), conn),
       await readPeer(nonsense, conn),
@@ -349,7 +357,9 @@ describe("readPeer", () => {
       { kind: "unread", why: expect.stringMatching(/^the reader can't start: .*ENOENT/) },
       {
         kind: "unread",
-        why: expect.stringMatching(/started at \d+, after the connection was accepted at 0$/),
+        why: expect.stringMatching(
+          new RegExp(`started at \\d+, after the connection was accepted at ${ACCEPTED_IN_MS_0}$`),
+        ),
       },
     ]);
   });
