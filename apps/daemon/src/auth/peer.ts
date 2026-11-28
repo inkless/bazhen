@@ -43,14 +43,6 @@ export function parsePeer(line: string): PeerChain | undefined {
   };
 }
 
-/** When each connection to the socket was accepted, which a peer's process must have started by. */
-const accepted = new WeakMap<Socket, number>();
-
-/** Records that `connection` was accepted now: call it from the server's `connection` event. */
-export function noteAccepted(connection: Socket, now = Date.now()): void {
-  accepted.set(connection, now);
-}
-
 /** How long one reading may take: the peer is waiting on its own reply meanwhile. */
 const READ_MS = 2000;
 /** The most readings at once; more wait their turn rather than each starting a process. */
@@ -70,6 +62,58 @@ async function turn<T>(read: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Whether the kernel's name for a socket's peer can be a process other than the one that
+ * connected: macOS names the peer socket's last user, which a process the connection is handed to
+ * becomes once it touches it. There the one it names as the connection is accepted is pinned
+ * (`noteAccepted`) and every reading is of that one, as Linux reads the process that connected.
+ */
+export const PINS_CONNECTOR = process.platform === "darwin";
+
+/**
+ * When each connection to the socket was accepted, in epoch microseconds, which a peer's process
+ * must have started by.
+ */
+const accepted = new WeakMap<Socket, number>();
+
+/** A connector pinned as its connection was accepted: its pid and start, as the reader gave them. */
+type Pin =
+  | { readonly kind: "pinned"; readonly pid: string; readonly started: string }
+  | { readonly kind: "unread"; readonly why: string }
+  | { readonly kind: "late" };
+
+/** Each connection's connector, where one is pinned (`PINS_CONNECTOR`). */
+const pins = new WeakMap<Socket, Promise<Pin>>();
+
+/**
+ * `ms`, an epoch millisecond, as the epoch microsecond a connection accepted then was accepted by:
+ * the last of that millisecond, which a process that started before it can't have started after.
+ */
+export const acceptedBy = (ms: number): number => ms * 1000 + 999;
+
+/**
+ * Records that `connection` was accepted at `now` (epoch milliseconds), and, where the kernel's
+ * name for its peer can be another process than the connector (`PINS_CONNECTOR`), pins the one it
+ * names with the reader at `binary`: call it from the server's `connection` event, before any
+ * request on it is read. A connection with none pinned there is refused.
+ */
+export function noteAccepted(connection: Socket, binary?: string, now = Date.now()): void {
+  const since = acceptedBy(now);
+  accepted.set(connection, since);
+  if (PINS_CONNECTOR && binary !== undefined)
+    pins.set(
+      connection,
+      run(binary, ["connector", String(since)], connection, READ_MS).then((ran): Pin => {
+        if (ran.kind !== "ran") return ran;
+        const [, pid, started] =
+          (ran.code === 0 && /^([0-9]{1,10}) ([0-9]{1,20})\n?$/.exec(ran.out)) || [];
+        return pid === undefined || started === undefined
+          ? { kind: "unread", why: whyNot(ran, "connector") }
+          : { kind: "pinned", pid, started };
+      }),
+    );
+}
+
+/**
  * A reading of a socket's peer: who it is; nobody, and why; or late, when the reader was still
  * running at its deadline, which says nothing about the caller but that it wasn't read in time.
  */
@@ -83,14 +127,57 @@ const MAX_WHY = 512;
 
 /**
  * Who is at the other end of `connection`, as `bazhen-peer` at `binary` reads it with the
- * connection as its standard input.
+ * connection as its standard input: the connector pinned when it was accepted, where one is
+ * (`noteAccepted`).
  */
-export function readPeer(
+export async function readPeer(
   binary: string,
   connection: Socket,
   timeoutMs = READ_MS,
 ): Promise<PeerRead> {
-  const since = Math.ceil((accepted.get(connection) ?? Date.now()) / 1000);
+  const since = accepted.get(connection) ?? acceptedBy(Date.now());
+  const pin = await pins.get(connection);
+  if (pin !== undefined && pin.kind !== "pinned") return pin;
+  const args = [String(since), ...(pin === undefined ? [] : [pin.pid, pin.started])];
+  const ran = await run(binary, args, connection, timeoutMs);
+  if (ran.kind !== "ran") return ran;
+  const chain = ran.code === 0 ? parsePeer(ran.out) : undefined;
+  return chain === undefined
+    ? { kind: "unread", why: whyNot(ran, "peer") }
+    : { kind: "read", chain };
+}
+
+/**
+ * How the reader ended: its exit, what it printed and the first line of what it said why; that it
+ * couldn't start; or that it was still running at its deadline.
+ */
+type Ran =
+  | {
+      readonly kind: "ran";
+      readonly code: number | null;
+      readonly signal: NodeJS.Signals | null;
+      readonly out: string;
+      readonly said: string;
+    }
+  | { readonly kind: "unread"; readonly why: string }
+  | { readonly kind: "late" };
+
+/** Why a reader that ran gave no `printed`: what it said, else how it ended. */
+function whyNot(ran: Extract<Ran, { kind: "ran" }>, printed: string): string {
+  if (ran.said !== "") return ran.said;
+  if (ran.code === 0) return `the reader printed no ${printed}`;
+  return `the reader ${ran.signal === null ? `exited ${ran.code}` : `was ended by ${ran.signal}`}`;
+}
+
+/**
+ * The reader at `binary`, run with `args` and `connection` as its standard input, in its turn.
+ */
+function run(
+  binary: string,
+  args: readonly string[],
+  connection: Socket,
+  timeoutMs: number,
+): Promise<Ran> {
   return turn(
     () =>
       new Promise((resolve) => {
@@ -98,14 +185,12 @@ export function readPeer(
         // Node stops reading a socket it hands a child as stdio, and only a read of the request
         // body starts it again: a route that read its body first would hear nothing more on the
         // connection.
-        const done = (read: PeerRead) => {
+        const done = (ran: Ran) => {
           clearTimeout(deadline);
           if (!connection.destroyed) connection.resume();
-          resolve(read);
+          resolve(ran);
         };
-        const child = heard(
-          spawn(binary, [String(since)], { stdio: [connection, "pipe", "pipe"] }),
-        );
+        const child = heard(spawn(binary, args, { stdio: [connection, "pipe", "pipe"] }));
         // The deadline judges the reader, not this loop: after a stall the timer runs before the
         // exit that came during it is read, so the exit gets one turn to land first.
         const deadline = setTimeout(
@@ -126,17 +211,9 @@ export function readPeer(
           done({ kind: "unread", why: `the reader can't start: ${e.message}` }),
         );
         child.on("close", (code, signal) => {
-          const chain = code === 0 ? parsePeer(out) : undefined;
-          if (chain !== undefined) return done({ kind: "read", chain });
           // One line: a reader that panicked says more than a reason, and its first line is why.
           const [said = ""] = err.toString("utf8").trim().split("\n", 1);
-          const why =
-            said !== ""
-              ? said
-              : code === 0
-                ? "the reader printed no peer"
-                : `the reader ${signal === null ? `exited ${code}` : `was ended by ${signal}`}`;
-          done({ kind: "unread", why });
+          done({ kind: "ran", code, signal, out, said });
         });
       }),
   );
@@ -245,6 +322,8 @@ export async function codexServerMarked(
     made.on("error", () => resolve(undefined));
   });
   if (connection === undefined) return "unread";
+  // The listener is the peer of a connection this process made, as of when it was made.
+  noteAccepted(connection, binary);
   try {
     const read = await readPeer(binary, connection, timeoutMs);
     if (read.kind !== "read") return "unread";

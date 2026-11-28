@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bazhen_peer::tcp::{self, Candidate, ProcView, Scan};
-use bazhen_peer::{Peer, Refused};
+use bazhen_peer::{Connector, Peer, Refused};
 use bazhen_protocol::daemon::HttpCallers;
 use bazhen_protocol::ids::AgentId;
 use bazhen_store::LiveTerminal;
@@ -89,16 +89,25 @@ fn found_itself(read: PeerRead, itself: u32) -> HttpCallers {
 
 /// A connection, as every request on it carries it: its end of a Unix socket, a dup of its
 /// descriptor or why there is none, or a loopback TCP connection's two addresses; and the epoch
-/// second it was accepted by, which its peer's process must have started by.
+/// microsecond it was accepted by, which its peer's process must have started by.
 #[derive(Debug, Clone)]
 pub(crate) struct PeerSocket {
     end: End,
     accepted: u64,
 }
 
+/// When a Unix socket's connection was accepted, in epoch microseconds, and, where the kernel's
+/// name for its peer can be a process other than the one that connected
+/// (`bazhen_peer::PINS_CONNECTOR`), the process it named then.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Accepted {
+    pub(crate) at: u64,
+    pub(crate) connector: Option<Connector>,
+}
+
 #[derive(Debug, Clone)]
 enum End {
-    Unix(Arc<OwnedFd>),
+    Unix(Arc<OwnedFd>, Option<Connector>),
     Tcp {
         client: SocketAddr,
         server: SocketAddr,
@@ -106,23 +115,32 @@ enum End {
     Unreadable(String),
 }
 
-/// Now, as the epoch second a connection accepted now was accepted by.
+/// Now, as the epoch microsecond a connection accepted now was accepted by.
 fn accepted_now() -> u64 {
-    let ms = SystemTime::now()
+    let ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_millis());
-    u64::try_from(ms.div_ceil(1000)).unwrap_or(u64::MAX)
+        .map_or(0, |since| since.as_nanos());
+    u64::try_from(ns.div_ceil(1000)).unwrap_or(u64::MAX)
 }
 
 impl PeerSocket {
-    /// `socket`, accepted now.
+    /// `socket`, accepted now, before any request on it is read: where the kernel's name for its
+    /// peer can be another process than the one that connected, the one it names now is pinned,
+    /// and each request read as that one, or refused when it can't be read now.
     pub(crate) fn accepted_now(socket: BorrowedFd<'_>) -> Self {
+        let accepted = accepted_now();
+        let connector = if bazhen_peer::PINS_CONNECTOR {
+            bazhen_peer::connector(socket, accepted).map(Some)
+        } else {
+            Ok(None)
+        };
         Self {
-            end: match socket.try_clone_to_owned() {
-                Ok(fd) => End::Unix(Arc::new(fd)),
-                Err(err) => End::Unreadable(Refused::Unreadable(err).to_string()),
+            end: match (socket.try_clone_to_owned(), connector) {
+                (Ok(fd), Ok(connector)) => End::Unix(Arc::new(fd), connector),
+                (Err(err), _) => End::Unreadable(Refused::Unreadable(err).to_string()),
+                (_, Err(refused)) => End::Unreadable(refused.to_string()),
             },
-            accepted: accepted_now(),
+            accepted,
         }
     }
 
@@ -166,7 +184,7 @@ pub(crate) enum Found {
     Unheld(Vec<Peer>),
 }
 
-type ReadFn = dyn Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync;
+type ReadFn = dyn Fn(BorrowedFd<'_>, Accepted) -> Result<Peer, Refused> + Send + Sync;
 type HolderFn = dyn Fn(Pid, u64) -> Result<Peer, Refused> + Send + Sync;
 type CandidateFn = dyn Fn(Candidate) -> Result<Peer, Refused> + Send + Sync;
 type View = dyn ProcView + Send + Sync;
@@ -387,7 +405,7 @@ async fn blocking<T: Send + 'static>(
 
 /// What one reading reads.
 enum Job {
-    Unix(Arc<OwnedFd>),
+    Unix(Arc<OwnedFd>, Option<Connector>),
     Tcp(Arc<Tcp>, SocketAddr, SocketAddr),
 }
 
@@ -417,14 +435,16 @@ impl std::fmt::Debug for Peers {
 
 impl Default for Peers {
     fn default() -> Self {
-        Self::with(READ, bazhen_peer::of)
+        Self::with(READ, |socket, accepted: Accepted| {
+            bazhen_peer::of(socket, accepted.at, accepted.connector)
+        })
     }
 }
 
 impl Peers {
     pub(crate) fn with(
         deadline: Duration,
-        read: impl Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync + 'static,
+        read: impl Fn(BorrowedFd<'_>, Accepted) -> Result<Peer, Refused> + Send + Sync + 'static,
     ) -> Self {
         Self {
             turns: Arc::new(Semaphore::new(MAX_READING)),
@@ -457,11 +477,11 @@ impl Peers {
         let job = match (&socket.end, &self.tcp) {
             (End::Unreadable(why), _) => return PeerRead::Unread(why.clone()),
             (End::Tcp { .. }, None) => return PeerRead::Unread(UNIDENTIFIABLE.to_owned()),
-            (End::Unix(fd), _) => Job::Unix(Arc::clone(fd)),
+            (End::Unix(fd, connector), _) => Job::Unix(Arc::clone(fd), *connector),
             (End::Tcp { client, server }, Some(tcp)) => Job::Tcp(Arc::clone(tcp), *client, *server),
         };
         let turns = Arc::clone(match job {
-            Job::Unix(_) => &self.turns,
+            Job::Unix(..) => &self.turns,
             Job::Tcp(..) => &self.tcp_turns,
         });
         let Ok(Ok(turn)) = tokio::time::timeout(self.deadline, turns.acquire_owned()).await else {
@@ -479,8 +499,12 @@ impl Peers {
                         }))
                     })
             }
-            Job::Unix(fd) => {
+            Job::Unix(fd, connector) => {
                 let read = Arc::clone(&self.read);
+                let accepted = Accepted {
+                    at: accepted,
+                    connector,
+                };
                 let reading = tokio::task::spawn_blocking(move || {
                     let _turn = turn;
                     read(fd.as_fd(), accepted).map(PeerRead::Read)
@@ -1808,5 +1832,30 @@ mod tests {
                 rustix::process::getppid().unwrap()
             ]
         );
+    }
+
+    /// The process the connection was accepted from, not one it was handed to after: on macOS the
+    /// kernel names the child once it writes to its end, and the child ran before the connection
+    /// was accepted, so only the connector pinned at accept tells them apart.
+    #[test]
+    fn reads_a_call_as_the_process_it_was_accepted_from_though_its_end_was_handed_on() {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "read _; printf x; read _"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(OwnedFd::from(theirs))
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let peer = PeerSocket::accepted_now(ours.as_fd());
+        std::io::Write::write_all(&mut stdin, b"\n").unwrap();
+        std::io::Read::read_exact(&mut (&ours), &mut [0u8]).unwrap();
+        let read = runtime().block_on(Peers::default().read(&peer));
+        drop(stdin);
+        child.wait().unwrap();
+        let PeerRead::Read(read) = read else {
+            panic!("{read:?}");
+        };
+        assert_eq!(read.pid, rustix::process::getpid());
     }
 }
